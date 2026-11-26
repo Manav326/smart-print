@@ -88,7 +88,17 @@ jobs:
         shell: pwsh
         run: |
           $version = $env:RELEASE_TAG -replace '^v', ''
-          if ($version -notmatch '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)
+          if ($version -notmatch '^[0-9]+\.[0-9]+\.[0-9]+$') { throw "Release tag is not a stable semantic version." }
+          $configPath = "apps/desktop/src-tauri/tauri.conf.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $config.version = $version
+          $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $configPath -Encoding utf8
+          $packagePath = "apps/desktop/package.json"
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $package.version = $version
+          $package | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding utf8
+      - name: Build the native desktop frontend
+        shell: pwsh
         run: |
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
           pnpm --filter @smart-print/desktop build
@@ -134,7 +144,7 @@ jobs:
           $isccArgs += "scripts/build-windows-installer.iss"
           & $iscc @isccArgs
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Windows installer compilation failed." }
-      - name: Confirm Windows installer is intentionally unsigned for the beta channel
+      - name: Verify the interim unsigned Windows installer before signed release packaging
         shell: pwsh
         run: |
           $installer = "artifacts/agent-installer/SmartPrint-Windows-Setup.exe"
