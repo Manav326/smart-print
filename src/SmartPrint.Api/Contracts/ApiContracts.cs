@@ -171,12 +171,13 @@ public sealed record AgentLocalUploadStatusBatchRequest(IReadOnlyList<Guid> JobI
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
-public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);
+public sealed record AgentSpoolerAcceptedRequest(int SpoolerJobId, string SpoolerJobName, string SpoolerStatus);\npublic sealed record AgentSpoolerSubmissionAuthorizationRequest(string SpoolerJobName);
 public sealed record AgentPrintBlockedRequest(
     string ReasonCode,
     string Message,
     int? PagesPrinted = null,
-    int? TotalPages = null);
+    int? TotalPages = null,
+    string? SpoolerJobName = null);
 public sealed record AgentSpoolerStatusRequest(int SpoolerJobId, string SpoolerStatus, int PagesPrinted, int TotalPages);
 
 
