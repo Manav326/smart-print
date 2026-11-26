@@ -64,14 +64,21 @@ public sealed class VirtualPrinterTestGrantPolicyTests
         string outputMode, string status, bool grantActive, bool expected)
     {
         Assert.Equal(expected, VirtualPrinterTestGrantPolicy.IsEligibleForSelection(
-            outputMode, status, Now.AddSeconds(-30), grantActive, Now));
+            outputMode, status, Now.AddSeconds(-30), grantActive, Now, false));
+    }
+
+    [Fact]
+    public void SelectionRejectsVirtualQueueInProductionEvenWithGrant()
+    {
+        Assert.False(VirtualPrinterTestGrantPolicy.IsEligibleForSelection(
+            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddSeconds(-30), true, Now, true));
     }
 
     [Fact]
     public void SelectionRejectsStaleInventory()
     {
         Assert.False(VirtualPrinterTestGrantPolicy.IsEligibleForSelection(
-            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, Now));
+            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, Now, false));
     }
 
     [Fact]
