@@ -6,35 +6,16 @@ public static class PrinterTypePolicy
     public const string PdfExport = "PDF_EXPORT";
     public const string UnsupportedVirtual = "UNSUPPORTED_VIRTUAL";
 
-    // Legacy global configuration is deliberately inert. Virtual output is
-    // authorised by VirtualPrinterTestGrant, never by changing its printer type.
-    public static bool IsTestModeEnabled(bool configured, bool isProduction) => false;
-
     public static bool IsWorkingWindowsQueue(string? status) =>
         string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase);
 
-    public static string ResolveOutputMode(
-        string? discoveredOutputMode,
-        string? queueStatus,
-        bool treatWorkingVirtualQueuesAsPhysicalForTesting,
-        string? connectionPort = null)
-    {
-        if (string.Equals(discoveredOutputMode, PdfExport, StringComparison.OrdinalIgnoreCase))
-            return PdfExport;
-
-        return string.Equals(discoveredOutputMode, Physical, StringComparison.OrdinalIgnoreCase)
-            ? Physical
-            : UnsupportedVirtual;
-    }
-
-    public static bool IsTestModeOverride(
-        string? discoveredOutputMode,
-        string? effectiveOutputMode,
-        string? queueStatus,
-        bool treatWorkingVirtualQueuesAsPhysicalForTesting,
-        string? connectionPort = null) =>
-        false;
+    public static string ResolveOutputMode(string? discoveredOutputMode) =>
+        string.Equals(discoveredOutputMode, PdfExport, StringComparison.OrdinalIgnoreCase)
+            ? PdfExport
+            : string.Equals(discoveredOutputMode, Physical, StringComparison.OrdinalIgnoreCase)
+                ? Physical
+                : UnsupportedVirtual;
 
     public static bool IsConnectedPrinterPort(string? connectionPort)
     {
