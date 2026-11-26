@@ -6496,7 +6496,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
-                message = $"The saved Photo Studio sheet must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+                message = $"The saved Photo Studio PDF does not match its selected photo size and output layout. Reopen Photo Studio and prepare the sheet again."
             });
     }
 
@@ -7589,7 +7589,7 @@ agentApi.MapPost("/local-uploads/{ticketId:guid}/complete", async (
             return Results.UnprocessableEntity(new
             {
                 code = "photo_sheet_layout_invalid",
-                message = $"The Photo Studio PDF must contain exactly {expectedPageCount} portrait A4 page(s), each with one full-page photo raster."
+                message = $"The Photo Studio PDF does not match its selected photo size and output layout. Reopen Photo Studio and prepare the sheet again."
             });
     }
 
