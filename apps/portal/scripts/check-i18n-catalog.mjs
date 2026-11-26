@@ -62,7 +62,7 @@ for (const [locale, catalog] of Object.entries(catalogs)) {
     }
   }
 }
-for (const required of ['id: "english"', 'id: "hindi"', 'id: "hinglish"', 'normalized === "hi"', 'normalized === "hi-latn"']) {
+for (const required of ['english: {', 'hindi: {', 'hinglish: {', 'aliases: ["hi"]', 'aliases: ["hi-latn"]']) {
   if (!source.includes(required)) throw new Error("Locale registry contract missing: " + required);
 }
 console.log("i18n catalog check passed: " + baseKeys.length + " keys × 3 locales; no missing keys, blank values, duplicate keys, or placeholder mismatches.");
