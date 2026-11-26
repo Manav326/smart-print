@@ -107,6 +107,25 @@ test("only fresh zero-page physical queue absences with a local copy can be resu
   ), false);
 });
 
+test("authorised virtual test output can resume only with its original approved queue", () => {
+  const eligible = [
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","TEST_VIRTUAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ] as const;
+  assert.equal(canResumeUnprintedPhysicalJob(...eligible), true);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","TEST_VIRTUAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",false,nowUtc
+  ), false);
+  assert.equal(canResumeUnprintedPhysicalJob(
+    "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","PHYSICAL","OUTPUT_UNCONFIRMED",
+    "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
+    "2026-11-16T09:00:05.000Z",true,nowUtc
+  ), false);
+});
+
 test("an Agent restart without a spooler ID is uncertain and requires manual queue reconciliation", () => {
   assert.equal(isVerifiedSpoolerAbsenceReport("AGENT_RESTART_DURING_PRINT_SUBMISSION", null), false);
   assert.equal(canConfirmPhysicalOutput("OUTPUT_UNCONFIRMED", "UNKNOWN", submittedUtc, observedUtc, "Ready", "AGENT_RESTART_DURING_PRINT_SUBMISSION", null, nowUtc), false);
