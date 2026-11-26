@@ -1806,6 +1806,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Online": "ऑनलाइन",
     "Ready": "तैयार",
     "Busy": "व्यस्त",
+    "Upload progress for {name}": "अपलोड प्रोग्रेस · {name}",
 
   },
   hinglish: {
@@ -3240,6 +3241,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Online": "Online",
     "Ready": "Ready",
     "Busy": "Busy",
+    "Upload progress for {name}": "Upload progress · {name}",
 
   },
 };
