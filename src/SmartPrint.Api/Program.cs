@@ -8327,6 +8327,79 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-test-output", async (
         PhysicalOutputConfirmed = false
     });
 });
+agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
+    Guid jobId,
+    HttpContext context,
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    var now = DateTimeOffset.UtcNow;
+    var onlineAfter = now.AddMinutes(-2);
+    var output = await (
+        from job in db.PrintJobs.AsNoTracking()
+        join printer in db.PrinterDevices.AsNoTracking()
+            on new { job.TenantId, PrinterId = job.PrinterDeviceId!.Value }
+            equals new { printer.TenantId, PrinterId = printer.Id }
+        join agent in db.AgentDevices.AsNoTracking()
+            on new { printer.TenantId, AgentId = printer.AgentDeviceId!.Value }
+            equals new { agent.TenantId, AgentId = agent.Id }
+        where job.Id == jobId && job.TenantId == device.TenantId &&
+              job.Status == "PRINT_SUBMITTING" &&
+              job.ClaimedByAgentDeviceId == device.Id &&
+              printer.AgentDeviceId == device.Id && printer.IsActive &&
+              printer.QueueName != null && printer.QueueName != "" &&
+              printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
+              (printer.Status == "Ready" || printer.Status == "Busy") &&
+              agent.Id == device.Id && agent.RevokedUtc == null &&
+              agent.Status != "Revoked" && agent.LastSeenUtc != null &&
+              agent.LastSeenUtc >= onlineAfter
+        select new
+        {
+            job.PrivatePrinting,
+            printer.Id,
+            printer.OutputMode,
+            printer.IdentityFingerprint,
+            printer.AgentDeviceId,
+            printer.TenantId
+        }).SingleOrDefaultAsync(ct);
+
+    if (output is null)
+        return Results.Conflict(new { code = "spooler_submission_not_authorised", message = "The print lease, paired Agent or current Windows queue readiness is no longer valid. No spooler submission was authorised." });
+
+    if (output.OutputMode == PrinterTypePolicy.UnsupportedVirtual)
+    {
+        if (environment.IsProduction() || string.IsNullOrWhiteSpace(output.IdentityFingerprint))
+            return Results.Forbid();
+        var grantActive = await db.VirtualPrinterTestGrants.AsNoTracking().AnyAsync(grant =>
+            grant.TenantId == output.TenantId &&
+            grant.PrinterDeviceId == output.Id &&
+            grant.AgentDeviceId == device.Id &&
+            grant.IdentityFingerprint == output.IdentityFingerprint &&
+            grant.RevokedUtc == null && grant.ExpiresUtc > now, ct);
+        if (!grantActive)
+            return Results.Conflict(new { code = "virtual_printer_test_grant_expired_or_revoked", message = "The shop-scoped virtual printer test grant is no longer active. No Windows spooler submission was attempted." });
+    }
+    else if (output.OutputMode != PrinterTypePolicy.Physical)
+    {
+        return Results.Conflict(new { code = "unsupported_spooler_output_mode" });
+    }
+
+    if (output.PrivatePrinting)
+    {
+        var privateOutputEnabled = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+        var virtualGrantActive = output.OutputMode == PrinterTypePolicy.UnsupportedVirtual;
+        if (!PrivatePrintingOutputPolicy.IsEligible(
+                privateOutputEnabled, environment.IsProduction(), output.OutputMode, virtualGrantActive))
+            return Results.Conflict(new { code = "private_printing_output_not_authorised" });
+    }
+
+    return Results.Ok(new { authorised = true, expiresUtc = now.AddSeconds(10), outputMode = output.OutputMode });
+});
+
 agentApi.MapPost("/jobs/{jobId:guid}/spooler-accepted", async (Guid jobId, AgentSpoolerAcceptedRequest request, HttpContext context, SmartPrintDbContext db, CancellationToken ct) =>
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
