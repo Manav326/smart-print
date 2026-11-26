@@ -11,8 +11,8 @@ public static class PrinterDispatchRules
     public static bool IsDispatchableStatus(
         string? outputMode,
         string? status,
-        bool virtualTestGrantActive = false,
-        bool isProduction = false)
+        bool virtualTestGrantActive,
+        bool isProduction)
     {
         var readyOrBusy = string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
             string.Equals(status, "Busy", StringComparison.OrdinalIgnoreCase);
