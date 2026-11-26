@@ -1811,7 +1811,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
         description:`SmartPrint photo order ${job.jobNumber}`
       })
     : null;
-  return <Modal title="Photo order created" subtitle={`Job ${job.jobNumber} · ${job.recipientName}`} onClose={onClose}>
+  return <Modal title={t("Photo order created")} subtitle={t("Job {job} · {recipient}").replace("{job}",job.jobNumber).replace("{recipient}",job.recipientName)} onClose={onClose}>
     <div className="photo-order-receipt">
       <div className="photo-order-receipt-summary">
         <span>{t("Server-calculated amount")}</span><strong>{amount}</strong>
@@ -1902,7 +1902,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
     });
   }
 
-  return <Modal title="New photo order" subtitle="Upload a shop-owned original, prepare its A4 photo sheets and create one shop-scoped print job." onClose={onClose}>
+  return <Modal title={t("New photo order")} subtitle={t("Upload a shop-owned original, prepare its A4 photo sheets and create one shop-scoped print job.")} onClose={onClose}>
     <form className="modal-form" onSubmit={submit}>
       <label>{t("Original photo")}<input aria-label={t("Choose original photo")} type="file" accept=".jpg,.jpeg,.png,image/jpeg,image/png" onChange={selectFile}/></label>
       {file&&<div className="file-review-note"><ImageIcon size={16}/><span>{file.name} · {(file.size/1024/1024).toFixed(2)} MB. The original is not modified.</span></div>}
@@ -2829,7 +2829,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
     <>
     <section className="panel collection-panel">
       <div className="collection-header"><div><h2>Customer QR stations</h2><p>Each station has a permanent public link. Every scan creates a separate short-lived customer session.</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
-      {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title="Your first QR station starts here" text="Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session." actionLabel="Create QR station" onAction={onAdd}/> :
+      {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title={t("Your first QR station starts here")} text={t("Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session.")} actionLabel={t("Create QR station")} onAction={onAdd}/> :
       <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
         {station.publicUrl
           ?<QrStationArtworkPreview station={station} profile={profile}/>
@@ -3327,7 +3327,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
     {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} {reviewBatches.length===1?"batch":"batches"} need review</strong><span>Review includes every file in the batch. New files start accepted; rejected files stay excluded until restored.</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>Loading full batch…</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
-    {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title="Your queue is clear" text="When a customer uploads a document through one of your QR stations, the job and its current state will appear here."/> :
+    {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title={t("Your queue is clear")} text={t("When a customer uploads a document through one of your QR stations, the job and its current state will appear here.")}/> :
       <div className="table-scroll queue-table-scroll"><table className="queue-jobs-table"><thead><tr><th>JOB</th><th>DOCUMENT</th><th>PRINT SETTINGS</th><th>QUOTE</th><th>PRINTER / LOCAL QUEUE</th><th>STATUS</th><th>CREATED</th><th>ACTIONS</th></tr></thead><tbody>
         {queueBatches.map(batch=>{
           const first=batch.jobs[0];
@@ -3402,7 +3402,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&batchPrinter.virtualTestGrantActive!==true&&<small className="queue-batch-printer-lock">This virtual queue needs an active platform-admin test grant for this shop before it can receive jobs.</small>}
                 </>}
                 {assignmentJob&&<select
-                  aria-label="Assign one printer for all files in batch"
+                  aria-label={t("Assign one printer for all files in batch")}
                   value={currentBatchPrinterId}
                   disabled={!!busyJobId||batchPrinterConflict||availableBatchPrinters.length===0}
                   onChange={event=>onAssignPrinter(assignmentJob,event.target.value)}>
@@ -3592,7 +3592,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
         <small>{t("Add a footer only to eligible PDFs with clear bottom margins. New batches start off.")}</small>
       </div>
       <label className="batch-branding-toggle">
-        <input type="checkbox" checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label="Add SmartPrint footer to PDF exports in this batch"/>
+        <input type="checkbox" checked={pdfBrandingEnabled&&!hasIdDocument} disabled={busy||hasIdDocument} onChange={event=>setPdfBrandingEnabled(event.currentTarget.checked)} aria-label={t("Add SmartPrint footer to PDF exports in this batch")}/>
         <span>{hasIdDocument?"Unavailable for ID card sheets":pdfBrandingEnabled?"On for this batch":"Off · default"}</span>
       </label>
     </div>
@@ -3852,13 +3852,15 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
   onClose: () => void;
   onSave: (values: { ownerName: string; email: string; currentPassword?: string }) => Promise<void>;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [ownerName, setOwnerName] = useState(profile.ownerName);
   const [email, setEmail] = useState(profile.ownerEmail);
   const [currentPassword, setCurrentPassword] = useState("");
   const [saveError, setSaveError] = useState("");
   const emailChanged = email.trim().toLowerCase() !== profile.ownerEmail.trim().toLowerCase();
   return (
-    <Modal title="Personal details" subtitle="Update the name and sign-in email for your shop owner account." onClose={onClose}>
+    <Modal title={t("Personal details")} subtitle={t("Update the name and sign-in email for your shop owner account.")} onClose={onClose}>
       <form className="modal-form account-edit-form" onSubmit={async event => {
         event.preventDefault();
         setSaveError("");
@@ -3907,6 +3909,8 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
 }
 
 function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavigate: (section: Section) => void }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const topics: { section: Section; title: string; description: string; icon: typeof FileText }[] = [
     { section: "Print Queue", title: "Print jobs and approvals", description: "Review incoming jobs, decisions, print status and refunds.", icon: FileText },
     { section: "Printers", title: "Printers and connections", description: "Check printer setup, availability and device details.", icon: Printer },
@@ -3916,7 +3920,7 @@ function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavi
   ];
 
   return (
-    <Modal title="Help & support" subtitle="Choose the part of your shop workspace you need help with." onClose={onClose}>
+    <Modal title={t("Help & support")} subtitle={t("Choose the part of your shop workspace you need help with.")} onClose={onClose}>
       <div className="help-topic-list">
         {topics.map(({ section, title, description, icon: Icon }) => (
           <button type="button" className="help-topic" key={section} onClick={() => onNavigate(section)}>
@@ -3938,7 +3942,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   const t = (value: string) => translateUiText(locale, value);
   const [displayName,setDisplayName]=useState("Front counter");
   const [printerDeviceId,setPrinterDeviceId]=useState("");
-  return <Modal title="Create a QR station" subtitle="Give customers a clear entry point for this counter or printer." onClose={onClose}>
+  return <Modal title={t("Create a QR station")} subtitle={t("Give customers a clear entry point for this counter or printer.")} onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>{t("Station name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={t("e.g. Front counter")} required maxLength={120}/></label>
       <label>Default printer <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">No default printer</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
@@ -6497,7 +6501,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <span className="customer-privacy-option-icon"><FileText size={22}/></span><span className="customer-privacy-option-copy"><strong>Standard Printing</strong><small>Normal print queue. Files are deleted 72 hours after confirmed output.</small></span><span className="customer-privacy-option-state">{privatePrinting?"Choose standard":"Selected"}</span>
         </button>
       </div>
-      {uploadedBatch.some(item=>!item.job.privatePrinting)&&<CustomerInlineNotice kind="info" title="Private mode is locked for this batch">Standard files have already been uploaded. To protect every document with Private Printing, start a new Private batch before uploading its files.</CustomerInlineNotice>}
+      {uploadedBatch.some(item=>!item.job.privatePrinting)&&<CustomerInlineNotice kind="info" title={t("Private mode is locked for this batch")}>Standard files have already been uploaded. To protect every document with Private Printing, start a new Private batch before uploading its files.</CustomerInlineNotice>}
       <div className="customer-upload-local-note"><InfoTooltip label="Private Printing details"><span>{privateVirtualTestMode&&privatePrintingVirtualOutputEnabled?"Encrypted on your device. The protected test PDF stays on this computer for up to 24 hours; it is not a physical print. Your original stays on your device.":"Encrypted on your device and decrypted only by the paired Windows Agent. The shop-side copy is erased after confirmed output. Your original stays on your device."}</span></InfoTooltip> Private Printing details <InfoTooltip label="Standard Printing details"><span>Uses the shop's normal print queue. The shop-side copy is deleted 72 hours after confirmed output. Your original stays on your device.</span></InfoTooltip> Standard Printing details</div>
       {!canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title={t("Private Printing unavailable")}>{!hasAssignedPrinter
         ?"The shop needs to assign an active printer."
@@ -6927,7 +6931,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         })}
       </div>
       {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title={t("Checking payment breakdown")}>{t("Review the full file list before paying or submitting a reference.")}</CustomerInlineNotice>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title="Refund summary">Refunded: {money(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {money(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title={t("Refund summary")}>Refunded: {money(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {money(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
         {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
         {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
