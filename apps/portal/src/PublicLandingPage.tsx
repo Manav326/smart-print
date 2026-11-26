@@ -7,10 +7,11 @@ import { useFileDownload } from "./download-manager";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import "./public-landing.css";
-import { useLocale, translateUi } from "./i18n";
+import { useLocale, translateUi, translateUiText } from "./i18n";
 
 export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boolean; onToggleTheme: () => void }) {
   const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const { release, state: releaseState, refresh } = usePublicRelease();
   const windowsDownloadUrl = release?.windowsAvailable && release.version
     ? getPublicDownloadPath("windows", release.version, release.downloadBaseUrl)
@@ -31,11 +32,11 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         <a className="sp-public-brand" href="/" aria-label="SmartPrint home">
           <BrandLockup className="sp-public-brand-lockup" />
         </a>
-        <nav className="sp-public-nav" aria-label="Main navigation">
-          <a href="#how-it-works">How it works</a>
+        <nav className="sp-public-nav" aria-label={t("Main navigation")}>
+          <a href="#how-it-works">{t("How it works")}</a>
           <a href="#for-shops">{translateUi(locale,"public.forShops")}</a>
           <a href="#for-customers">{translateUi(locale,"public.forCustomers")}</a>
-          <a href="#downloads">Downloads</a>
+          <a href="#downloads">{t("Downloads")}</a>
         </nav>
         <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="sp-theme-toggle"/>
         <a className="sp-shop-entry" href="/shop">
@@ -48,14 +49,14 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
       <main>
         <section className="sp-hero">
           <div className="sp-hero-copy">
-            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> SMART PRINT BY QUANTAEDGE</div>
+            <div className="sp-eyebrow"><span className="sp-eyebrow-dot"/> {t("SMART PRINT BY QUANTAEDGE")}</div>
             <h1>{translateUi(locale,"public.heroTitle")}</h1>
             <p className="sp-hero-lede">{translateUi(locale,"public.heroDescription")}</p>
             <div className="sp-hero-actions">
               <a className="sp-button-primary" href="/shop?mode=register">{translateUi(locale,"public.createShop")} <ArrowRight size={17}/></a>
               <a className="sp-button-quiet" href="#how-it-works">{translateUi(locale,"public.seeHow")} <ChevronRight size={17}/></a>
             </div>
-            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> Shop-controlled print approval</span><span><LockKeyhole size={14}/> Shop-authorised job handoff</span></div>
+            <div className="sp-hero-trust"><span><ShieldCheck size={15}/> {t("Shop-controlled print approval")}</span><span><LockKeyhole size={14}/> {t("Shop-authorised job handoff")}</span></div>
           </div>
 
           <div className="sp-hero-art" aria-label="Illustration of a customer phone connecting to a print shop">
@@ -73,13 +74,13 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
             </div>
             <div className="sp-art-connection"><span/><span/><span/><small>SHOP CONNECTION</small></div>
             <div className="sp-art-shop">
-              <div className="sp-art-shop-head"><span className="sp-art-shop-icon"><Store size={16}/></span><div><b>Your print shop</b><small>Workspace connected</small></div><i/></div>
-              <div className="sp-art-printer"><span><Printer size={25}/></span><div><b>Shop printer</b><small>Ready for the next job</small></div><em><Check size={12}/></em></div>
-              <div className="sp-art-shop-foot"><span><Wifi size={12}/> Agent online</span><span>Job received</span></div>
+              <div className="sp-art-shop-head"><span className="sp-art-shop-icon"><Store size={16}/></span><div><b>{t("Your print shop")}</b><small>{t("Workspace connected")}</small></div><i/></div>
+              <div className="sp-art-printer"><span><Printer size={25}/></span><div><b>{t("Shop printer")}</b><small>{t("Ready for the next job")}</small></div><em><Check size={12}/></em></div>
+              <div className="sp-art-shop-foot"><span><Wifi size={12}/> Agent online</span><span>{t("Job received")}</span></div>
               <div className="sp-art-shop-caption">YOUR SHOP</div>
             </div>
-            <div className="sp-art-floating sp-art-floating-one"><QrCode size={16}/><span>Scan to start</span></div>
-            <div className="sp-art-floating sp-art-floating-two"><Check size={15}/><span>Shop approved</span></div>
+            <div className="sp-art-floating sp-art-floating-one"><QrCode size={16}/><span>{t("Scan to start")}</span></div>
+            <div className="sp-art-floating sp-art-floating-two"><Check size={15}/><span>{t("Shop approved")}</span></div>
           </div>
         </section>
 
@@ -92,24 +93,24 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
 
         <section className="sp-section sp-how" id="how-it-works">
           <div className="sp-section-heading">
-            <div className="sp-eyebrow">A SIMPLE, CONNECTED FLOW</div>
-            <h2>Three steps. One smoother print experience.</h2>
-            <p>No scattered file messages. No repeating copy and colour instructions for every document.</p>
+            <div className="sp-eyebrow">{t("A simple, connected flow")}</div>
+            <h2>{t("Three steps. One smoother print experience.")}</h2>
+            <p>{t("No scattered file messages. No repeating copy and colour instructions for every document.")}</p>
           </div>
           <div className="sp-steps">
             <article className="sp-step-card">
               <span className="sp-step-number">01</span><div className="sp-step-icon"><QrCode size={24}/></div>
-              <h3>Scan &amp; send</h3><p>Customers scan your shop's QR code, add their documents and choose their print settings.</p>
+              <h3>{t("Scan & send")}</h3><p>{t("Customers scan your shop's QR code, add their documents and choose their print settings.")}</p>
               <span className="sp-step-tag">CUSTOMER</span>
             </article>
             <article className="sp-step-card">
               <span className="sp-step-number">02</span><div className="sp-step-icon"><FileCheck2 size={24}/></div>
-              <h3>Review &amp; approve</h3><p>Your team reviews the document, checks the quote and payment, and authorises the job.</p>
+              <h3>{t("Review & approve")}</h3><p>{t("Your team reviews the document, checks the quote and payment, and authorises the job.")}</p>
               <span className="sp-step-tag">YOUR SHOP</span>
             </article>
             <article className="sp-step-card">
               <span className="sp-step-number">03</span><div className="sp-step-icon"><Printer size={24}/></div>
-              <h3>Print &amp; hand over</h3><p>The connected Windows Agent routes approved jobs to the selected shop printer for output.</p>
+              <h3>{t("Print & hand over")}</h3><p>{t("The connected Windows Agent routes approved jobs to the selected shop printer for output.")}</p>
               <span className="sp-step-tag">CONNECTED PRINTER</span>
             </article>
           </div>
@@ -147,7 +148,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         <section className="sp-download-section" id="downloads">
           <div className="sp-section-heading">
             <div className="sp-eyebrow">GET STARTED WITH SMARTPRINT</div>
-            <h2>The right app for the right job.</h2>
+            <h2>{t("The right app for the right job.")}</h2>
             <p>Set up the shop computer or bring the customer experience to Android.</p>
           </div>
           <div className="sp-download-grid">
@@ -193,7 +194,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
       <footer className="sp-public-footer">
         <a className="sp-public-brand" href="/"><BrandLockup className="sp-public-brand-lockup" /></a>
         <span>© {new Date().getFullYear()} SmartPrint by QuantaEdge</span>
-        <div><a href="#how-it-works">How it works</a><a href="#downloads">Downloads</a><a href="/shop">For print shops</a></div>
+        <div><a href="#how-it-works">{t("How it works")}</a><a href="#downloads">{t("Downloads")}</a><a href="/shop">For print shops</a></div>
       <nav className="sp-public-footer-resources" aria-label="Print shop resources">
           <span>PRINT SHOP RESOURCES</span>
           <a href="/features/">All features</a>
