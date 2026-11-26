@@ -57,7 +57,7 @@ public sealed class DocumentRetentionWorker(
                 join job in db.PrintJobs
                     on new { document.TenantId, PrintJobId = document.PrintJobId }
                     equals new { job.TenantId, PrintJobId = job.Id }
-                let completedUtc = job.OutputType == "PHYSICAL" ? job.OutputConfirmedUtc : job.OutputCompletedUtc
+                let completedUtc = job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
                 let hasFinancialHold = db.PrintPayments.Any(payment =>
                     payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                     (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
@@ -76,7 +76,7 @@ public sealed class DocumentRetentionWorker(
                 {
                     Document = document,
                     job.Status,
-                    OutputConfirmedUtc = job.OutputType == "PHYSICAL" ? job.OutputConfirmedUtc : (DateTimeOffset?)null,
+                    OutputConfirmedUtc = job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? (DateTimeOffset?)null : job.OutputConfirmedUtc,
                     OutputCompletedUtc = completedUtc,
                     job.UpdatedUtc,
                     HasFinancialHold = hasFinancialHold
@@ -138,7 +138,7 @@ public sealed class DocumentRetentionWorker(
             join job in db.PrintJobs
                 on new { document.TenantId, PrintJobId = document.PrintJobId }
                 equals new { job.TenantId, PrintJobId = job.Id }
-            let completedUtc = job.OutputType == "PHYSICAL" ? job.OutputConfirmedUtc : job.OutputCompletedUtc
+            let completedUtc = job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
             let hasFinancialHold = db.PrintPayments.Any(payment =>
                 payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                 (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
