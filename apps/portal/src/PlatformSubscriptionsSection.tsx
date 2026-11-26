@@ -64,6 +64,8 @@ function date(value: string | null | undefined) {
 }
 
 export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [page, setPage] = useState<PlatformSubscriptionsPage | null>(null);
   const [plans, setPlans] = useState<PlatformPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -178,7 +180,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       <div className="platform-plans-intro">
         <div>
           <div className="platform-plan-kicker"><CreditCard size={14}/> SUBSCRIPTION OPERATIONS</div>
-          <h2>Shop subscriptions</h2>
+          <h2>{t("Shop subscriptions")}</h2>
           <p>Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.</p>
         </div>
         <div className="platform-plans-actions">
@@ -191,7 +193,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
 
       <section className="panel platform-tenants-panel">
         <div className="platform-tenants-heading">
-          <div><h2>Subscription directory</h2><p>Current subscription per tenant; older assignments remain available in history.</p></div>
+          <div><h2>{t("Subscription directory")}</h2><p>{t("Current subscription per tenant; older assignments remain available in history.")}</p></div>
           <span className="neutral-chip">{page?.totalCount ?? 0} shops</span>
         </div>
         <div className="platform-tenant-filters">
@@ -204,7 +206,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         {page && page.items.length > 0 && (
           <div className="platform-table-scroll">
             <table className="platform-tenant-table platform-subscription-table">
-              <thead><tr><th>SHOP</th><th>ASSIGNED PLAN</th><th>STATUS</th><th>PERIOD END</th><th>ACTIONS</th></tr></thead>
+              <thead><tr><th>{t("SHOP")}</th><th>{t("ASSIGNED PLAN")}</th><th>{t("STATUS")}</th><th>{t("PERIOD END")}</th><th>{t("ACTIONS")}</th></tr></thead>
               <tbody>
                 {page.items.map(tenant => (
                   <tr key={tenant.id}>
@@ -242,7 +244,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
           {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading history…</div> :
             history.length === 0 ? <div className="platform-empty">No platform assignment events have been recorded for this shop yet.</div> :
             <div className="platform-table-scroll"><table className="platform-tenant-table platform-history-table">
-              <thead><tr><th>EVENT</th><th>PLAN</th><th>STATUS</th><th>PREVIOUS STATUS</th><th>PERIOD</th><th>REASON</th><th>RECORDED</th></tr></thead>
+              <thead><tr><th>{t("EVENT")}</th><th>{t("PLAN")}</th><th>{t("STATUS")}</th><th>{t("PREVIOUS STATUS")}</th><th>{t("PERIOD")}</th><th>{t("REASON")}</th><th>{t("RECORDED")}</th></tr></thead>
               <tbody>{history.map(event => <tr key={event.id}>
                 <td><strong>{event.eventType.replace(/_/g, " ")}</strong></td>
                 <td>{event.planCode} · {event.billingInterval}{event.paymentReference ? <small>Payment ref: {event.paymentReference}</small> : null}</td>
@@ -275,15 +277,15 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
             </label>
             {selectedAssignment?.requiresPayment && <>
               <label className="platform-assignment-field">Payment transaction reference / UTR
-                <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} maxLength={100} placeholder="Enter the bank / UPI transaction reference" disabled={busy}/>
+                <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} maxLength={100} placeholder={t("Enter the bank / UPI transaction reference")} disabled={busy}/>
               </label>
               <label className="platform-assignment-payment-check">
                 <input type="checkbox" checked={paymentConfirmed} onChange={event => setPaymentConfirmed(event.target.checked)} disabled={busy}/>
-                <span>I checked the payment account and confirmed that this amount was received.</span>
+                <span>{t("I checked the payment account and confirmed that this amount was received.")}</span>
               </label>
             </>}
             <label className="platform-assignment-field">Reason for access grant
-              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder="Record why this plan is being granted." disabled={busy}/>
+              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder={t("Record why this plan is being granted.")} disabled={busy}/>
               <small>{reason.trim().length}/500 characters · minimum 10</small>
             </label>
             <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>{selectedAssignment?.requiresPayment ? "Access is granted as soon as you confirm the payment was received and enter its transaction reference. The amount and granting operator are retained in the audit history." : "Trial and explicitly free plans can be granted without payment. Every assignment is recorded in the audit history."}</span></div>
