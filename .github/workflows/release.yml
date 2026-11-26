@@ -165,7 +165,7 @@ jobs:
           $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
           $hasRuntimeUrl = -not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)
           $hasPublisher = -not [string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER)
-          if (-not $hasCertificate -and -not $hasRuntimeUrl -and -not $hasPublisher) {
+          if (-not $hasCertificate -and -not $hasRuntimeUrl) {
             "available=false" >> $env:GITHUB_OUTPUT
             Write-Host "Signed Windows packages skipped: configure the code-signing certificate, WebView2 standalone installer URL and Partner Center publisher name."
             exit 0
@@ -206,6 +206,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
           }
           $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          Remove-Item -LiteralPath "artifacts/agent-installer/SmartPrint-Windows-Setup.exe" -Force -ErrorAction SilentlyContinue
+          Remove-Item -LiteralPath "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe" -Force -ErrorAction SilentlyContinue
           $commonArgs = @(
             "/DSmartPrintPublicUrl=$env:SMARTPRINT_PUBLIC_BASE_URL",
             "/DSmartPrintVersion=$($env:RELEASE_TAG -replace '^v', '')",
