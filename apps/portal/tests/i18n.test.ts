@@ -78,7 +78,7 @@ test("standalone private Photo Studio copy is translated without changing saved 
   );
   assert.equal(
     translateUiText("hinglish", "Private preview · Page {page} of {pages}", { page: 2, pages: 4 }),
-    "Private preview · Page 2 / 4",
+    "Private preview · 4 mein se page 2",
   );
 });
 
@@ -91,7 +91,7 @@ test("customer QR session states are translated while shop names and session val
   );
   assert.equal(
     translateUiText("hinglish", "Your order history is saved. You can start another print session when ready."),
-    "Aapki order history save hai. Taiyaar hone par naya print session shuru kar sakte hain.",
+    "Aapki order history saved hai. Jab ready hon, naya print session start kar sakte hain.",
   );
 });
 
