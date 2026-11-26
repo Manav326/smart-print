@@ -2020,7 +2020,7 @@ function CustomersPage({ token }: { token: string }) {
       {!loading && !error && result?.items.length === 0 && (
         <div className="panel customers-empty">
           <span className="customers-empty-icon"><Users size={24}/></span>
-          <h3>{search ? t(search ? "No matching customers" : "No signed-in customers yet")}</h3>
+          <h3>{search ? t("No matching customers") : t("No signed-in customers yet")}</h3>
           <p>{search
             ? t("Try another name or email search.")
             : t("When a customer signs in before scanning this shop's QR code, their shop-specific activity will appear here. Guest jobs are intentionally not identified or linked.")}</p>
@@ -2089,12 +2089,12 @@ function CustomersPage({ token }: { token: string }) {
                             <strong>{money(job.quotedAmountMinor, job.currency)}</strong>
                           </div>
                           {job.payment && <div className="customer-history-payment">
-                            {job.payment.status.replaceAll("_", " ")} · {job.payment.method} · Net recorded: {money(netPaid, job.payment.currency)}
+                            {t(job.payment.status.replaceAll("_", " "))} · {job.payment.method === "UPI" ? "UPI" : t("Cash at counter")} · {t("Net recorded")}: {money(netPaid, job.payment.currency)}
                             {job.payment.refundedAmountMinor > 0 ? " · Refund recorded" : ""}
                           </div>}
                           <div className="customer-history-output">{job.outputType === "PDF_EXPORT"
-                            ? (job.outputCompletedUtc ? "PDF export created and verified" : "PDF export not yet completed")
-                            : (job.outputConfirmedUtc ? "Shop confirmed physical output" : "Physical output not yet confirmed")}</div>
+                            ? (job.outputCompletedUtc ? t("PDF export created and verified") : t("PDF export not yet completed"))
+                            : (job.outputConfirmedUtc ? t("Shop confirmed physical output") : t("Physical output not yet confirmed"))}</div>
                         </article>
                       );
                     })}
@@ -2143,7 +2143,7 @@ function ReportsPage({ token }: { token: string }) {
       <div className="reports-toolbar">
         <div><span className="reports-eyebrow">{t("SHOP PERFORMANCE")}</span><h2>{t("Operations report")}</h2><p>{t("Live figures from this shop’s recorded print jobs and verified collections.")}</p></div>
         <div className="reports-controls">
-          <label className="reports-period">Period
+          <label className="reports-period">{t("Period")}
             <select aria-label={t("Reporting period")} value={days} onChange={event => setDays(Number(event.target.value) as 7 | 30 | 90)}>
               <option value={7}>{t("Last 7 days")}</option><option value={30}>{t("Last 30 days")}</option><option value={90}>{t("Last 90 days")}</option>
             </select>
