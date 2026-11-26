@@ -64,9 +64,12 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
         {
             if (standardInput.Length > 0)
                 await process.StandardInput.WriteAsync(standardInput.AsMemory(), timeoutSource.Token);
+            await process.StandardInput.WriteLineAsync();
             await process.StandardInput.FlushAsync(timeoutSource.Token);
-            // Keep stdin open: the child requests a one-shot ALLOW/DENY decision
-            // after document preparation and immediately before StartDoc.
+            // Non-print workers receive one JSON line and EOF. The print child
+            // keeps stdin open for its later one-shot ALLOW/DENY handshake.
+            if (beforeSpoolerSubmission is null)
+                process.StandardInput.Close();
             await process.WaitForExitAsync(timeoutSource.Token);
         }
         catch (OperationCanceledException) when (timeoutSource.IsCancellationRequested)
