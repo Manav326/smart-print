@@ -1,4 +1,4 @@
-export type UiLocale = "english" | "hinglish";
+export type UiLocale = "english" | "hindi" | "hinglish";
 export type MessageValues = Record<string, string | number>;
 
 const english = {
@@ -239,30 +239,158 @@ const hinglish: Record<keyof typeof english, string> = {
 
 export const UI_LOCALE_OPTIONS = [
   { id: "english" as const, label: "English", nativeLabel: "English", lang: "en" },
+  { id: "hindi" as const, label: "Hindi", nativeLabel: "हिन्दी", lang: "hi" },
   { id: "hinglish" as const, label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn" },
 ];
 
-export const DEFAULT_UI_LOCALE: UiLocale = "hinglish";
+export const DEFAULT_UI_LOCALE: UiLocale = "english";
 
 export function resolveUiLocale(value: unknown): UiLocale | null {
   const normalized = String(value ?? "").trim().toLowerCase();
   if (normalized === "english" || normalized === "en") return "english";
-  if (normalized === "hinglish" || normalized === "hindi" || normalized === "hi" || normalized === "hi-latn") return "hinglish";
+  if (normalized === "hindi" || normalized === "hi") return "hindi";
+  if (normalized === "hinglish" || normalized === "hi-latn") return "hinglish";
   return null;
+}
+
+export function getUiLocaleLanguage(value: unknown): string {
+  return value === "hindi" || value === "hi" ? "hi" : value === "hinglish" || value === "hi-Latn" ? "hi-Latn" : "en";
 }
 
 export function normalizeUiLocale(value: unknown): UiLocale {
   return resolveUiLocale(value) ?? DEFAULT_UI_LOCALE;
 }
 
+
+
+const hindi: Record<keyof typeof english, string> = {
+  "common.language": "भाषा",
+  "common.english": "अंग्रेज़ी",
+  "common.hinglish": "हिंग्लिश",
+  "common.save": "सहेजें",
+  "common.cancel": "रद्द करें",
+  "common.close": "बंद करें",
+  "common.continue": "जारी रखें",
+  "common.retry": "फिर कोशिश करें",
+  "common.loading": "लोड हो रहा है…",
+  "nav.orderJourney": "ऑर्डर की स्थिति",
+  "nav.overview": "अवलोकन",
+  "nav.printQueue": "प्रिंट कतार",
+  "nav.printers": "प्रिंटर",
+  "nav.qrStations": "QR स्टेशन",
+  "nav.printAgent": "प्रिंट एजेंट",
+  "nav.pricing": "मूल्य सूची",
+  "nav.subscription": "सदस्यता",
+  "nav.payments": "भुगतान",
+  "nav.customers": "ग्राहक",
+  "nav.reports": "रिपोर्ट",
+  "nav.settings": "सेटिंग्स",
+  "nav.dailyWork": "दैनिक कार्य",
+  "nav.devices": "डिवाइस और कनेक्टिविटी",
+  "nav.business": "व्यवसाय",
+  "nav.insights": "जानकारी",
+  "auth.signIn": "साइन इन करें",
+  "auth.createAccount": "खाता बनाएँ",
+  "auth.email": "ईमेल पता",
+  "auth.password": "पासवर्ड",
+  "auth.forgotPassword": "पासवर्ड भूल गए?",
+  "auth.signOut": "साइन आउट करें",
+  "auth.backToWebsite": "वेबसाइट पर वापस जाएँ",
+  "auth.welcomeBack": "वापसी पर स्वागत है",
+  "auth.setupShop": "अपनी दुकान सेट अप करें",
+  "auth.signInHint": "जहाँ आपने छोड़ा था, वहीं से शुरू करने के लिए साइन इन करें।",
+  "auth.createShopHint": "कुछ आसान चरणों में अपनी दुकान का कार्यक्षेत्र बनाएँ।",
+  "auth.shopOwnerName": "दुकान के मालिक का नाम",
+  "auth.businessName": "व्यवसाय का नाम",
+  "auth.shopNamePlaceholder": "अपनी दुकान का नाम",
+  "auth.emailPlaceholder": "you@yourshop.com",
+  "auth.passwordPlaceholder": "अपना पासवर्ड दर्ज करें",
+  "auth.secureWorkspace": "सुरक्षित SmartPrint कार्यक्षेत्र",
+  "auth.trialNote": "आपकी दुकान को 14 दिनों का ट्रायल मिलेगा। पंजीकरण के दौरान कोई भुगतान नहीं लिया जाएगा।",
+  "customer.welcome": "{shopName} में आपका स्वागत है",
+  "customer.uploadFiles": "फ़ाइलें अपलोड करें",
+  "customer.selectFiles": "फ़ाइलें चुनें",
+  "customer.copies": "कितनी प्रतियाँ चाहिए",
+  "customer.colour": "रंगीन",
+  "customer.blackWhite": "श्वेत-श्याम",
+  "customer.privatePrinting": "निजी प्रिंटिंग",
+  "customer.standardPrinting": "सामान्य प्रिंटिंग",
+  "customer.uploading": "अपलोड हो रहा है…",
+  "customer.readyCollection": "आपका प्रिंट लेने के लिए तैयार है।",
+  "customer.startNewSession": "नया सत्र शुरू करें",
+  "customer.payment": "भुगतान",
+  "customer.upiPayment": "UPI से भुगतान",
+  "customer.cashCounter": "काउंटर पर नकद भुगतान",
+  "customer.submitReference": "भुगतान संदर्भ जमा करें",
+  "customer.orderReceived": "ऑर्डर प्राप्त हुआ",
+  "customer.awaitingReview": "दुकान आपकी फ़ाइलों की जाँच कर रही है।",
+  "customer.awaitingPayment": "आपकी फ़ाइलें स्वीकार कर ली गई हैं। आगे बढ़ने के लिए भुगतान करें।",
+  "customer.printing": "आपकी प्रिंटिंग जारी है।",
+  "customer.paymentVerified": "भुगतान सत्यापित हो गया।",
+  "customer.shopCopyRemoved": "दुकान की कॉपी हटा दी गई है।",
+  "journey.received": "प्राप्त हुआ",
+  "journey.review": "जाँच",
+  "journey.payment": "भुगतान",
+  "journey.printing": "प्रिंटिंग",
+  "journey.ready": "तैयार",
+  "journey.title": "ऑर्डर की प्रक्रिया",
+  "journey.searchPlaceholder": "बैच ID, ऑर्डर ID, फ़ाइल या फ़ोल्डर के नाम से खोजें।",
+  "journey.refresh": "रीफ़्रेश करें",
+  "journey.noOrders": "दिखाने के लिए कोई ऑर्डर नहीं है",
+  "journey.receivedDetail": "फ़ाइलें सुरक्षित रूप से प्राप्त होती हैं",
+  "journey.reviewDetail": "फ़ाइलें स्वीकार करें या हटाएँ",
+  "journey.paymentDetail": "प्राप्त भुगतान की पुष्टि करें",
+  "journey.printingDetail": "दुकान का कंप्यूटर प्रिंट करता है",
+  "journey.readyDetail": "प्रिंट की जाँच हो गई है और वह तैयार है",
+  "photo.crop": "क्रॉप करें",
+  "photo.look": "फ़ोटो का रूप",
+  "photo.textLayers": "टेक्स्ट लेयर",
+  "photo.background": "फ़ोटो की पृष्ठभूमि",
+  "photo.brightness": "चमक",
+  "photo.contrast": "कंट्रास्ट",
+  "photo.saturation": "रंग संतृप्ति",
+  "photo.copies": "प्रतियों की संख्या",
+  "photo.savePrivate": "निजी शीट सहेजें",
+  "photo.createOrder": "फ़ोटो ऑर्डर बनाएँ",
+  "photo.saveToJob": "इस जॉब में शीट सहेजें",
+  "photo.prepareA4": "A4 शीट तैयार करें",
+  "photo.cancel": "एडिटिंग रद्द करें",
+  "photo.addText": "टेक्स्ट जोड़ें",
+  "photo.removeBackground": "पृष्ठभूमि हटाएँ",
+  "photo.prepareSheet": "शीट तैयार करें",
+  "photo.preview": "पूर्वावलोकन",
+  "photo.zoom": "ज़ूम करें",
+  "upi.copyId": "UPI ID कॉपी करें",
+  "upi.copyAmount": "राशि कॉपी करें",
+  "upi.downloadQr": "QR इमेज डाउनलोड करें",
+  "upi.openApp": "UPI ऐप खोलें",
+  "upi.enterUtr": "भुगतान के बाद ट्रांज़ैक्शन ID दर्ज करें",
+  "upi.qrUnavailable": "भुगतान QR उपलब्ध नहीं है। दुकान से UPI ID की पुष्टि करने को कहें।",
+  "upi.saved": "भुगतान QR आपके डिवाइस पर सहेज दिया गया है।",
+  "upi.saveCancelled": "QR सहेजना रद्द कर दिया गया।",
+  "errors.network": "कनेक्शन में समस्या है। इंटरनेट जाँचें और फिर कोशिश करें।",
+  "errors.generic": "कुछ गलत हो गया। कृपया फिर कोशिश करें।"
+};
+
 export function translateUi(localeValue: unknown, key: keyof typeof english | string, values: MessageValues = {}): string {
   const locale = normalizeUiLocale(localeValue);
-  const template = locale === "english"
-    ? (english as Record<string, string>)[key] ?? key
-    : hinglish[key as keyof typeof english] ?? (english as Record<string, string>)[key] ?? key;
+  const catalog = locale === "hindi" ? hindi : locale === "hinglish" ? hinglish : english;
+  const template = (catalog as Record<string, string>)[key] ?? (english as Record<string, string>)[key] ?? key;
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) =>
     Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match
   );
 }
 
-export const UI_MESSAGE_KEYS = Object.keys(english);
+export const UI_MESSAGE_KEYS = Object.keys(english) as Array<keyof typeof english>;
+
+export function formatUiNumber(value: number, localeValue: unknown, options?: Intl.NumberFormatOptions): string {
+  return new Intl.NumberFormat(getUiLocaleLanguage(localeValue), options).format(value);
+}
+
+export function formatUiDate(value: Date | number | string, localeValue: unknown, options?: Intl.DateTimeFormatOptions): string {
+  return new Intl.DateTimeFormat(getUiLocaleLanguage(localeValue), options).format(new Date(value));
+}
+
+export function formatUiCurrency(value: number, localeValue: unknown, currency = "INR"): string {
+  return new Intl.NumberFormat(getUiLocaleLanguage(localeValue), { style: "currency", currency }).format(value);
+}
