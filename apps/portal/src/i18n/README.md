@@ -28,3 +28,12 @@ The selector and locale union are derived from the registry. The catalog checker
 - Use `formatUiNumber`, `formatUiDate`, and `formatUiCurrency` for locale-aware display. Do not localize stored values or alter amounts.
 - Keep language selection independent from print settings, privacy mode, permissions, payment state, and backend workflow state.
 - New locale catalogs must be reviewed by a fluent human before being exposed to customers.
+
+
+## Screen-level copy
+
+For screens whose existing copy is not yet represented by a stable message key, use `translateUiText(locale, englishSourceText)`. Its Hindi and Hinglish dictionaries are static key/value maps in `catalog.ts`; English is the source text and the safe fallback. Add every new screen-copy entry to both Hindi and Hinglish in the same change. The catalog check verifies parity, duplicate keys, and blank translations. Do not add runtime translation services, automatic translation requests, or repeated per-render catalog generation.
+
+Prefer the typed `translateUi(locale, "namespace.key")` catalog for reusable product terms, workflow states, and messages shared across multiple screens. Use `formatUiCurrency`, `formatUiNumber`, and `formatUiDate` for locale-aware values rather than hardcoding `en-IN` formatting.
+
+Every standalone entry point that renders a component using `useLocale` must be wrapped in `LanguageProvider`. The normal portal entry point and the offline Photo Studio entry point both provide the context.
