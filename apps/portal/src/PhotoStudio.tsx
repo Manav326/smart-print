@@ -820,7 +820,7 @@ export default function PhotoStudio({
       <header className={styles.topbar}>
         <div className={styles.brand}>
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
-          <span><strong id="photo-studio-title">Photo Studio</strong><small>{mode === "private-library" ? t("PRIVATE · ON THIS DEVICE") : mode === "shop-create" ? t("SHOP · NEW PHOTO ORDER") : mode === "shop" ? t("SHOP · EDIT EXISTING JOB") : t("CUSTOMER · BEFORE UPLOAD")}</small></span>
+          <span><strong id="photo-studio-title">{t("Photo Studio")}</strong><small>{mode === "private-library" ? t("PRIVATE · ON THIS DEVICE") : mode === "shop-create" ? t("SHOP · NEW PHOTO ORDER") : mode === "shop" ? t("SHOP · EDIT EXISTING JOB") : t("CUSTOMER · BEFORE UPLOAD")}</small></span>
         </div>
         <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>{t("PDF target · 300 DPI")}</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
