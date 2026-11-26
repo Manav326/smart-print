@@ -126,6 +126,7 @@ const localizedScreens = [
   "OrderJourneyPage.tsx",
   "PhotoStudio.tsx",
   "PublicLandingPage.tsx",
+  "PrivatePhotoStudioEntry.tsx",
 ];
 for (const file of localizedScreens) {
   const screenSource = readFileSync(resolve(root, "src", file), "utf8");
