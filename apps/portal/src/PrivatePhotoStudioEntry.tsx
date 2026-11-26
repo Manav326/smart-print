@@ -92,7 +92,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         }
       }else if(message.startsWith("PHOTO_LIBRARY_FAILED|")){
         setLibraryLoading(false);
-        setError(message.slice("PHOTO_LIBRARY_FAILED|".length)||t("The saved Photo Studio library could not be read."));
+        setError(message.slice("PHOTO_LIBRARY_FAILED|".length)||"The saved Photo Studio library could not be read.");
       }else if(message.startsWith("PHOTO_SAVED|")||message.startsWith("PHOTO_UPDATED|")){
         setSaving(false);
         setSource(null);
@@ -106,14 +106,14 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         refreshLibrary();
       }else if(message.startsWith("PHOTO_SAVE_FAILED|")||message.startsWith("PHOTO_UPDATE_FAILED|")){
         setSaving(false);
-        setError(message.slice(message.indexOf("|")+1)||t("The private photo sheet could not be saved."));
+        setError(message.slice(message.indexOf("|")+1)||"The private photo sheet could not be saved.");
       }else if(message.startsWith("PHOTO_PREVIEW_PAGE|")){
         const parts=message.split("|",4);
         if(parts.length===4){
           setPreview(current=>current&&current.id===parts[1]?{...current,pageIndex:Number(parts[2])||0,image:parts[3]}:current);
         }
       }else if(message.startsWith("PHOTO_PREVIEW_FAILED|")){
-        setError(message.slice("PHOTO_PREVIEW_FAILED|".length)||t("The private photo preview could not be opened."));
+        setError(message.slice("PHOTO_PREVIEW_FAILED|".length)||"The private photo preview could not be opened.");
         closePreview();
       }else if(message.startsWith("PHOTO_SOURCE|")){
         try{
@@ -141,7 +141,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           setError(t("The original photo could not be reopened for editing."));
         }
       }else if(message.startsWith("PHOTO_SOURCE_FAILED|")){
-        setError(message.slice("PHOTO_SOURCE_FAILED|".length)||t("The original photo could not be reopened."));
+        setError(message.slice("PHOTO_SOURCE_FAILED|".length)||"The original photo could not be reopened.");
       }else if(message.startsWith("PHOTO_RENAMED|")){
         setRenameTarget(null);
         setRenameValue("");
@@ -149,14 +149,14 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         setStatus(t("Document name updated."));
         refreshLibrary();
       }else if(message.startsWith("PHOTO_RENAME_FAILED|")){
-        setError(message.slice("PHOTO_RENAME_FAILED|".length)||t("The document could not be renamed."));
+        setError(message.slice("PHOTO_RENAME_FAILED|".length)||"The document could not be renamed.");
       }else if(message.startsWith("PHOTO_DELETED|")){
         setMenuDocumentId(null);
         setPreview(current=>current?.id===message.slice("PHOTO_DELETED|".length)?null:current);
         setStatus(t("Private photo document deleted from this device."));
         refreshLibrary();
       }else if(message.startsWith("PHOTO_DELETE_FAILED|")){
-        setError(message.slice("PHOTO_DELETE_FAILED|".length)||t("The private photo document could not be deleted."));
+        setError(message.slice("PHOTO_DELETE_FAILED|".length)||"The private photo document could not be deleted.");
       }
     };
     if(bridge.addEventListener){
@@ -218,7 +218,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         : "savePhotoStudioDocument|"+encoded);
     }catch(cause){
       setSaving(false);
-      setError(cause instanceof Error?cause.message:t("The private photo sheet could not be transferred to this device."));
+      setError(cause instanceof Error?cause.message:"The private photo sheet could not be transferred to this device.");
     }
   }
 
