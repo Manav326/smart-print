@@ -1,11 +1,14 @@
 import { useEffect,useRef,useState } from "react";
 import { Check, Copy, Download, Info } from "lucide-react";
 import QRCode from "react-qr-code";
+import { useLocale, translateUiText } from "./i18n";
 
 type Props={uri:string|null;payeeName:string;upiId:string;amount:string;amountMinor:number;fileName:string};
 
 /** Browser download and Android document-picker save for the same high-resolution UPI QR. */
 export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fileName}:Props){
+ const { locale } = useLocale();
+ const t = (value:string) => translateUiText(locale,value);
  const root=useRef<HTMLDivElement|null>(null);
  const [error,setError]=useState("");
  const [status,setStatus]=useState("");
@@ -17,9 +20,9 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
   if(!nativeAppMode)return;
   const onNativeMessage=(event:MessageEvent)=>{
    const message=typeof event.data==="string"?event.data:"";
-   if(message.startsWith("CUSTOMER_PAYMENT_QR_SAVED|")){setBusy(false);setError("");setStatusTone("success");setStatus("Payment QR saved to your device.");}
-   else if(message.startsWith("CUSTOMER_PAYMENT_QR_CANCELLED|")){setBusy(false);setStatusTone("info");setStatus("QR save cancelled.");}
-   else if(message.startsWith("CUSTOMER_PAYMENT_QR_FAILED|")){setBusy(false);setStatus("");setError(message.slice("CUSTOMER_PAYMENT_QR_FAILED|".length)||"The QR image could not be saved.");}
+   if(message.startsWith("CUSTOMER_PAYMENT_QR_SAVED|")){setBusy(false);setError("");setStatusTone("success");setStatus(t("Payment QR saved to your device."));}
+   else if(message.startsWith("CUSTOMER_PAYMENT_QR_CANCELLED|")){setBusy(false);setStatusTone("info");setStatus(t("QR save cancelled."));}
+   else if(message.startsWith("CUSTOMER_PAYMENT_QR_FAILED|")){setBusy(false);setStatus("");setError(message.slice("CUSTOMER_PAYMENT_QR_FAILED|".length)||t("The QR image could not be saved."));}
   };
   window.addEventListener("message",onNativeMessage);
   return ()=>window.removeEventListener("message",onNativeMessage);
@@ -40,9 +43,9 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
     document.body.appendChild(input);input.select();
     copied=document.execCommand("copy");input.remove();
    }
-   if(!copied)throw new Error("Clipboard access is unavailable.");
+   if(!copied)throw new Error(t("Clipboard access is unavailable."));
    setStatusTone("success");
-   setStatus(label+" copied.");
+   setStatus(t(label === "UPI ID" ? "UPI ID copied." : "Amount copied."));
   }catch(e){setError(e instanceof Error?e.message:"Could not copy "+label.toLowerCase()+".");}
  }
 
@@ -57,27 +60,27 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    clone.setAttribute("width","1024");clone.setAttribute("height","1024");
    svgUrl=URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(clone)],{type:"image/svg+xml;charset=utf-8"}));
    const image=new Image();
-   await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error("The QR image could not be prepared."));image.src=svgUrl!;});
+   await new Promise<void>((resolve,reject)=>{image.onload=()=>resolve();image.onerror=()=>reject(new Error(t("The QR image could not be prepared.")));image.src=svgUrl!;});
    const canvas=document.createElement("canvas"),quiet=80,size=1024;
    canvas.width=size+quiet*2;canvas.height=size+quiet*2;
    const context=canvas.getContext("2d");
-   if(!context)throw new Error("This browser cannot create the QR image.");
+   if(!context)throw new Error(t("This browser cannot create the QR image."));
    context.fillStyle="#fff";context.fillRect(0,0,canvas.width,canvas.height);
    context.imageSmoothingEnabled=false;context.drawImage(image,quiet,quiet,size,size);
-   const png=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error("The QR image could not be saved.")),"image/png"));
+   const png=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error(t("The QR image could not be saved."))),"image/png"));
    if(nativeAppMode){
     const bridge=(window as Window & {SmartPrintNative?:{postMessage:(value:string)=>void}}).SmartPrintNative;
-    if(!bridge?.postMessage)throw new Error("Android QR saving is unavailable. Please try again.");
+    if(!bridge?.postMessage)throw new Error(t("Android QR saving is unavailable. Please try again."));
     const dataUrl=await new Promise<string>((resolve,reject)=>{
      const reader=new FileReader();
-     reader.onload=()=>typeof reader.result==="string"?resolve(reader.result):reject(new Error("The QR image could not be prepared."));
-     reader.onerror=()=>reject(new Error("The QR image could not be prepared."));
+     reader.onload=()=>typeof reader.result==="string"?resolve(reader.result):reject(new Error(t("The QR image could not be prepared.")));
+     reader.onerror=()=>reject(new Error(t("The QR image could not be prepared.")));
      reader.readAsDataURL(png);
     });
     bridge.postMessage("saveCustomerPaymentQr|"+fileName+"|"+dataUrl.slice(dataUrl.indexOf(",")+1));
     waitingForNativeSave=true;
     setStatusTone("info");
-    setStatus("Choose where to save the QR image.");
+    setStatus(t("Choose where to save the QR image."));
     return;
    }
    pngUrl=URL.createObjectURL(png);
@@ -85,7 +88,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    document.body.appendChild(anchor);anchor.click();anchor.remove();
    const downloadedUrl=pngUrl;window.setTimeout(()=>URL.revokeObjectURL(downloadedUrl),1500);pngUrl=null;
    setStatusTone("info");
-   setStatus("QR image download started.");
+   setStatus(t("QR image download started."));
   }catch(e){setError(e instanceof Error?e.message:"The QR image could not be downloaded.");}
   finally{if(svgUrl)URL.revokeObjectURL(svgUrl);if(pngUrl)URL.revokeObjectURL(pngUrl);if(!waitingForNativeSave)setBusy(false);}
  }
@@ -99,7 +102,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    <button type="button" className="secondary-button" onClick={()=>void copyText(upiId,"UPI ID")}><Copy size={13}/>Copy UPI ID</button>
    <button type="button" className="secondary-button" onClick={()=>void copyText((amountMinor/100).toFixed(2),"Amount")}><Copy size={13}/>Copy amount</button>
   </div>}
-  {uri&&<button type="button" className="secondary-button customer-upi-download" onClick={()=>void download()} disabled={busy}><Download size={15}/>{busy?"Preparing QR…":"Download QR image"}</button>}
+  {uri&&<button type="button" className="secondary-button customer-upi-download" onClick={()=>void download()} disabled={busy}><Download size={15}/>{busy?t("Preparing QR…"):t("Download QR image")}</button>}
   {status&&<small className={"customer-upi-download-status "+statusTone} role="status">{statusTone==="success"?<Check size={13}/>:<Info size={13}/>} {status}</small>}
   {error&&<small className="customer-upi-download-error" role="alert">{error}</small>}
   {uri&&<a href={uri} className="customer-flow-button customer-upi-open">Open UPI app</a>}
