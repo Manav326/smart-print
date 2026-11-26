@@ -9365,18 +9365,38 @@ agentApi.MapPost("/printers/sync", async (
         else
         {
             // A grant remains valid only for the exact current Agent/queue/driver/port
-            // identity. A changed identity invalidates approval and deselects the queue.
+            // identity. Revoke old grants permanently when discovery observes any change,
+            // so switching back to an earlier identity cannot reactivate an old approval.
             var discoveredFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
                 device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName);
+            var previousFingerprint = printer.IdentityFingerprint;
+            var wasQuotaSelected = printer.IsActive &&
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" ||
+                 (printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                  !string.IsNullOrWhiteSpace(previousFingerprint) &&
+                  await db.VirtualPrinterTestGrants.AnyAsync(grant =>
+                      grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
+                      grant.AgentDeviceId == device.Id && grant.IdentityFingerprint == previousFingerprint &&
+                      grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct)));
+
+            if (!string.Equals(previousFingerprint, discoveredFingerprint, StringComparison.Ordinal))
+            {
+                var staleGrants = await db.VirtualPrinterTestGrants.Where(grant =>
+                    grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
+                    grant.RevokedUtc == null && grant.IdentityFingerprint != discoveredFingerprint).ToListAsync(ct);
+                foreach (var staleGrant in staleGrants)
+                {
+                    staleGrant.RevokedUtc = now;
+                    staleGrant.RevocationReason = "Automatically revoked because the paired Agent, Windows queue, driver or port identity changed.";
+                }
+            }
+
             var hasActiveVirtualGrant = !environment.IsProduction() &&
                 discovered.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
                 await db.VirtualPrinterTestGrants.AnyAsync(grant =>
                     grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
                     grant.AgentDeviceId == device.Id && grant.IdentityFingerprint == discoveredFingerprint &&
                     grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct);
-            var wasQuotaSelected = printer.IsActive &&
-                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" ||
-                 (printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && hasActiveVirtualGrant));
             var driverChanged = !string.Equals(
                 printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
