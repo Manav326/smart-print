@@ -14,6 +14,14 @@ test("customer upload sends the selected file settings to both storage paths", (
   assert.match(api, /orientation: settings\.orientation/);
 });
 
+test("resuming an already received private relay preserves completed transfer progress", () => {
+  const api = read("../src/api.ts");
+  const app = read("../src/App.tsx");
+  assert.match(api, /existing\.state === "PENDING" && existing\.transferPath === "CLOUD_RELAY"[\s\S]{0,260}bytesSent: file\.size,[\s\S]{0,100}stage: "WAITING_FOR_SHOP"/);
+  assert.match(app, /progress\.stage==="WAITING_FOR_SHOP"[\s\S]{0,220}status:"WAITING_FOR_SHOP"/);
+  assert.match(app, /Encrypted file received; waiting for shop confirmation/);
+});
+
 test("Private Printing relays only the encrypted print document and required quote metadata", () => {
   const api = read("../src/api.ts");
   const ticketStart = api.indexOf("async function requestCustomerLocalUploadTicket(");
@@ -40,7 +48,9 @@ test("Private Printing relays only the encrypted print document and required quo
   assert.match(qsp2, /name: "AES-GCM"/);
   assert.match(qsp2, /return new ReadableStream<Uint8Array>/);
   assert.match(qsp2, /name: "RSA-OAEP"/);
-  const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
+  const endpointLoopStart = upload.indexOf("if (localAgent && ticket.agentDeviceId === localAgent.agentDeviceId");
+  assert.ok(endpointLoopStart >= 0, "direct Agent upload must remain scoped to the paired Agent");
+  const relayStart = upload.indexOf("if (privatePrinting) {", endpointLoopStart);
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
   assert.ok(relayStart >= 0 && relayEnd > relayStart);
   const privateRelay = upload.slice(relayStart, relayEnd);
@@ -93,7 +103,15 @@ test("saved Photo Studio sheets join the chooser selection and wait for the fina
   assert.doesNotMatch(picker, /uploadCustomerDocument|dispatchShopPrintJob/);
   assert.match(main, /Add selected files \(\$\{chooserSelection\.size\}\)/);
   assert.match(main, /setChooserFileSelected\(file, !selected\)/);
-  assert.match(app, /privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
+  assert.match(app, /privatePrinting&&uploadWaitingCount>0&&uploadFailedCount===0\?"Resume secure upload":privatePrinting&&uploadFailedCount>0\?"Retry pending secure uploads":privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
+  assert.match(app, /hasPendingLocalCustomerUploadAttempt/);
+  assert.match(app, /selectedBatchRequiresPrivatePrinting&&pendingPrivateRetryFiles\.some/);
+  assert.match(app, /!canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity/);
+  assert.match(app, /effectivePrivatePrinting\|\|localAgent/);
+  const api = read("../src/api.ts");
+  assert.match(api, /CustomerLocalAgentApi \| null/);
+  assert.match(api, /ticket\.agentDeviceId === localAgent\.agentDeviceId/);
+  assert.match(api, /paired shop computer must reconnect before an unstarted encrypted transfer can resume/);
 });
 
 test("successful upload releases decrypted ID and Photo Studio staging but preserves both encrypted libraries", () => {
