@@ -245,15 +245,16 @@ type LocaleMetadata = {
   label: string;
   nativeLabel: string;
   lang: string;
+  dir: "ltr" | "rtl";
   aliases: readonly string[];
   fallback: UiLocale;
   default: boolean;
 };
 
 const localeMetadata: Record<UiLocale, LocaleMetadata> = {
-  english: { label: "English", nativeLabel: "English", lang: "en", aliases: ["en"], fallback: "english", default: false },
-  hindi: { label: "Hindi", nativeLabel: "हिन्दी", lang: "hi", aliases: ["hi"], fallback: "english", default: false },
-  hinglish: { label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn", aliases: ["hi-latn"], fallback: "english", default: true },
+  english: { label: "English", nativeLabel: "English", lang: "en", dir: "ltr", aliases: ["en", "en-in", "en-us", "en-gb"], fallback: "english", default: false },
+  hindi: { label: "Hindi", nativeLabel: "हिन्दी", lang: "hi", dir: "ltr", aliases: ["hi", "hi-in"], fallback: "english", default: false },
+  hinglish: { label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn", dir: "ltr", aliases: ["hi-latn", "hi-latn-in"], fallback: "english", default: true },
 };
 
 export const DEFAULT_UI_LOCALE: UiLocale = (
@@ -282,6 +283,10 @@ export function normalizeUiLocale(value: unknown): UiLocale {
 
 export function getUiLocaleLanguage(value: unknown): string {
   return localeMetadata[normalizeUiLocale(value)].lang;
+}
+
+export function getUiLocaleDirection(value: unknown): "ltr" | "rtl" {
+  return localeMetadata[normalizeUiLocale(value)].dir;
 }
 
 export function translateUi(localeValue: unknown, key: keyof typeof english | string, values: MessageValues = {}): string {
