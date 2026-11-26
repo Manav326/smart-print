@@ -2447,38 +2447,38 @@ function PrintersPage({
         <div className="collection-header">
           <div>
             <h2>{t("Detected printer connections and Windows queues")}</h2>
-            <p>USB, LAN, shared and IPP connections are discovered through Windows. Connection type tells you how the queue is reached; output type tells you whether SmartPrint sends a physical print job, creates a PDF, or keeps an unsupported virtual queue visible. Your plan limit applies only to selected output queues.</p>
+            <p>{t("USB, LAN, shared and IPP connections are discovered through Windows. Connection type tells you how the queue is reached; output type tells you whether SmartPrint sends a physical print job, creates a PDF, or keeps an unsupported virtual queue visible. Your plan limit applies only to selected output queues.")}</p>
           </div>
           <div className="printer-discovery-guidance" role="note">
             <strong>{t("Adding a new printer")}</strong>
-            <span>Connect the printer by USB or to the shop network. In Windows Settings → Printers &amp; scanners, choose Add device and install the manufacturer's driver if Windows asks. Keep the SmartPrint Print Agent running; it lists the queue automatically, usually within 30 seconds. If the printer is connected to another PC, pair that PC's SmartPrint Print Agent to this shop from the Print Agent page. You do not manually register the printer here.</span>
+            <span>{t("Connect the printer by USB or to the shop network. In Windows Settings → Printers & scanners, choose Add device and install the manufacturer's driver if Windows asks. Keep the SmartPrint Print Agent running; it lists the queue automatically, usually within 30 seconds. If the printer is connected to another PC, pair that PC's SmartPrint Print Agent to this shop from the Print Agent page. You do not manually register the printer here.")}</span>
           </div>
         </div>
         <div className="printer-selection-summary" role="status">
           <div>
-            <strong>{detectedCount} detected Windows queues</strong>
-            <span>{selectedPrinters.length} selected{maxPrinters == null ? " · no configured selection limit" : ` of ${maxPrinters} plan slots`}</span>
+            <strong>{detectedCount} {t("detected Windows queues")}</strong>
+            <span>{selectedPrinters.length} {t("selected")}{maxPrinters == null ? " · " + t("no configured selection limit") : ` ${t("of")} ${maxPrinters} ${t("plan slots")}`}</span>
           </div>
-          <p>At the plan limit, choose another ready queue and replace any selected one. You can also replace a queue before the limit is reached; use Select to add a queue without replacing anything. The other discovered queues remain visible.</p>
+          <p>{t("At the plan limit, choose another ready queue and replace any selected one. You can also replace a queue before the limit is reached; use Select to add a queue without replacing anything. The other discovered queues remain visible.")}</p>
         </div>
         {!canUseSelection && (
           <div className="printer-selection-warning" role={subscriptionActive === false ? "alert" : "status"}>
             {subscriptionActive === false
-              ? "Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored."
-              : "Checking your shop plan before allowing printer selection. Your detected queues remain visible."}
+              ? t("Your shop subscription is inactive. Your queues and files remain visible, but new printer selections are paused until shop access is restored.")
+             : t("Checking your shop plan before allowing printer selection. Your detected queues remain visible.")}
           </div>
         )}
         {maxPrinters === 0 && selectedPrinters.length === 0 && (
           <div className="printer-selection-warning" role="status">
-            This plan currently has no printer selection slots. All discovered queues remain visible, but selecting one requires a plan with at least one printer slot.
+            {t("This plan currently has no printer selection slots. All discovered queues remain visible, but selecting one requires a plan with at least one printer slot.")}
           </div>
         )}
         {printers.length === 0 ? (
           <EmptyModule
             icon={<Printer size={24}/>}
             title={t("No Windows printer queues reported yet")}
-            text="Connect the printer and add it in Windows Settings → Printers & scanners. Install its driver if Windows asks, then keep the SmartPrint Print Agent running. If the printer is on another PC, pair that PC's Print Agent to this shop from the Print Agent page. New queues appear automatically after the next scan."
-            actionLabel="Check Print Agent"
+            text={t("Connect the printer and add it in Windows Settings → Printers & scanners. Install its driver if Windows asks, then keep the SmartPrint Print Agent running. If the printer is on another PC, pair that PC's Print Agent to this shop from the Print Agent page. New queues appear automatically after the next scan.")}
+            actionLabel={t("Check Print Agent")}
             onAction={onOpenAgent}
           />
         ) : (
@@ -2498,15 +2498,15 @@ function PrintersPage({
               const queueReady = printer.outputMode === "PDF_EXPORT" ||
                 printer.status === "Ready" || printer.status === "Busy";
               const selectionBlockReason = isUnsupportedVirtual && !isAuthorisedVirtual
-                ? "This virtual queue needs an active platform-admin test grant for this shop before it can be selected."
+                ? t("This virtual queue needs an active platform-admin test grant for this shop before it can be selected.")
                 : !printer.agentDeviceId
-                  ? "Keep the Print Agent connected. This Windows queue has not been linked yet."
+                  ? t("Keep the Print Agent connected. This Windows queue has not been linked yet.")
                   : !agentOnline
-                    ? "Connect the shop Windows computer and wait for its Print Agent to report online."
+                    ? t("Connect the shop Windows computer and wait for its Print Agent to report online.")
                     : !queueFresh
-                      ? "The Agent is online, but this queue has not reported recently. Wait for the next automatic printer scan."
+                      ? t("The Agent is online, but this queue has not reported recently. Wait for the next automatic printer scan.")
                       : !queueReady
-                        ? "This Windows queue is not ready. Clear its Windows printer error or paper/connection issue, then wait for the next automatic scan."
+                        ? t("This Windows queue is not ready. Clear its Windows printer error or paper/connection issue, then wait for the next automatic scan.")
                         : undefined;
               const possibleDuplicates = printer.outputMode === "PHYSICAL" && printer.agentDeviceId && printer.connectionAddress
                 ? printers.filter(other => other.id !== printer.id && other.outputMode === "PHYSICAL" &&
@@ -2514,43 +2514,43 @@ function PrintersPage({
                     other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
                 : [];
               const ownerStatus = isAuthorisedVirtual
-                ? "Platform-approved virtual test queue"
+                ? t("Platform-approved virtual test queue")
                 : !printer.agentDeviceId
-                ? "Waiting for Print Agent discovery"
+                ? t("Waiting for Print Agent discovery")
                 : !agentOnline
-                  ? "Windows computer not currently connected"
+                  ? t("Windows computer not currently connected")
                   : printer.outputMode === "PDF_EXPORT"
-                    ? "PDF export destination ready on this computer"
+                    ? t("PDF export destination ready on this computer")
                     : !queueFresh
-                      ? "Waiting for a fresh Windows printer scan"
+                      ? t("Waiting for a fresh Windows printer scan")
                       : printer.status === "Ready" || printer.status === "Busy"
-                        ? "Windows queue reported ready"
+                        ? t("Windows queue reported ready")
                         : `Windows queue reports ${printer.status.toLowerCase()}`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready"}
+                      label={isUnsupportedVirtual && !isAuthorisedVirtual ? t(isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready")}
                       tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? "Virtual test · " : "Unsupported virtual · ") : printer.outputMode === "PDF_EXPORT" ? "PDF export · " : printer.connectionType === "IPP" ? "IPP printer · " : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? t("Virtual test · ") : t("Unsupported virtual · ")) : printer.outputMode === "PDF_EXPORT" ? t("PDF export · ") : printer.connectionType === "IPP" ? t("IPP printer · ") : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
                     ? isAuthorisedVirtual
-                      ? "Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment."
+                      ? t("Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment.")
                       : "This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected."
                     : printer.outputMode === "PDF_EXPORT"
-                      ? "Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used."
+                      ? t("Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used.")
                       : printer.connectionType === "IPP"
-                        ? `IPP-connected Windows queue · installed driver ${printer.model}`
+                        ? t("IPP-connected Windows queue · installed driver {model}").replace("{model}", printer.model)
                         : printer.manufacturer === "Windows"
-                          ? `Installed Windows driver · ${printer.model}`
-                          : `${printer.manufacturer} · ${printer.model}`}</p>
+                          ? t("Installed Windows driver · {model}").replace("{model}", printer.model)
+                          : t("{manufacturer} · {model}").replace("{manufacturer}", printer.manufacturer).replace("{model}", printer.model)}</p>
                   <div className="printer-meta">
-                    <span>{ownerStatus}{printer.isDefault ? " · Default Windows queue" : ""}</span>
-                    <span>{printer.queueName || printer.connectionAddress || "Connection details not reported"}</span>
-                    <span>Print Agent · {agent?.deviceName || "Not linked"}</span>
+                    <span>{ownerStatus}{printer.isDefault ? " · " + t("Default Windows queue") : ""}</span>
+                    <span>{printer.queueName || printer.connectionAddress || t("Connection details not reported")}</span>
+                    <span>Print Agent · {agent?.deviceName || t("Not linked")}</span>
                   </div>
                   <PrinterCapabilityPanel printer={printer}/>
                   {possibleDuplicates.length > 0 && (
@@ -2561,7 +2561,7 @@ function PrintersPage({
                   )}
                   <div className="printer-card-footer">
                     <span className={isSelected ? "enabled-label" : "disabled-label"}>
-                      {isSelected ? "Selected for new jobs" : isUnsupportedVirtual && !isAuthorisedVirtual ? "Visible · awaiting approval" : "Not selected"}
+                      {t(isSelected ? "Selected for new jobs" : isUnsupportedVirtual && !isAuthorisedVirtual ? "Visible · awaiting approval" : "Not selected")}
                     </span>
                     {isSelected ? (
                       <button
@@ -2569,7 +2569,7 @@ function PrintersPage({
                         disabled={!!busyResourceId}
                         onClick={() => void onToggle(printer)}
                       >
-                        {busyResourceId === printer.id ? <span className="button-spinner"/> : "Deselect"}
+                        {busyResourceId === printer.id ? <span className="button-spinner"/> : t("Deselect")}
                       </button>
                     ) : (
                       <div className="printer-card-actions">
@@ -2588,7 +2588,7 @@ function PrintersPage({
                         <button
                           className="subtle-button"
                           disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
-                          title={!canSelect ? selectionBlockReason : !canUseSelection ? "Shop plan access must be confirmed before selecting a printer." : quotaFull && !canReplaceSelection ? "No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot." : undefined}
+                          title={!canSelect ? selectionBlockReason : !canUseSelection ? t("Shop plan access must be confirmed before selecting a printer.") : quotaFull && !canReplaceSelection ? t("No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot.") : undefined}
                           onClick={() => {
                             if (!canSelect || !canUseSelection) return;
                             if (quotaFull && canReplaceSelection) {
@@ -2599,7 +2599,7 @@ function PrintersPage({
                             }
                           }}
                         >
-                          {busyResourceId === printer.id ? <span className="button-spinner"/> : quotaFull ? "Replace" : "Select"}
+                          {busyResourceId === printer.id ? <span className="button-spinner"/> : quotaFull ? t("Replace") : t("Select")}
                         </button>
                       </div>
                     )}
@@ -2613,12 +2613,12 @@ function PrintersPage({
       {pendingReplacement && (
         <Modal
           title={t("Replace a selected printer")}
-          subtitle={`Select which current queue to replace with ${pendingReplacement.displayName}.`}
+          subtitle={t("Select which current queue to replace with {printer}.").replace("{printer}", pendingReplacement.displayName)}
           onClose={() => { if (!busyResourceId) { setPendingReplacement(null); setReplacePrinterId(""); } }}
         >
           <div className="modal-form">
             <label>
-              Queue to replace
+              {t("Queue to replace")}
               <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
                 <option value="">{t("Choose a selected queue")}</option>
                 {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
@@ -2626,12 +2626,12 @@ function PrintersPage({
             </label>
             <div className="modal-note">
               <ShieldCheck size={15}/>
-              <span>The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.</span>
+              <span>{t("The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.")}</span>
             </div>
             <div className="modal-actions">
               <button type="button" className="secondary-button" disabled={!!busyResourceId} onClick={() => { setPendingReplacement(null); setReplacePrinterId(""); }}>{t("Cancel")}</button>
               <button type="button" className="primary-button" disabled={!!busyResourceId || !replacePrinterId} onClick={() => void confirmReplacement()}>
-                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : "Replace selected queue"}
+                {busyResourceId === pendingReplacement.id ? <span className="button-spinner"/> : t("Replace selected queue")}
               </button>
             </div>
           </div>
