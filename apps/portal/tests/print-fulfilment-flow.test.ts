@@ -672,7 +672,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  const api=read("../src/api.ts");
  const program=read("../../../src/SmartPrint.Api/Program.cs");
  const css=read("../src/styles.css");
- assert.match(app,/placeholder="e.g. Manjeet - College Notes"/);
+ assert.match(app,/placeholder=\\{t\\("e.g. Manjeet - College Notes"\\)\\}/);
  assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);
  assert.match(app,/<CustomerNativePdfPreview[\s\S]*onPage=/);
  assert.match(app,/event\.previousStatus!==event\.newStatus/);
@@ -746,7 +746,7 @@ test("offline Photo Studio explains one-photo editing, friendly sizes, and shop 
  assert.ok(entry.includes('"25x35":"25 × 35 mm"'));
  assert.ok(entry.includes('"2x2":"2 × 2 inch"'));
  assert.ok(entry.includes('"4x6":"4 × 6 inch"'));
- assert.ok(entry.includes("{photoSizeLabel(document.sizeCode)} · {document.photoCount} photos · {document.photosPerPage} per A4 sheet"));
+ assert.ok(entry.includes("{t(photoSizeLabel(document.sizeCode))} · {t(\"{count} photos · {perPage} per A4 sheet\",{count:document.photoCount,perPage:document.photosPerPage})}"));
  assert.ok(entry.includes("Choose one original photo. Crop and enhance it, then set the number of copies and photos per A4 sheet in the editor."));
  assert.ok(entry.includes("To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker."));
 });
