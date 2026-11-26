@@ -1059,6 +1059,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Queue to replace": "बदलने वाली कतार",
     "The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.": "नई कतार खाली हुए प्लान स्लॉट का उपयोग करेगी। पुरानी कतार का उपयोग करने वाले QR स्टेशन के डिफ़ॉल्ट नए प्रिंटर पर चले जाएँगे। मौजूदा ऑर्डर और फ़ाइलें सुरक्षित रहेंगी; Print Queue में जाकर प्रतीक्षा कर रही फ़ाइलें नए प्रिंटर को असाइन करें। सक्रिय जॉब या आउटपुट पुष्टि की प्रतीक्षा वाली जॉब पहले हल करें। मूल Windows कंप्यूटर पर ही सेव फ़ाइलें वहीं रहेंगी; उसी PC की दूसरी कतार चुनें या कंप्यूटर बदलने से पहले उन फ़ाइलों को पूरा करें।",
     "Replace selected queue": "चुनी हुई कतार बदलें",
+    "Replace": "बदलें",
+    "Select": "चुनें",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1741,6 +1743,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Queue to replace": "Replace karne wali queue",
     "The new queue takes the freed plan slot. QR station defaults using the old queue move to the replacement. Existing orders and files are kept; review the Print Queue and assign waiting files to the new printer. Jobs already active or awaiting output confirmation must be resolved first. Files stored only on the original Windows computer stay there; choose another queue on that same PC or finish those files before replacing the computer.": "Nayi queue freed plan slot use karegi. Purani queue wale QR station defaults replacement par shift honge. Existing orders aur files safe rahengi; Print Queue mein waiting files naye printer ko assign karein. Active jobs ya output confirmation pending jobs pehle resolve karein. Original Windows computer par stored files wahin rahengi; usi PC ki doosri queue choose karein ya computer replace karne se pehle files complete karein.",
     "Replace selected queue": "Selected queue replace karein",
+    "Replace": "Replace karein",
+    "Select": "Select karein",
   },
 };
 
