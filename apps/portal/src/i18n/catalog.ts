@@ -1710,6 +1710,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.": "अंतरिम Windows बीटा इंस्टॉलर पर डिजिटल साइन नहीं है। Windows में Unknown Publisher या SmartScreen चेतावनी दिख सकती है; कुछ प्रबंधित डिवाइस बिना साइन वाले इंस्टॉलर को रोक सकते हैं।",
     "Latest stable release: {version}.": "नवीनतम स्थिर रिलीज़: {version}.",
     "The signed APK download appears automatically when the latest stable release contains the verified Android package.": "नवीनतम स्थिर रिलीज़ में सत्यापित Android पैकेज होने पर साइन किया हुआ APK डाउनलोड अपने आप दिखाई देगा।",
+    "Download progress for {label}": "{label} का डाउनलोड प्रोग्रेस",
 
   },
   hinglish: {
@@ -3048,6 +3049,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers.": "Interim Windows beta installer unsigned hai. Windows Unknown Publisher ya SmartScreen prompt dikha sakta hai; kuch managed devices unsigned installer ko block kar sakte hain.",
     "Latest stable release: {version}.": "Latest stable release: {version}.",
     "The signed APK download appears automatically when the latest stable release contains the verified Android package.": "Latest stable release mein verified Android package hone par signed APK download automatically dikh jayega.",
+    "Download progress for {label}": "{label} ka download progress",
 
   },
 };
