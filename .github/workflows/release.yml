@@ -213,14 +213,38 @@ jobs:
           $pfxPassword = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
           $signingCertificate = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $pfxPassword | Where-Object { $_.HasPrivateKey } | Select-Object -First 1)
           if ($signingCertificate.Count -ne 1) { throw "The PFX did not import exactly one code-signing certificate with a private key." }
-          $thumbprint = $signingCertificate[0].Thumbprint
+          $certificate = $signingCertificate[0]
+          $now = [DateTime]::UtcNow
+          if ($now -lt $certificate.NotBefore.ToUniversalTime() -or $now -gt $certificate.NotAfter.ToUniversalTime()) {
+            throw "The Windows code-signing certificate is not currently valid."
+          }
+          $codeSigningEku = @($certificate.Extensions | Where-Object { $_.Oid.Value -eq "2.5.29.37" } | ForEach-Object { $_.EnhancedKeyUsages } | ForEach-Object { $_.Value })
+          if ($codeSigningEku.Count -eq 0 -or $codeSigningEku -notcontains "1.3.6.1.5.5.7.3.3") {
+            throw "The PFX certificate is not explicitly valid for Code Signing."
+          }
+          $certificatePublisher = $certificate.GetNameInfo([System.Security.Cryptography.X509Certificates.X509NameType]::SimpleName, $false)
+          if (-not [string]::Equals($certificatePublisher, $env:SMARTPRINT_WINDOWS_PUBLISHER, [StringComparison]::OrdinalIgnoreCase)) {
+            throw "The code-signing certificate publisher '$certificatePublisher' does not exactly match SMARTPRINT_WINDOWS_PUBLISHER."
+          }
+          $thumbprint = $certificate.Thumbprint
           $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
             Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
-          $peFiles = @(
-            Get-ChildItem $storeAgent, $storeDesktop -Recurse -File |
-              Where-Object { $_.Extension -in ".exe", ".dll", ".sys", ".ocx" -and $_.FullName -ne $runtime }
-          )
+          # Detect PE files by the DOS MZ signature, not filename extension. This
+          # includes native modules such as .node and avoids silently omitting a
+          # bundled executable because it uses an unexpected extension.
+          $peFiles = @()
+          foreach ($candidate in (Get-ChildItem $storeAgent, $storeDesktop -Recurse -File)) {
+            $stream = [System.IO.File]::OpenRead($candidate.FullName)
+            try {
+              $first = $stream.ReadByte()
+              $second = $stream.ReadByte()
+            }
+            finally {
+              $stream.Dispose()
+            }
+            if ($first -eq 0x4D -and $second -eq 0x5A) { $peFiles += $candidate }
+          }
           if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
           foreach ($file in $peFiles) {
             & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /sha1 $thumbprint $file.FullName
