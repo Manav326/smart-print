@@ -55,6 +55,9 @@ public sealed class PrinterSelectionRulesTests
         Assert.Equal(expected, PrinterSelectionRules.CanSelect(
             "UNSUPPORTED_VIRTUAL", status, Now.AddSeconds(-30), true, false,
             Now.AddSeconds(-30), Now, grantActive, false));
+        Assert.False(PrinterSelectionRules.CanSelect(
+            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddSeconds(-30), true, false,
+            Now.AddSeconds(-30), Now, true, true));
     }
 
     [Fact]
