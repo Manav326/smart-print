@@ -154,6 +154,12 @@ jobs:
           } else {
             throw "Could not safely check whether the immutable R2 Store package exists: $($existingJson -join ' ')"
           }
+          $verifiedCopy = Join-Path $env:RUNNER_TEMP "SmartPrint-Windows-Store-Setup-R2-verified.exe"
+          aws s3 cp "s3://$env:CLOUDFLARE_R2_BUCKET/$key" $verifiedCopy --endpoint-url $endpoint --region auto --only-show-errors
+          if ($LASTEXITCODE -ne 0) { throw "Could not download the stored Microsoft Store package for byte-for-byte verification." }
+          $storedHash = (Get-FileHash $verifiedCopy -Algorithm SHA256).Hash.ToLowerInvariant()
+          if ($storedHash -ne $hash) { throw "The stored Microsoft Store package bytes do not match the signed release artifact." }
+          Remove-Item -LiteralPath $verifiedCopy -Force
           $publicUrl = "$($env:PUBLIC_DOWNLOAD_BASE_URL.TrimEnd('/'))/$env:RELEASE_TAG/SmartPrint-Windows-Store-Setup.exe"
           $response = Invoke-WebRequest -Uri $publicUrl -Method Head -MaximumRedirection 5
           if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) { throw "Public Store installer URL did not return a successful response." }
