@@ -36,4 +36,4 @@ For screens whose existing copy is not yet represented by a stable message key, 
 
 Prefer the typed `translateUi(locale, "namespace.key")` catalog for reusable product terms, workflow states, and messages shared across multiple screens. Use `formatUiCurrency`, `formatUiNumber`, and `formatUiDate` for locale-aware values rather than hardcoding `en-IN` formatting.
 
-Every standalone entry point that renders a component using `useLocale` must be wrapped in `LanguageProvider`. The normal portal entry point and the offline Photo Studio entry point both provide the context.
+Every standalone entry point that renders a component using `useLocale` must be wrapped in `LanguageProvider`. The normal portal, native desktop, offline Photo Studio, and isolated Photo Studio browser-test entry points all provide the context.
