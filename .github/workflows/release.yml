@@ -296,11 +296,16 @@ jobs:
             echo "::error::ANDROID_VERSION_CODE_BASE must be a non-negative integer."
             exit 1
           fi
-          version_code=$((ANDROID_VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
-          if (( version_code < 1 || version_code > 2100000000 )); then
-            echo "::error::Computed Android versionCode $version_code is outside Google's supported range."
-            exit 1
-          fi
+          version_code="$(python - <<'PY'
+          import os
+          base = int(os.environ["ANDROID_VERSION_CODE_BASE"])
+          run_number = int(os.environ["GITHUB_RUN_NUMBER"])
+          value = base + run_number
+          if value < 1 or value > 2_100_000_000:
+              raise SystemExit(f"Computed Android versionCode {value} is outside Google's supported range.")
+          print(value)
+          PY
+          )"
           echo "Building Android versionCode=$version_code (base=$ANDROID_VERSION_CODE_BASE, release run=$GITHUB_RUN_NUMBER)."
           gradle --no-daemon --console=plain -p apps/android \
             -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
