@@ -72,16 +72,27 @@ function readScreenCatalog(locale) {
   const localeStart = source.indexOf("  " + locale + ": {", screenRegistryStart);
   if (localeStart < 0) throw new Error("Missing screen-level dictionary for " + locale);
   const bodyStart = source.indexOf("\n", localeStart) + 1;
-  const end = source.indexOf("\n  },", bodyStart);
+  const commaEnd = source.indexOf("\n  },", bodyStart);
+  const finalEnd = source.indexOf("\n  }\n};", bodyStart);
+  const end = commaEnd < 0 ? finalEnd : finalEnd < 0 ? commaEnd : Math.min(commaEnd, finalEnd);
   if (bodyStart <= 0 || end < 0) throw new Error("Unterminated screen-level dictionary for " + locale);
   const entries = [];
   for (const line of source.slice(bodyStart, end).split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const separator = trimmed.indexOf(":");
-    if (separator < 0) throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
-    const key = JSON.parse(trimmed.slice(0, separator).trim());
-    const value = JSON.parse(trimmed.slice(separator + 1).trim().replace(/,$/, ""));
+    if (!trimmed.startsWith('"')) throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
+    let closingQuote = -1;
+    for (let index = 1; index < trimmed.length; index += 1) {
+      if (trimmed[index] === '"' && trimmed[index - 1] !== "\\\\") {
+        closingQuote = index;
+        break;
+      }
+    }
+    if (closingQuote < 0 || trimmed.slice(closingQuote + 1).trimStart()[0] !== ":") {
+      throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
+    }
+    const key = JSON.parse(trimmed.slice(0, closingQuote + 1));
+    const value = JSON.parse(trimmed.slice(closingQuote + 2).trim().replace(/,$/, ""));
     entries.push([key, value]);
   }
   const keys = entries.map(([key]) => key);
