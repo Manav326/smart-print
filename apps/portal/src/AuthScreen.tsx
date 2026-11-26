@@ -5,7 +5,7 @@ import { isDesktopApp } from "./desktop-bridge";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
 import ShopGoogleSignInButton from "./ShopGoogleSignInButton";
-import { useLocale, translateUi, translateUiText } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUi, translateUiText } from "./i18n";
 
 export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { onAuthenticated: (tokens: AuthTokens) => void; dark: boolean; onToggleTheme: () => void }) {
   const { locale } = useLocale();
@@ -61,7 +61,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
       <div className="auth-glow auth-glow-one"/><div className="auth-glow auth-glow-two"/>
       <header className="auth-topbar">
         <BrandLockup className="auth-brand" />
-        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> {translateUi(locale,"auth.backToWebsite")}</a>}<span className="auth-top-note"><ShieldCheck size={15}/> {translateUi(locale,"auth.secureWorkspace")}</span></div>
+        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><LanguageSwitcher compact/>{!desktop && <a className="auth-home-link" href="/"><ArrowLeft size={14}/> {translateUi(locale,"auth.backToWebsite")}</a>}<span className="auth-top-note"><ShieldCheck size={15}/> {translateUi(locale,"auth.secureWorkspace")}</span></div>
       </header>
       <main className="auth-layout">
         <section className="auth-story">
