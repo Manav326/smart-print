@@ -352,9 +352,14 @@ internal static class AgentChildCommands
 
     private static async Task<T> ReadInputAsync<T>() where T : class
     {
-        var input = await JsonSerializer.DeserializeAsync<T>(
-            Console.OpenStandardInput(), JsonOptions, CancellationToken.None);
-        return input ?? throw new InvalidDataException("The isolated Agent worker request is empty.");
+        // The parent sends one compact JSON line. Line framing lets the print
+        // child keep stdin open for its later pre-StartDoc authorization reply
+        // without relying on EOF to finish JSON deserialization.
+        var line = await Console.In.ReadLineAsync();
+        if (string.IsNullOrWhiteSpace(line))
+            throw new InvalidDataException("The isolated Agent worker request is empty.");
+        return JsonSerializer.Deserialize<T>(line, JsonOptions)
+            ?? throw new InvalidDataException("The isolated Agent worker request is empty.");
     }
 
     private static void WriteProtocol<T>(string kind, T value)
