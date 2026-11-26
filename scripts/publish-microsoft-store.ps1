@@ -33,11 +33,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 
 $baseUri = [Uri]$PublicDownloadBaseUrl
-if ($baseUri.AbsolutePath -notin @("", "/") -or $baseUri.Query -or $baseUri.Fragment -or $baseUri.UserInfo) {
-    throw "PublicDownloadBaseUrl must be a canonical HTTPS origin without path, query, fragment or credentials."
+if ($baseUri.Query -or $baseUri.Fragment -or $baseUri.UserInfo) {
+    throw "PublicDownloadBaseUrl must be a canonical HTTPS URL without query, fragment or embedded credentials."
 }
 
-$packageUrl = "$($baseUri.GetLeftPart([UriPartial]::Authority))/$ReleaseTag/SmartPrint-Windows-Store-Setup.exe"
+$downloadBase = $PublicDownloadBaseUrl.TrimEnd('/')
+$packageUrl = "$downloadBase/$ReleaseTag/SmartPrint-Windows-Store-Setup.exe"
 $documentationUrl = "https://raw.githubusercontent.com/Manav326/smart-print/main/docs/windows-installer-exit-codes.md"
 $apiBase = "https://api.store.microsoft.com"
 $tokenUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
