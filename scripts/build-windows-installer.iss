@@ -8,10 +8,10 @@
   #define SmartPrintBuildId "local"
 #endif
 #ifndef SmartPrintAgentSourceDir
-  #define SmartPrintAgentSourceDir "artifacts\\agent"
+  #define SmartPrintAgentSourceDir "artifacts\agent"
 #endif
 #ifndef SmartPrintDesktopSourceDir
-  #define SmartPrintDesktopSourceDir "artifacts\\desktop"
+  #define SmartPrintDesktopSourceDir "artifacts\desktop"
 #endif
 #ifndef SmartPrintOutputBaseFilename
   #define SmartPrintOutputBaseFilename "SmartPrint-Windows-Setup"
