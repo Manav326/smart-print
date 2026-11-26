@@ -52,7 +52,7 @@ public static class PrivateRelayProgressRules
         DecryptingAndAuthenticating => "Checking file security",
         ValidatingDocument => "Checking that the file can be printed",
         SecuringLocalQueue => "Saving your file securely on the shop computer",
-        Ready => "File secured on the shop computer · ready for printing",
+        Ready => "Secure upload confirmed · awaiting shop review",
         Failed => "The shop computer could not verify this file",
         Expired => "The secure upload expired before the file reached the print queue",
         _ => "Your secure file is being prepared"
