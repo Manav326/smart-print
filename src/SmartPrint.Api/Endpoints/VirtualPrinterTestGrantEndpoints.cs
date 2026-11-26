@@ -71,7 +71,7 @@ public static class VirtualPrinterTestGrantEndpoints
                         grant.RevokedUtc,
                         grant.RevocationReason,
                         IsActive = VirtualPrinterTestGrantPolicy.IsGrantActive(
-                            queue.TenantId, queue.TenantId, queue.AgentDeviceId,
+                            queue.TenantId, queue.TenantId, grant.TenantId, queue.AgentDeviceId,
                             grant.AgentDeviceId, queue.IdentityFingerprint,
                             grant.IdentityFingerprint, grant.CreatedUtc, grant.ExpiresUtc,
                             grant.RevokedUtc, now)
