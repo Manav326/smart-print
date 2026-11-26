@@ -126,6 +126,9 @@ public sealed class AddShopScopedVirtualPrinterTestGrants : Migration
                 IF EXISTS (SELECT 1 FROM "VirtualPrinterTestGrants") THEN
                     RAISE EXCEPTION 'Cannot downgrade while virtual-printer test grant audit records exist.';
                 END IF;
+                IF EXISTS (SELECT 1 FROM "PrinterDevices" WHERE "OutputMode" = 'UNSUPPORTED_VIRTUAL') THEN
+                    RAISE EXCEPTION 'Cannot downgrade printer test-mode migration while unsupported virtual-printer inventory exists.';
+                END IF;
             END;
             $virtual_printer_grants$;
             """);
