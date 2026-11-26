@@ -65,8 +65,8 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
       </header>
       <main className="auth-layout">
         <section className="auth-story">
-          <div className="auth-kicker"><Sparkles size={14}/> PRINTING, REIMAGINED</div>
-          <h1>Your print shop.<br/><span>{t("In perfect flow.")}</span></h1>
+          <div className="auth-kicker"><Sparkles size={14}/> {t("Printing, reimagined")}</div>
+          <h1>{t("Your print shop.")}<br/><span>{t("In perfect flow.")}</span></h1>
           <p>{t("One beautifully simple workspace to manage printers, connect customers and keep every job moving.")}</p>
           <div className="auth-benefits">
             <div><span><QrCodeIcon/></span><div><strong>{t("One scan to start")}</strong><small>{t("Let customers connect through a secure QR station.")}</small></div></div>
@@ -76,7 +76,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
           <div className="auth-proof"><span className="proof-line"/><span>{t("BUILT FOR INDEPENDENT PRINT SHOPS")}</span></div>
         </section>
         <section className="auth-card">
-          <div className="auth-card-heading"><div className="auth-card-icon"><Store size={20}/></div><div><span>WELCOME TO SMART PRINT</span><h2>{translateUi(locale,mode === "signin" ? "auth.welcomeBack" : "auth.setupShop")}</h2><p>{translateUi(locale,mode === "signin" ? "auth.signInHint" : "auth.createShopHint")}</p></div></div>
+          <div className="auth-card-heading"><div className="auth-card-icon"><Store size={20}/></div><div><span>{t("WELCOME TO SMART PRINT")}</span><h2>{translateUi(locale,mode === "signin" ? "auth.welcomeBack" : "auth.setupShop")}</h2><p>{translateUi(locale,mode === "signin" ? "auth.signInHint" : "auth.createShopHint")}</p></div></div>
           <div className="auth-tabs"><button className={mode === "signin" ? "selected" : ""} onClick={() => {setMode("signin");setError("");}}>{translateUi(locale,"auth.signIn")}</button><button className={mode === "register" ? "selected" : ""} onClick={() => {setMode("register");setError("");}}>{translateUi(locale,"auth.createAccount")}</button></div>
           <form className="auth-form" onSubmit={submit}>
             {mode === "register" && <>
