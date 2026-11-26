@@ -2221,7 +2221,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Progress shows file transfer, not printing. A file is complete only after SmartPrint confirms it. Successful files stay saved if another file fails.": "Progress file transfer dikhata hai, printing nahi. SmartPrint confirm kare tabhi file complete hai. Doosri file fail ho toh bhi successful files saved rahengi.",
 
     "Photo Studio": "Photo Studio",
-    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",    "This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.": "Yeh request aapke current session se alag hai. Iska status sirf reference ke liye dikhaya gaya hai; yahan printing, payment ya file changes available nahi hain.",
+    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",
+    "This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.": "Yeh request aapke current session se alag hai. Iska status sirf reference ke liye dikhaya gaya hai; yahan printing, payment ya file changes available nahi hain.",
     "Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.": "Aapka pehla order apne original shop session se juda rehta hai. Document content private rehta hai; yeh panel sirf status details dikhata hai.",
     "This photo has already been submitted to the shop.": "Yeh photo pehle hi shop ko bheji ja chuki hai.",
     "Open Photo Studio": "Photo Studio kholein",
