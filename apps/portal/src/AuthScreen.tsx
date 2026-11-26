@@ -50,7 +50,7 @@ export default function AuthScreen({ onAuthenticated, dark, onToggleTheme }: { o
       await storeTokens(tokens, "shop");
       onAuthenticated(tokens);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Something went wrong. Please try again."));
+      setError(exception instanceof Error ? t(exception.message) : t("Something went wrong. Please try again."));
     } finally {
       setBusy(false);
     }
