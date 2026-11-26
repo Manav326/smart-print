@@ -5050,3 +5050,25 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 /* Script-aware fallback keeps translated UI legible without changing user content. */
 :lang(hi){font-family:"Noto Sans Devanagari","Nirmala UI",Mangal,"Noto Sans",sans-serif}
 :lang(hi-Latn){font-family:"DM Sans","Noto Sans",sans-serif}
+
+/* Compact desktop/tablet workspace header: retain core controls without
+   letting optional status telemetry push the account menu off-screen. */
+@media (min-width: 851px) and (max-width: 1100px) {
+  .app-shell .topbar {
+    gap: 10px;
+    padding-inline: 18px;
+  }
+  .app-shell .service-status-row,
+  .app-shell .topbar-product-tag {
+    display: none !important;
+  }
+  .app-shell .topbar-actions {
+    flex: 0 0 auto;
+    min-width: 0;
+    gap: 10px;
+  }
+  .app-shell .topbar-left {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+}
