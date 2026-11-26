@@ -83,6 +83,12 @@ function Invoke-StoreApi {
     return $response
 }
 
+$draftStatusPath = "/submission/v1/product/$ProductId/status"
+$initialStatus = Invoke-StoreApi -Method GET -Path $draftStatusPath
+if (-not [string]::IsNullOrWhiteSpace([string]$initialStatus.responseData.ongoingSubmissionId)) {
+    throw "Microsoft already has an active submission ($($initialStatus.responseData.ongoingSubmissionId)). Wait for it to finish before updating the package."
+}
+
 $packagesPath = "/submission/v1/product/$ProductId/packages"
 $packagesResponse = Invoke-StoreApi -Method GET -Path $packagesPath
 $packages = @($packagesResponse.responseData.packages)
