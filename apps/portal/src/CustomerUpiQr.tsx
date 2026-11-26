@@ -95,16 +95,16 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
  return <div className="customer-upi-details">
   <div className="customer-upi-qr" ref={root}>
    {uri?<QRCode value={uri} size={180} level="H" bgColor="#ffffff" fgColor="#111827"/>:
-    <div className="customer-upi-qr-unavailable">The payment QR is unavailable. Ask the shop to verify its UPI ID and try again.</div>}
+    <div className="customer-upi-qr-unavailable">{t("Payment QR is unavailable. Ask the shop to verify its UPI ID and try again.")}</div>}
   </div>
   <strong>{payeeName}</strong><span>{upiId}</span><strong className="customer-upi-amount">{amount}</strong>
   {uri&&<div className="customer-upi-quick-actions">
-   <button type="button" className="secondary-button" onClick={()=>void copyText(upiId,"UPI ID")}><Copy size={13}/>Copy UPI ID</button>
-   <button type="button" className="secondary-button" onClick={()=>void copyText((amountMinor/100).toFixed(2),"Amount")}><Copy size={13}/>Copy amount</button>
+   <button type="button" className="secondary-button" onClick={()=>void copyText(upiId,"UPI ID")}><Copy size={13}/>{t("Copy UPI ID")}</button>
+   <button type="button" className="secondary-button" onClick={()=>void copyText((amountMinor/100).toFixed(2),"Amount")}><Copy size={13}/>{t("Copy amount")}</button>
   </div>}
   {uri&&<button type="button" className="secondary-button customer-upi-download" onClick={()=>void download()} disabled={busy}><Download size={15}/>{busy?t("Preparing QR…"):t("Download QR image")}</button>}
   {status&&<small className={"customer-upi-download-status "+statusTone} role="status">{statusTone==="success"?<Check size={13}/>:<Info size={13}/>} {status}</small>}
   {error&&<small className="customer-upi-download-error" role="alert">{error}</small>}
-  {uri&&<a href={uri} className="customer-flow-button customer-upi-open">Open UPI app</a>}
+  {uri&&<a href={uri} className="customer-flow-button customer-upi-open">{t("Open UPI app")}</a>}
  </div>;
 }
