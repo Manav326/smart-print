@@ -1778,6 +1778,16 @@ async function uploadCustomerPrivateRelay(
     existing.stageMessage ?? existing.message ?? "Checking the secure shop handoff",
     existing.stageUpdatedUtc
   );
+  // The relay upload endpoint sets CLOUD_RELAY only after the complete
+  // encrypted payload has been durably accepted. A resumed status check must
+  // preserve that completed byte-transfer progress while Agent validation runs.
+  if (existing.state === "PENDING" && existing.transferPath === "CLOUD_RELAY") {
+    onProgress?.({
+      bytesSent: file.size,
+      totalBytes: file.size,
+      stage: "WAITING_FOR_SHOP"
+    });
+  }
   if (existing.state === "READY") {
     clearCustomerLocalUploadAttempt(sessionToken, file, ticket.batchId);
     return existing.uploadResult;
