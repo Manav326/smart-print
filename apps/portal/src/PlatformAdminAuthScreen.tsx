@@ -2,7 +2,7 @@ import { useState, type FormEvent } from "react";
 import { ArrowLeft, ArrowRight, Eye, EyeOff, LockKeyhole, Mail, ShieldCheck } from "lucide-react";
 import ThemeToggleButton from "./ThemeToggleButton";
 import BrandLockup from "./BrandLockup";
-import { useLocale, translateUiText } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUiText } from "./i18n";
 import {
   isPlatformAdminSession,
   signIn,
@@ -52,6 +52,7 @@ export default function PlatformAdminAuthScreen({
         <BrandLockup className="auth-brand" subline={t("PLATFORM ADMINISTRATION")} />
         <div className="auth-top-actions">
           <ThemeToggleButton dark={dark} onToggle={onToggleTheme}/>
+          <LanguageSwitcher compact/>
           <a className="auth-home-link" href="/"><ArrowLeft size={14}/> {t("Back to website")}</a>
           <span className="auth-top-note"><ShieldCheck size={15}/> {t("Restricted platform access")}</span>
         </div>
