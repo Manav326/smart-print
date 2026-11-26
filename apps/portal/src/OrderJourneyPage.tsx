@@ -155,7 +155,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
   onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<boolean>;
 }){
-  const t=(value:string)=>tx(locale,value);
+  const t=(value:string, values: Record<string,string|number> = {})=>tx(locale,value,values);
   const printer=printerSummary(journey.jobs,printers,agents,locale);
   const canReview=journey.canReview&&!!journey.batchId;
   const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
