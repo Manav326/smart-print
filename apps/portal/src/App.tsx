@@ -2189,7 +2189,7 @@ function ReportsPage({ token }: { token: string }) {
             <div className="panel-heading"><div><h2>{t("Refunds recorded")}</h2><p>{t("Refunds the shop confirmed sending during this period")}</p></div><span className="neutral-chip">{t("Recorded as sent")}</span></div>
             {summary.refundsRecordedByMethod.length === 0 ? <div className="reports-empty">{t("No refunds were recorded as sent during this period.")}</div> :
               <div className="report-collection-list">{summary.refundsRecordedByMethod.map(item => <div className="report-collection-row" key={`refund-${item.currency}-${item.method}`}>
-                <div><strong>{item.method === "UPI" ? t(item.method === "UPI" ? "UPI refund" : "Cash refund")}</strong><small>{item.refundCount} {t(item.refundCount === 1 ? "refund" : "refunds")} {t("recorded")}</small></div>
+                <div><strong>{t(item.method === "UPI" ? "UPI refund" : "Cash refund")}</strong><small>{item.refundCount} {t(item.refundCount === 1 ? "refund" : "refunds")} {t("recorded")}</small></div>
                 <strong className="report-collection-amount">{money(item.amountMinor, item.currency)}</strong>
               </div>)}</div>}
           </section>
