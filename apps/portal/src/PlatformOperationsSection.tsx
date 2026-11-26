@@ -50,6 +50,8 @@ function toDraft(value: PlatformOperationalSettings): Draft {
 }
 
 function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [queues, setQueues] = useState<PlatformVirtualPrinterTestQueue[]>([]);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
