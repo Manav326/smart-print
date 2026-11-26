@@ -46,6 +46,21 @@ test("screen copy uses pretranslated dictionaries and preserves English source f
   assert.equal(translateUiText("hindi", "A newly added phrase"), "A newly added phrase");
 });
 
+test("shop, printer and refund workflows use pretranslated screen copy", () => {
+  assert.equal(translateUiText("hindi", "Driver capabilities"), "ड्राइवर की क्षमताएँ");
+  assert.equal(translateUiText("hinglish", "Driver capabilities"), "Driver capabilities");
+  assert.equal(translateUiText("hindi", "PDF saved"), "PDF सेव हो गई");
+  assert.equal(translateUiText("hinglish", "PDF saved"), "PDF save ho gayi");
+  assert.equal(
+    translateUiText("hindi", "Return {amount}", { amount: "₹125.00" }),
+    "₹125.00 लौटाएँ",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Select page(s) to see the refund amount."),
+    "Refund amount dekhne ke liye page(s) select karein.",
+  );
+});
+
 test("screen copy interpolation preserves dynamic order and queue details", () => {
   const source = "The Agent could not identify this Windows job. Manually check the {queue} queue for {job}, then inspect every printed page before reconciling.";
   const translated = translateUiText("hindi", source, { queue: "Canon LBP", job: "SP-1042" });
