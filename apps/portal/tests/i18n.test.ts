@@ -95,6 +95,19 @@ test("customer QR session states are translated while shop names and session val
   );
 });
 
+test("Photo Studio actions, order recovery and public download warnings are localized", () => {
+  assert.equal(translateUiText("hindi", "Save private sheet"), "निजी शीट सेव करें");
+  assert.equal(translateUiText("hinglish", "All files have a recorded final decision."), "Sabhi files ka final decision record hai.");
+  assert.equal(
+    translateUiText("hindi", "Retry {count} virtual test(s)", { count: 3 }),
+    "3 वर्चुअल टेस्ट दोबारा चलाएँ",
+  );
+  assert.equal(
+    translateUiText("hindi", "The interim Windows beta installer is unsigned. Windows may show an Unknown Publisher or SmartScreen prompt; some managed devices may block unsigned installers."),
+    "अंतरिम Windows बीटा इंस्टॉलर पर डिजिटल साइन नहीं है। Windows में Unknown Publisher या SmartScreen चेतावनी दिख सकती है; कुछ प्रबंधित डिवाइस बिना साइन वाले इंस्टॉलर को रोक सकते हैं।",
+  );
+});
+
 test("number, currency and date formatting use the selected locale", () => {
   assert.equal(typeof formatUiNumber(1234.5, "hindi"), "string");
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
