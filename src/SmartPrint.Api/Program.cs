@@ -8124,11 +8124,25 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
                   db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
                       (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))
-            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
+            select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.PrintDispatchAttempts, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
 
         var lease = now.AddMinutes(5);
+        var dispatchAttempt = candidate.PrintDispatchAttempts + 1;
+        var attemptSpoolerJobName = candidate.SpoolerJobName;
+        if (candidate.OutputMode != PrinterTypePolicy.PdfExport)
+        {
+            var prefix = candidate.OutputMode == PrinterTypePolicy.UnsupportedVirtual
+                ? "VIRTUAL-TEST-"
+                : "SmartPrint-";
+            var suffix = $"-{candidate.Id:N}-A{dispatchAttempt}";
+            var availableJobNumberLength = Math.Max(0, 180 - prefix.Length - suffix.Length);
+            var jobNumber = candidate.JobNumber.Length <= availableJobNumberLength
+                ? candidate.JobNumber
+                : candidate.JobNumber[..availableJobNumberLength];
+            attemptSpoolerJobName = prefix + jobNumber + suffix;
+        }
         var updated = await db.PrintJobs.Where(job =>
             job.Id == candidate.Id && job.TenantId == device.TenantId &&
             (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
@@ -8169,6 +8183,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
+                .SetProperty(job => job.SpoolerJobName, attemptSpoolerJobName)
                 .SetProperty(job => job.PrintDispatchLeaseExpiresUtc, lease)
                 .SetProperty(job => job.PrintDispatchAttempts, job => job.PrintDispatchAttempts + 1)
                 .SetProperty(job => job.SpoolerStatus, "SUBMISSION_STARTED")
@@ -8186,7 +8201,7 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
         claimed.Add(new
         {
             candidate.Id, candidate.JobNumber, Status = "PRINT_SUBMITTING",
-            candidate.QueueName, candidate.SpoolerJobName, candidate.OutputMode,
+            candidate.QueueName, SpoolerJobName = attemptSpoolerJobName, candidate.OutputMode,
             RejectedPageNumbers = JsonSerializer.Deserialize<int[]>(candidate.RejectedPageNumbersJson) ?? [],
             LeaseExpiresUtc = lease
         });
@@ -8340,6 +8355,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/private-test-output", async (
 });
 agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
     Guid jobId,
+    AgentSpoolerSubmissionAuthorizationRequest request,
     HttpContext context,
     SmartPrintDbContext db,
     IHostEnvironment environment,
@@ -8347,6 +8363,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
 {
     var device = await AuthenticateAgentAsync(context, db, ct);
     if (device is null) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(request.SpoolerJobName) || request.SpoolerJobName.Length > 180)
+        return Results.BadRequest(new { code = "invalid_spooler_submission_authorization" });
 
     var now = DateTimeOffset.UtcNow;
     var onlineAfter = now.AddMinutes(-2);
@@ -8372,6 +8390,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
         {
             job.PrivatePrinting,
             job.OutputType,
+            job.SpoolerJobName,
+            job.PrintDispatchLeaseExpiresUtc,
             printer.Id,
             printer.OutputMode,
             printer.IdentityFingerprint,
@@ -8381,6 +8401,9 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
 
     if (output is null)
         return Results.Conflict(new { code = "spooler_submission_not_authorised", message = "The print lease, paired Agent or current Windows queue readiness is no longer valid. No spooler submission was authorised." });
+    if (!PrinterDispatchRules.IsCurrentSpoolerSubmissionAttempt(
+            output.SpoolerJobName, request.SpoolerJobName, output.PrintDispatchLeaseExpiresUtc, now))
+        return Results.Conflict(new { code = "stale_spooler_submission_attempt", message = "This worker no longer owns the current dispatch attempt. No Windows spooler submission was authorised." });
 
     if (output.OutputMode == PrinterTypePolicy.UnsupportedVirtual)
     {
@@ -8462,8 +8485,10 @@ agentApi.MapPost("/jobs/{jobId:guid}/print-blocked", async (Guid jobId, AgentPri
     if (job is null) return Results.NotFound();
     if (job.Status == "LOCAL_QUEUE_READY" && job.ClaimedByAgentDeviceId == device.Id)
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
-    if (job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id || job.SpoolerJobId != null)
-        return Results.Conflict(new { code = "print_dispatch_state_changed", message = "Reconcile the spooler before attempting another print." });
+    if (job.Status != "PRINT_SUBMITTING" || job.ClaimedByAgentDeviceId != device.Id ||
+        job.SpoolerJobId != null ||
+        !string.Equals(job.SpoolerJobName, request.SpoolerJobName, StringComparison.Ordinal))
+        return Results.Conflict(new { code = "print_dispatch_state_changed", message = "This failure report belongs to a stale dispatch attempt; reconcile the current spooler state." });
 
     var previous = job.Status;
     job.Status = "LOCAL_QUEUE_READY";
@@ -8497,12 +8522,15 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     if (device is null) return Results.Unauthorized();
     var reason = request.ReasonCode?.Trim();
     if (string.IsNullOrWhiteSpace(reason) || reason.Length > 80 ||
+        string.IsNullOrWhiteSpace(request.SpoolerJobName) || request.SpoolerJobName.Length > 180 ||
         (request.PagesPrinted ?? 0) < 0 || (request.TotalPages ?? 0) < 0 ||
         (request.PagesPrinted is int reportedPages && request.TotalPages is int reportedTotal &&
          reportedTotal > 0 && reportedPages > reportedTotal))
         return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    if (!string.Equals(job.SpoolerJobName, request.SpoolerJobName, StringComparison.Ordinal))
+        return Results.Conflict(new { code = "stale_spooler_submission_attempt" });
     var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
     if (job.Status is "OUTPUT_UNCONFIRMED" or "COMPLETED")
     {
