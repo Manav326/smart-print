@@ -82,7 +82,7 @@ The existing release workflow already expects these repository variables/secrets
 | `CLOUDFLARE_R2_ACCESS_KEY_ID` | Secret | R2 object access key |
 | `CLOUDFLARE_R2_SECRET_ACCESS_KEY` | Secret | R2 object secret |
 
-The public download base must be an HTTPS custom domain (an optional path prefix is supported), not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
+The public download base must be the root HTTPS custom-domain origin, not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
 
 ### E. Android upload signing
 
