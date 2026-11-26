@@ -75,12 +75,47 @@ function Invoke-StoreApi {
         $parameters.ContentType = "application/json"
         $parameters.Body = ConvertTo-Json -InputObject $Body -Depth 20 -Compress
     }
-    $response = Invoke-RestMethod @parameters
-    if ($response.PSObject.Properties.Name -contains "isSuccess" -and -not $response.isSuccess) {
-        $details = ($response.errors | ForEach-Object { "$($_.code): $($_.message) [$($_.target)]" }) -join "; "
-        throw "Microsoft Store API rejected $Method $Path. $details"
+    # GET and PATCH are safe to retry for transient throttling/service errors.
+    # Do not automatically retry POST: a timed-out submission could already have
+    # been accepted by Partner Center and must be reconciled before another POST.
+    $maxAttempts = if ($Method -in @("GET", "PATCH")) { 5 } else { 1 }
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            $response = Invoke-RestMethod @parameters
+            if ($response -and $response.PSObject.Properties.Name -contains "isSuccess" -and -not $response.isSuccess) {
+                $details = ($response.errors | ForEach-Object { "$($_.code): $($_.message) [$($_.target)]" }) -join "; "
+                throw "Microsoft Store API rejected $Method $Path. $details"
+            }
+            return $response
+        }
+        catch {
+            $httpResponse = $_.Exception.Response
+            $statusCode = 0
+            if ($httpResponse -and $null -ne $httpResponse.StatusCode) {
+                $statusCode = [int]$httpResponse.StatusCode
+            }
+            $retryable = $statusCode -in @(408, 429, 500, 502, 503, 504)
+            if (-not $retryable -or $attempt -ge $maxAttempts) {
+                throw
+            }
+
+            $retryAfterSeconds = 0
+            try {
+                $retryAfterHeader = $httpResponse.Headers["Retry-After"]
+                if ($retryAfterHeader) { $retryAfterSeconds = [int]$retryAfterHeader }
+            }
+            catch {
+                $retryAfterSeconds = 0
+            }
+            if ($retryAfterSeconds -le 0) {
+                $retryAfterSeconds = [Math]::Min(30, [Math]::Pow(2, $attempt))
+            }
+            $retryAfterSeconds = [Math]::Min(60, [Math]::Max(1, $retryAfterSeconds))
+            Write-Warning "Microsoft Store API returned HTTP $statusCode for $Method $Path. Retrying in $retryAfterSeconds seconds (attempt $attempt of $maxAttempts)."
+            Start-Sleep -Seconds $retryAfterSeconds
+        }
     }
-    return $response
+    throw "Microsoft Store API request exhausted its retry policy for $Method $Path."
 }
 
 $draftStatusPath = "/submission/v1/product/$ProductId/status"
