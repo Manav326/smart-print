@@ -1150,6 +1150,10 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Upload {count} file(s) securely": "{count} फ़ाइल सुरक्षित रूप से अपलोड करें",
     "Upload {count} file(s) to shop": "{count} फ़ाइल शॉप पर अपलोड करें",
     "Upload {count} file(s)": "{count} फ़ाइल अपलोड करें",
+    "PRIVATE · ON THIS DEVICE": "निजी · इसी डिवाइस पर",
+    "SHOP · NEW PHOTO ORDER": "शॉप · नया फ़ोटो ऑर्डर",
+    "SHOP · EDIT EXISTING JOB": "शॉप · मौजूदा जॉब एडिट करें",
+    "CUSTOMER · BEFORE UPLOAD": "ग्राहक · अपलोड से पहले",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1923,6 +1927,10 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Upload {count} file(s) securely": "{count} file(s) securely upload karein",
     "Upload {count} file(s) to shop": "{count} file(s) shop par upload karein",
     "Upload {count} file(s)": "{count} file(s) upload karein",
+    "PRIVATE · ON THIS DEVICE": "Private · isi device par",
+    "SHOP · NEW PHOTO ORDER": "Shop · naya photo order",
+    "SHOP · EDIT EXISTING JOB": "Shop · existing job edit karein",
+    "CUSTOMER · BEFORE UPLOAD": "Customer · upload se pehle",
   },
 };
 
