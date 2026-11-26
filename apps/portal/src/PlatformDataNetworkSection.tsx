@@ -78,7 +78,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
         <div>
           <div className="platform-plan-kicker"><Activity size={14}/> DATA &amp; NETWORK INTELLIGENCE</div>
           <h2>{t("Where SmartPrint data moves")}</h2>
-          <p>Measured original-document payload across cloud transfer and shop Wi-Fi paths. Each network leg is counted separately from unique files.</p>
+          <p>{t("Measured original-document payload across cloud transfer and shop Wi-Fi paths. Each network leg is counted separately from unique files.")}</p>
         </div>
         <div className="platform-data-actions">
           <label className="platform-data-range">
@@ -172,13 +172,13 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
 
           <div className="platform-data-storage-grid">
             <article className="panel platform-data-storage-card">
-              <div className="platform-data-panel-title"><Cloud size={16}/> Cloud document storage</div>
+              <div className="platform-data-panel-title"><Cloud size={16}/> {t("Cloud document storage")}</div>
               <strong>{formatGb(report.storage.cloudLogicalDocumentBytes)}</strong>
               <span>{formatCount(report.storage.cloudLogicalDocumentCount)} active logical source documents</span>
               <small>{t("Metadata-reported file bytes, not encrypted disk occupancy.")}</small>
             </article>
             <article className="panel platform-data-storage-card">
-              <div className="platform-data-panel-title"><Router size={16}/> Protected Agent queue files</div>
+              <div className="platform-data-panel-title"><Router size={16}/> {t("Protected Agent queue files")}</div>
               <strong>{report.storage.agentCount === 0 ? "No Agents" : report.storage.freshAgentCount === 0 ? "Unavailable" : formatGb(report.storage.localQueueDiskBytes)}</strong>
               <span>{formatCount(report.storage.freshAgentCount)} of {formatCount(report.storage.agentCount)} Agents have snapshots newer than {report.storage.snapshotFreshnessMinutes} minutes</span>
               <small>
@@ -202,7 +202,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                 </thead>
                 <tbody>
                   {report.shops.length === 0 ? (
-                    <tr><td colSpan={7} className="platform-data-empty">No shops are available for this report.</td></tr>
+                    <tr><td colSpan={7} className="platform-data-empty">{t("No shops are available for this report.")}</td></tr>
                   ) : report.shops.map(shop => (
                     <tr key={shop.tenantId}>
                       <td><strong>{shop.shopName}</strong><small>{shop.shopStatus}</small></td>
@@ -228,7 +228,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             </div>
             <div className="platform-data-channel-list">
               {report.channels.length === 0 ? (
-                <div className="platform-data-empty">No transfer events have been recorded yet.</div>
+                <div className="platform-data-empty">{t("No transfer events have been recorded yet.")}</div>
               ) : report.channels.map((channel, index) => (
                 <div className="platform-data-channel-row" key={`${channel.channel}-${channel.direction}-${channel.status}-${index}`}>
                   <div><strong>{channelLabel(channel.channel)}</strong><small>{channel.direction} · {channel.status}</small></div>
@@ -255,7 +255,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
           </section>
         </>
       ) : (
-        <div className="panel platform-data-empty-state">No report is available for this period. Refresh to retry.</div>
+        <div className="panel platform-data-empty-state">{t("No report is available for this period. Refresh to retry.")}</div>
       )}
     </section>
   );
