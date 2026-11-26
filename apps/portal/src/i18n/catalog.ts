@@ -243,7 +243,7 @@ export const UI_LOCALE_OPTIONS = [
   { id: "hinglish" as const, label: "Hinglish", nativeLabel: "Hinglish", lang: "hi-Latn" },
 ];
 
-export const DEFAULT_UI_LOCALE: UiLocale = "english";
+export const DEFAULT_UI_LOCALE: UiLocale = "hinglish";
 
 export function resolveUiLocale(value: unknown): UiLocale | null {
   const normalized = String(value ?? "").trim().toLowerCase();
