@@ -113,6 +113,7 @@ try {
   if ($LASTEXITCODE -ne 0) { throw "Microsoft Store installer signature verification failed." }
   
   
+  "signer_thumbprint=$thumbprint" >> $env:GITHUB_OUTPUT
   Write-Host "Verified the separate signed offline Microsoft Store installer, including its signed uninstaller. The website installer remains the intentionally unsigned direct-download build."
 }
 finally {
