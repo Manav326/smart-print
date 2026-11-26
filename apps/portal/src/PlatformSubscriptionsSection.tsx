@@ -179,12 +179,12 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     <section className="platform-plans platform-subscriptions">
       <div className="platform-plans-intro">
         <div>
-          <div className="platform-plan-kicker"><CreditCard size={14}/> SUBSCRIPTION OPERATIONS</div>
+          <div className="platform-plan-kicker"><CreditCard size={14}/> {t("SUBSCRIPTION OPERATIONS")}</div>
           <h2>{t("Shop subscriptions")}</h2>
-          <p>Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.</p>
+          <p>{t("Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.")}</p>
         </div>
         <div className="platform-plans-actions">
-          <button className="secondary-button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+          <button className="secondary-button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><RefreshCw size={14}/> {t("Refresh")}</button>
         </div>
       </div>
 
@@ -198,11 +198,11 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         </div>
         <div className="platform-tenant-filters">
           <label className="platform-search"><Search size={15}/><input value={search} onChange={event => { setSearch(event.target.value); setPageNumber(1); }} placeholder="Search shop name or tenant slug"/></label>
-          <span className="platform-status-filter"><ShieldCheck size={14}/> Platform-only controls</span>
+          <span className="platform-status-filter"><ShieldCheck size={14}/> {t("Platform-only controls")}</span>
         </div>
 
         {loading && !page ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading subscriptions…</div> : null}
-        {!loading && page && page.items.length === 0 ? <div className="platform-empty">No shops match this search.</div> : null}
+        {!loading && page && page.items.length === 0 ? <div className="platform-empty">{t("No shops match this search.")}</div> : null}
         {page && page.items.length > 0 && (
           <div className="platform-table-scroll">
             <table className="platform-tenant-table platform-subscription-table">
@@ -220,8 +220,8 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
                     <td><span className={`platform-subscription-state ${(tenant.subscription?.status ?? "unassigned").toLowerCase()}`}>{tenant.subscription?.status ?? "Unassigned"}</span></td>
                     <td><div className="platform-subs-copy"><strong>{date(tenant.subscription?.periodEndUtc)}</strong><small>{tenant.subscription ? `Started ${date(tenant.subscription.periodStartUtc)}` : "—"}</small></div></td>
                     <td><div className="platform-subscription-actions">
-                      <button className="secondary-button small" type="button" onClick={() => void toggleHistory(tenant)}><History size={13}/> History</button>
-                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>Grant plan access</button>
+                      <button className="secondary-button small" type="button" onClick={() => void toggleHistory(tenant)}><History size={13}/> {t("History")}</button>
+                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>{t("Grant plan access")}</button>
                     </div></td>
                   </tr>
                 ))}
@@ -240,9 +240,9 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
 
       {historyTenant && (
         <section className="panel platform-tenants-panel platform-subscription-history">
-          <div className="platform-tenants-heading"><div><h2>Assignment history</h2><p>Append-only platform audit events for {page?.items.find(item => item.id === historyTenant)?.businessName ?? "this shop"}.</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label="Close history"><X size={15}/></button></div>
+          <div className="platform-tenants-heading"><div><h2>{t("Assignment history")}</h2><p>{t("Append-only platform audit events for {shop}.").replace("{shop}", page?.items.find(item => item.id === historyTenant)?.businessName ?? t("this shop"))}</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label="Close history"><X size={15}/></button></div>
           {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading history…</div> :
-            history.length === 0 ? <div className="platform-empty">No platform assignment events have been recorded for this shop yet.</div> :
+            history.length === 0 ? <div className="platform-empty">{t("No platform assignment events have been recorded for this shop yet.")}</div> :
             <div className="platform-table-scroll"><table className="platform-tenant-table platform-history-table">
               <thead><tr><th>{t("EVENT")}</th><th>{t("PLAN")}</th><th>{t("STATUS")}</th><th>{t("PREVIOUS STATUS")}</th><th>{t("PERIOD")}</th><th>{t("REASON")}</th><th>{t("RECORDED")}</th></tr></thead>
               <tbody>{history.map(event => <tr key={event.id}>
@@ -263,7 +263,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         <div className="platform-assignment-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setAssignTenant(null); }}>
           <section className="panel platform-assignment-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-assignment-title">
             <div className="platform-assignment-heading">
-              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> SUBSCRIPTION ACCESS</div><h2 id="subscription-assignment-title">Grant plan access</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
+              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> {t("SUBSCRIPTION ACCESS")}</div><h2 id="subscription-assignment-title">{t("Grant plan access")}</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
               <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label="Close assignment"><X size={16}/></button>
             </div>
             <label className="platform-assignment-field">Published plan
@@ -290,7 +290,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
             </label>
             <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>{selectedAssignment?.requiresPayment ? "Access is granted as soon as you confirm the payment was received and enter its transaction reference. The amount and granting operator are retained in the audit history." : "Trial and explicitly free plans can be granted without payment. Every assignment is recorded in the audit history."}</span></div>
             <div className="platform-assignment-actions">
-              <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>Cancel</button>
+              <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>{t("Cancel")}</button>
               <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? "Granting…" : "Grant access"}</button>
             </div>
           </section>
