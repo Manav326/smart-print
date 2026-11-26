@@ -1091,7 +1091,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function confirmPrintedOutput(job: ShopPrintJob) {
     if (hasIncompleteSpoolerPageProgress(job.spoolerPagesPrinted,job.spoolerTotalPages)) {
-      setError(`Windows recorded ${job.spoolerPagesPrinted??0} of ${job.spoolerTotalPages} pages for ${job.jobNumber}. Finish and reconcile the remaining pages separately before marking this file complete.`);
+      setError(t("Windows recorded {printed} of {total} pages for {job}. Finish and reconcile the remaining pages separately before marking this file complete.").replace("{printed}", String(job.spoolerPagesPrinted??0)).replace("{total}", String(job.spoolerTotalPages)).replace("{job}", job.jobNumber));
       return;
     }
     const manualQueueReconciliation=canManuallyReconcileUncertainOutput(
@@ -5652,7 +5652,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     if(pending.length===0){setError(nativeAppMode ? "Files already uploaded. Choose more." : "All selected files are already uploaded. Choose another document or folder.");return;}
     const currentBatchBytes=results.reduce((sum,item)=>sum+item.document.sizeBytes,0);
     const uploadCapacityError=validateCustomerUploadBatchLimits(results.length,currentBatchBytes,pending.map(candidate=>candidate.size));
-    if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?"One selected file exceeds the 50 MB per-file upload limit.":uploadCapacityError.code==="FILE_COUNT"?"A print batch can contain up to 20 files.":"A print batch can contain up to 500 MB in total.");return;}
+    if(uploadCapacityError){setError(uploadCapacityError.code==="FILE_SIZE"?t("One selected file exceeds the 50 MB per-file upload limit."):uploadCapacityError.code==="FILE_COUNT"?t("A print batch can contain up to 20 files."):t("A print batch can contain up to 500 MB in total."));return;}
     setBusy(true);setError("");setNotices([]);setQuote(null);setQuotesByJobId({});setJobStatus(null);
     setUploadProgress({
       completed:0,
@@ -5937,7 +5937,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
-      if(failures.length) setError(`Could not quote: ${failures.join(", ")}. Retry the batch quote.`);
+      if(failures.length) setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
       else if(!Object.keys(nextQuotes).length) setError(t("No files are waiting for a quote."));
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:t("The shop could not calculate the batch quote."));
@@ -5977,7 +5977,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }));
       rememberBatchStatuses(Object.fromEntries(refreshedBatch.filter((entry):entry is NonNullable<typeof entry>=>entry!==null)));
       setQuote(uploaded?nextQuotes[uploaded.job.id]??null:null);
-      if(failures.length)setError(`Could not send: ${failures.join(", ")}. Refresh and retry.`);
+      if(failures.length)setError(t("Could not send: {files}. Refresh and retry.").replace("{files}", failures.join(", ")));
     } catch(exception) {
       setError(exception instanceof ApiError?exception.message:t("The batch could not be sent to the shop."));
     } finally {setBusy(false);}
