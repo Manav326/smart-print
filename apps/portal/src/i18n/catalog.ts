@@ -1219,6 +1219,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Secure customer printing": "सुरक्षित ग्राहक प्रिंटिंग",
     "Your order history is saved. You can start another print session when ready.": "आपके ऑर्डर का इतिहास सेव है। तैयार होने पर आप नया प्रिंट सेशन शुरू कर सकते हैं।",
     "Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.": "भुगतान बाकी है · ग्राहक से QR स्कैन करके सही राशि चुकाने को कहें। अपने UPI/बैंक ऐप में वास्तविक क्रेडिट जाँचें; यह QR भुगतान की पुष्टि नहीं करता।",
+    "This QR station is unavailable.": "यह QR स्टेशन उपलब्ध नहीं है।",
+    "Could not start a new print session.": "नया प्रिंट सेशन शुरू नहीं हो सका।",
 
   },
   hinglish: {
@@ -2017,6 +2019,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Give customers a clear entry point for this counter or printer.": "Is counter ya printer ke liye customers ko ek clear entry point dein.",
     "Private mode is locked for this batch": "Is batch ke liye Private mode locked hai",
     "Refund summary": "Refund summary",
+
 
   },
 };
