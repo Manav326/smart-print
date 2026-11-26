@@ -2531,7 +2531,7 @@ function PrintersPage({
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={isUnsupportedVirtual && !isAuthorisedVirtual ? t(isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready")}
+                      label={t(isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready")}
                       tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
@@ -2539,7 +2539,7 @@ function PrintersPage({
                   <p>{isUnsupportedVirtual
                     ? isAuthorisedVirtual
                       ? t("Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment.")
-                      : "This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected."
+                      : t("This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected.")
                     : printer.outputMode === "PDF_EXPORT"
                       ? t("Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used.")
                       : printer.connectionType === "IPP"
