@@ -691,7 +691,7 @@ export default function PhotoStudio({
     const sx=Math.max(0,Math.min(image.naturalWidth-1,Math.floor(crop.x+localX/size.widthMm*crop.width)));
     const sy=Math.max(0,Math.min(image.naturalHeight-1,Math.floor(crop.y+localY/size.heightMm*crop.height)));
     const sampler=document.createElement("canvas");sampler.width=1;sampler.height=1;
-    const ctx=sampler.getContext("2d",{willReadFrequently:true});if(!ctx){setError("The background colour could not be sampled.");return;}
+    const ctx=sampler.getContext("2d",{willReadFrequently:true});if(!ctx){setError(t("The background colour could not be sampled."));return;}
     ctx.filter=`brightness(${adjustments.brightness}%) contrast(${adjustments.contrast}%) saturate(${adjustments.saturation}%)`;
     ctx.drawImage(image,sx,sy,1,1,0,0,1,1);
     ctx.filter="none";
