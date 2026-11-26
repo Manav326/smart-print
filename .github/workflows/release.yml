@@ -200,13 +200,14 @@ jobs:
             "/DSmartPrintDesktopSourceDir=artifacts\store-desktop",
             "/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup",
             "/DSmartPrintPublisher=$env:SMARTPRINT_WINDOWS_PUBLISHER",
+            "/DSmartPrintSignToolName=SmartPrintSignTool",
             "scripts/build-windows-installer.iss"
           )
+          $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f "' + $pfxPath + '" /p "' + $env:WINDOWS_CODESIGN_PFX_PASSWORD + '" $f'
+          $isccArgs = @("--signtool=$signToolCommand") + $isccArgs
           & $iscc @isccArgs
-          if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation failed." }
+          if ($LASTEXITCODE -ne 0) { throw "Offline Microsoft Store installer compilation/signing failed." }
           $installer = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
-          & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /f $pfxPath /p $env:WINDOWS_CODESIGN_PFX_PASSWORD $installer
-          if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signing failed." }
           & $signtool verify /pa /all $installer
           if ($LASTEXITCODE -ne 0) { throw "Final Microsoft Store installer signature verification failed." }
           Remove-Item -LiteralPath $pfxPath -Force
