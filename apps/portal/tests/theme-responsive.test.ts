@@ -175,7 +175,7 @@ test("light and dark palettes cover authentication, customer QR and public landi
     "Photo Studio title and help control must remain aligned in a dedicated header row.");
   assert.match(photoStudio, /\.helpTooltipPanel\s*\{[^}]*display:grid[^}]*line-height:1\.65/s,
     "Photo Studio guidance must use readable line spacing in its contextual panel.");
-  assert.match(photoStudioComponent, /aria-label=\{"Help: "\+panelTitle\}/);
+  assert.match(photoStudioComponent, /aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
   assert.match(photoStudioComponent, /role="region" aria-label=\{panelTitle\+" guidance"\}/,
     "Photo Studio helper content must be available in the accessible contextual-help region.");
 });
