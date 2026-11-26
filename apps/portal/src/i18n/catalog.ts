@@ -1944,6 +1944,10 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Dismiss": "बंद करें",
     "Search shop name or tenant slug": "शॉप का नाम या टेनेंट स्लग खोजें",
     "INR": "INR",
+    "Grant plan access": "प्लान का एक्सेस दें",
+    "e.g. 149": "जैसे 149",
+    "e.g. 1499": "जैसे 1499",
+    "Close assignment": "असाइनमेंट बंद करें",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -3515,6 +3519,10 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Dismiss": "Dismiss",
     "Search shop name or tenant slug": "Shop ka naam ya tenant slug search karein",
     "INR": "INR",
+    "Grant plan access": "Plan ka access dein",
+    "e.g. 149": "jaise 149",
+    "e.g. 1499": "jaise 1499",
+    "Close assignment": "Assignment band karein",
   },
 };
 
