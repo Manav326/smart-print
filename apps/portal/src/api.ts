@@ -238,7 +238,10 @@ export interface PrinterDevice {
   isDefault: boolean;
   agentDeviceId?: string | null;
   lastSeenUtc?: string | null;
-  /** True only while the platform admin test policy temporarily treats a virtual queue as physical. */
+  /** True only while a current platform-admin grant authorises this exact virtual queue identity. */
+  virtualTestGrantActive?: boolean;
+  identityFingerprint?: string | null;
+  /** Legacy response field; no longer grants any permission. */
   isTestModeOverride?: boolean;
 }
 
@@ -3175,6 +3178,52 @@ export interface PlatformOperationalSettingsInput {
   allowPrivatePrintingVirtualOutput: boolean;
   treatWorkingVirtualQueuesAsPhysicalForTesting: boolean;
   reason: string;
+}
+
+export interface PlatformVirtualPrinterTestGrant {
+  id: string;
+  reason: string;
+  approvedByUserId: string;
+  createdUtc: string;
+  expiresUtc: string;
+  revokedByUserId: string | null;
+  revokedUtc: string | null;
+  revocationReason: string | null;
+  isActive: boolean;
+}
+export interface PlatformVirtualPrinterTestQueue {
+  tenantId: string;
+  shopName: string;
+  shopSlug: string;
+  id: string;
+  displayName: string;
+  model: string;
+  connectionType: string;
+  connectionAddress: string | null;
+  queueName: string | null;
+  agentDeviceId: string | null;
+  identityFingerprint: string | null;
+  status: string;
+  lastSeenUtc: string | null;
+  isActive: boolean;
+  grants: PlatformVirtualPrinterTestGrant[];
+}
+export function getPlatformVirtualPrinterTestQueues(token: string) {
+  return apiRequest<PlatformVirtualPrinterTestQueue[]>("/api/v1/platform/virtual-printer-test-grants", {}, token);
+}
+export function approvePlatformVirtualPrinterTestQueue(token: string, tenantId: string, printerDeviceId: string, reason: string, expiresUtc?: string) {
+  return apiRequest<{ id: string; tenantId: string; printerDeviceId: string; agentDeviceId: string; createdUtc: string; expiresUtc: string }>(
+    "/api/v1/platform/virtual-printer-test-grants",
+    { method: "POST", body: JSON.stringify({ tenantId, printerDeviceId, reason, expiresUtc }) },
+    token
+  );
+}
+export function revokePlatformVirtualPrinterTestGrant(token: string, grantId: string, reason: string) {
+  return apiRequest<{ id: string; revokedUtc: string; revokedByUserId: string; revocationReason: string }>(
+    "/api/v1/platform/virtual-printer-test-grants/" + grantId,
+    { method: "DELETE", body: JSON.stringify({ reason }) },
+    token
+  );
 }
 
 export interface PlatformOperationalSettingsAudit {
