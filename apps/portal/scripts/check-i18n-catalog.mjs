@@ -120,7 +120,7 @@ for (const locale of localeNames) {
 if (!source.includes("Object.entries(localeMetadata).map")) {
   throw new Error("Language selector options must be derived from the locale registry");
 }
-const defaults = [...metadata.matchAll(/^\\s*(\\w+): \\{[^\\n]*default: true/mg)].map(match => match[1]);
+const defaults = [...metadata.matchAll(/^\s*(\w+): \{[^\n]*default: true/mg)].map(match => match[1]);
 if (defaults.length !== 1 || defaults[0] !== "english") {
   throw new Error("English must remain the single first-use default locale");
 }
