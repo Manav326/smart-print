@@ -108,8 +108,12 @@ public static class VirtualPrinterTestGrantEndpoints
                 });
 
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var printer = await db.PrinterDevices.SingleOrDefaultAsync(item =>
-                item.Id == request.PrinterDeviceId && item.TenantId == request.TenantId, ct);
+            // Serialize approvals for this exact queue so two administrators
+            // cannot create overlapping active grants from concurrent requests.
+            var lockedPrinters = await db.PrinterDevices.FromSqlInterpolated(
+                $"SELECT * FROM \"PrinterDevices\" WHERE \"TenantId\" = {request.TenantId} AND \"Id\" = {request.PrinterDeviceId} FOR UPDATE")
+                .ToListAsync(ct);
+            var printer = lockedPrinters.SingleOrDefault();
             if (printer is null) return Results.NotFound();
             if (printer.OutputMode != PrinterTypePolicy.UnsupportedVirtual ||
                 printer.AgentDeviceId is not Guid agentId ||
