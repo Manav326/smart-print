@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useLocale, translateUiText } from "./i18n";
 import { formatIstDate } from "./date-time";
 import {
   CheckCircle2, CirclePlus, Cloud, FileText, Layers3, LoaderCircle,
@@ -480,6 +481,8 @@ function PlanVersionEditor({ form, onChange }: {
   form: PlanForm;
   onChange: <K extends keyof PlanForm>(key: K, value: PlanForm[K]) => void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const currencyLabel = form.currency.trim().toUpperCase() === "INR" ? "₹" : form.currency.toUpperCase();
   const priceStep = 10 ** -currencyMinorUnitDigits(form.currency);
   return (
