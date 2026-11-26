@@ -47,6 +47,10 @@ jobs:
             echo "::error::The checked-out commit does not match the requested release tag."
             exit 1
           fi
+          if [[ "$tag_commit" != "$GITHUB_SHA" ]]; then
+            echo "::error::The workflow event commit must exactly match the release tag. Push the tag to trigger this workflow, or dispatch manually only when the tag points to the current main commit."
+            exit 1
+          fi
           if ! git merge-base --is-ancestor "$tag_commit" origin/main; then
             echo "::error::Release tags must point to a commit reachable from main."
             exit 1
