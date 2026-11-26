@@ -2060,6 +2060,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Could not quote: {files}. Retry the batch quote.": "कोट नहीं बन सका: {files}। बैच का कोट फिर से निकालें।",
     "Could not send: {files}. Refresh and retry.": "भेजा नहीं जा सका: {files}। Refresh करके फिर कोशिश करें।",
     "Could not load measured document transfer data.": "मापे गए दस्तावेज़ ट्रांसफर डेटा लोड नहीं हो सका।",
+    "Something went wrong. Please try again.": "कुछ गड़बड़ हुई। कृपया फिर कोशिश करें।",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -3747,6 +3748,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Could not quote: {files}. Retry the batch quote.": "Quote nahi bana: {files}. Batch quote dobara try karein.",
     "Could not send: {files}. Refresh and retry.": "Send nahi ho saka: {files}. Refresh karke retry karein.",
     "Could not load measured document transfer data.": "Measured document transfer data load nahi ho saka.",
+    "Something went wrong. Please try again.": "Kuch gadbad hui. Please dobara try karein.",
   },
 };
 
