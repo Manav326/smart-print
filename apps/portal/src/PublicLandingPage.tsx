@@ -197,16 +197,16 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
         <div><a href="#how-it-works">{t("How it works")}</a><a href="#downloads">{t("Downloads")}</a><a href="/shop">{t("For print shops")}</a></div>
       <nav className="sp-public-footer-resources" aria-label={t("Print shop resources")}>
           <span>{t("PRINT SHOP RESOURCES")}</span>
-          <a href="/features/">All features</a>
-          <a href="/whatsapp-printing-alternative/">Chat-based print orders</a>
-          <a href="/document-privacy-private-printing/">Document privacy</a>
-          <a href="/photo-id-printing/">Photo and ID printing</a>
-          <a href="/print-shop-software/">Print shop software</a>
-          <a href="/qr-code-print-ordering/">QR code ordering</a>
-          <a href="/print-job-management/">Print job management</a>
-          <a href="/windows-print-agent/">Windows Print Agent</a>
-          <a href="/smartprint-faq/">SmartPrint FAQ</a>
-          <a href="/qr-printing-for-xerox-shops/">QR printing for Xerox shops</a>
+          <a href="/features/">{t("All features")}</a>
+          <a href="/whatsapp-printing-alternative/">{t("Chat-based print orders")}</a>
+          <a href="/document-privacy-private-printing/">{t("Document privacy")}</a>
+          <a href="/photo-id-printing/">{t("Photo and ID printing")}</a>
+          <a href="/print-shop-software/">{t("Print shop software")}</a>
+          <a href="/qr-code-print-ordering/">{t("QR code ordering")}</a>
+          <a href="/print-job-management/">{t("Print job management")}</a>
+          <a href="/windows-print-agent/">{t("Windows Print Agent")}</a>
+          <a href="/smartprint-faq/">{t("SmartPrint FAQ")}</a>
+          <a href="/qr-printing-for-xerox-shops/">{t("QR printing for Xerox shops")}</a>
         </nav>
       </footer>
     </div>
