@@ -11,7 +11,7 @@ This repository uses one versioned GitHub release to produce the website downloa
    - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate, WebView2 standalone URL and exact Partner Center publisher name are configured.
    - `SmartPrint-Android.apk`: website/direct-download Android package.
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
-   - `BUILD-INFO.txt`: exact source commit, release tag and workflow run provenance.
+   - `BUILD-INFO.txt`: exact source commit, release tag, workflow run provenance, and SHA-256/thumbprint identities for the Android upload key and Windows Store code-signing certificate when those packages are built.
    - `attestation.sigstore.json`: signed SLSA provenance bundle for the release binaries and build metadata.
    - `SHA256SUMS.txt`: checksums for every release binary and build metadata (the Sigstore bundle is independently signed).
 4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned binaries, build metadata and the checksum manifest are uploaded and verified there. The signed Sigstore bundle remains a GitHub release asset because its timestamped bytes can change on a retry.
