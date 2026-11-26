@@ -24,6 +24,7 @@ Allow a platform administrator to authorise a specific shop's discovered Windows
 - Platform administrators approve/revoke time-bounded grants for one tenant, printer and paired Agent. Reasons and actor/timestamps are retained.
 - Shop selection, QR-station assignment, job assignment, Agent claim, Private Printing relay and the final pre-spooler authorization all check the current grant and identity.
 - The Agent uses its existing `WindowsPrintExecutor.PrintAsync` path for both physical and authorised virtual queues. Only `PDF_EXPORT` uses the separate PDF-export path.
+- The isolated print child pauses after document preparation at the `StartDoc` boundary. It asks the parent Agent for a fresh server authorization and proceeds only after an explicit `ALLOW`; denial, timeout or transport failure sends `DENY` and does not call the Windows spooler.
 - Virtual test output is recorded as `TEST_VIRTUAL` / `TEST_OUTPUT_READY`, never as physical fulfilment. The ordinary physical-output confirmation endpoint rejects it.
 - Standard and Private Printing retain the existing verified spooler receipt, retry/idempotency and protected-source cleanup rules. PDF export remains separate.
 
@@ -33,7 +34,8 @@ Allow a platform administrator to authorise a specific shop's discovered Windows
 2. Three-shop isolation: A approved, B not approved, C approved then revoked.
 3. Grant expiry, explicit revocation, changed queue name, driver, port, and Agent pairing.
 4. Non-platform-admin approval attempts are forbidden.
-5. Production fail-closed checks at selection, assignment, claim, and immediately before spooler submission.
-6. Duplicate claims, retry, lost acknowledgement, and reconciliation remain idempotent.
+5. Production fail-closed checks at selection, assignment, claim, and the isolated child's pre-`StartDoc` authorization handshake.
+6. A revoked/expired grant or failed authorization response after document preparation produces no spooler job.
+7. Duplicate claims, retry, lost acknowledgement, and reconciliation remain idempotent.
 7. Private Printing cannot purge protected content before the existing required acknowledgement.
 8. Real Windows acceptance with the actual installed IPP virtual queue. CI/unit tests are not a substitute for this hardware/driver check.
