@@ -5177,14 +5177,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   },[localFallbackSuggested,localReady,localAgent?.endpoints.length,secureQueueFallbackEnabled,uploadModeManuallySelected,privatePrinting]);
 
+  const selectedBatchRequiresPrivatePrinting=privatePrinting||files.some(isSmartPrintIdDocument);
   const pendingPrivateRetryFiles=files.filter(candidate=>
     !uploadedFileFingerprints.includes(customerFileFingerprint(candidate))
   );
-  const hasPendingPrivateUploadIdentity=privatePrinting&&pendingPrivateRetryFiles.length>0&&
-    pendingPrivateRetryFiles.every(candidate=>
-      hasPendingLocalCustomerUploadAttempt(sessionToken,candidate,batchId||undefined)
-    );
-  const customerUploadUnavailable = privatePrinting
+  const hasPendingPrivateUploadIdentity=selectedBatchRequiresPrivatePrinting&&pendingPrivateRetryFiles.some(candidate=>
+    hasPendingLocalCustomerUploadAttempt(sessionToken,candidate,batchId||undefined)
+  );
+  const customerUploadUnavailable = selectedBatchRequiresPrivatePrinting
     ? !canOfferPrivatePrinting&&!hasPendingPrivateUploadIdentity
     : !secureQueueFallbackEnabled && !localAgent?.endpoints.length;
 
