@@ -222,18 +222,18 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
       </>}
       {singleFileReviewJob?.status==="AWAITING_PAYMENT"&&<button type="button" className={styles.actionButton} onClick={()=>actions.onReject(singleFileReviewJob)}><X size={14}/> {t("Reject file")}</button>}
       {journey.canVerifyPayment&&journey.payment&&<button type="button" className={styles.actionButton} onClick={()=>onVerifyPayment(journey.payment!)}><ShieldCheck size={14}/> {t("Verify payment")}</button>}
-      {journey.isClosed&&<span className={styles.closedHint}>All files have a recorded final decision.</span>}
+      {journey.isClosed&&<span className={styles.closedHint}>{t("All files have a recorded final decision.")}</span>}
     </div>
     <div className={styles.orderFileList}>
       <button type="button" className={styles.fileDetailsToggle} aria-expanded={filesExpanded} aria-controls={"order-files-"+journey.key} onClick={()=>setFilesExpanded(value=>!value)}>
-        <span><FileText size={13}/> File details &amp; actions</span>
+        <span><FileText size={13}/> {t("File details & actions")}</span>
         <span>{journey.jobs.length} {t(journey.jobs.length===1?"file":"files")} <ChevronDown size={14} className={filesExpanded?styles.chevronOpen:""}/></span>
       </button>
       {filesExpanded&&<div className={styles.orderFileDetails} id={"order-files-"+journey.key}>
         {journey.batchId&&unprintedResumeCandidates.length>0&&<section className={styles.resumePanel} aria-label={t("Resume files verified as unprinted")}>
           <div className={styles.resumePanelHeading}>
             <strong>{t(virtualTestResume?"Retry virtual tests with zero output":"Resume files with zero pages printed")}</strong>
-            <span>Only files with a fresh Windows queue-absence check, a known page total and a secured copy on the original computer appear here.</span>
+            <span>{t("Only files with a fresh Windows queue-absence check, a known page total and a secured copy on the original computer appear here.")}</span>
           </div>
           <div className={styles.resumeCandidateList}>
             {unprintedResumeCandidates.map(job=>{
@@ -248,15 +248,15 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
                     isChecked?[...current.filter(id=>id!==job.id),job.id]:current.filter(id=>id!==job.id)
                   );
                 }}/>
-                <span><strong>{fileLabel}</strong><small>0 of {job.spoolerTotalPages} pages recorded</small></span>
+                <span><strong>{fileLabel}</strong><small>{t("0 of {pages} pages recorded",{pages:job.spoolerTotalPages})}</small></span>
               </label>;
             })}
           </div>
           <p>{virtualTestResume
-            ?"Before continuing, verify that each exact job is absent from the original virtual Windows queue and that no test output artifact was created. Files with any recorded pages or unknown page counts cannot be retried."
-            :"Before continuing, check the original Windows queue and paper tray for each selected file. Files with any printed pages or unknown page counts cannot be retried here."}</p>
+            ?t("Before continuing, verify that each exact job is absent from the original virtual Windows queue and that no test output artifact was created. Files with any recorded pages or unknown page counts cannot be retried.")
+            :t("Before continuing, check the original Windows queue and paper tray for each selected file. Files with any printed pages or unknown page counts cannot be retried here.")}</p>
           <button type="button" className={styles.resumeButton} disabled={resumeBusy||effectiveSelectedResumeJobIds.length===0} onClick={()=>void resumeSelectedUnprintedFiles()}>
-            {resumeBusy?"Authorising selected files":virtualTestResume?`Retry ${effectiveSelectedResumeJobIds.length} virtual test(s)`:`Resume ${effectiveSelectedResumeJobIds.length} selected file(s)`}
+            {resumeBusy?t("Authorising selected files"):virtualTestResume?t("Retry {count} virtual test(s)",{count:effectiveSelectedResumeJobIds.length}):t("Resume {count} selected file(s)",{count:effectiveSelectedResumeJobIds.length})}
           </button>
         </section>}
         {journey.jobs.map((job,index)=><div className={styles.orderFileItem} key={job.id}>
@@ -294,7 +294,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
 
   return <div className={styles.journeyPage}>
     <header className={styles.pageHero}>
-      <div><div className={styles.eyebrow}><span className={styles.livePulse}/> LIVE ORDER CONTROL</div><p>{t("Workload, payments and print status at a glance.")}</p></div>
+      <div><div className={styles.eyebrow}><span className={styles.livePulse}/> {t("LIVE ORDER CONTROL")}</div><p>{t("Workload, payments and print status at a glance.")}</p></div>
       <div className={styles.heroActions}><span className={styles.liveLabel}><span/> {t("Live shop view")}</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?t("Refreshing"):t("Refresh")}</button></div>
     </header>
 
