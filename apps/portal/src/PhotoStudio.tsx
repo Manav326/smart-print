@@ -6,7 +6,7 @@ import {
 import styles from "./PhotoStudio.module.css";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { isDesktopApp, setDesktopContentProtection } from "./desktop-bridge";
-import { LanguageSwitcher, useLocale, translateUiText, formatUiCurrency } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUiText, formatUiCurrency, type MessageValues } from "./i18n";
 import { A4_HEIGHT_MM, A4_WIDTH_MM, A4_HEIGHT_PX, A4_WIDTH_PX, buildPhotoPdfBlob, getPhotoPaperPageGeometry, getPhotoSheetLayout, getPhotoSheetPhotoPositions, getPhotoCropFocusAfterDrag, hasSufficientPhotoResolution, type PhotoOutputLayout, type PhotoPaperFinish } from "./photo-studio-layout";
 
 export type PhotoStudioEditorSettings = {
@@ -294,7 +294,7 @@ export default function PhotoStudio({
   initialSettings?: Partial<PhotoStudioEditorSettings>;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
