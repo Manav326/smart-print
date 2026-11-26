@@ -2060,7 +2060,8 @@ public sealed class Worker(
         }
 
         var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
-        if (cloudState?.Status == "COMPLETED")
+        if (cloudState?.Status == "COMPLETED" ||
+            (cloudState?.Status == "TEST_OUTPUT_READY" && localQueueStore.Find(jobId)?.PrivatePrinting != true))
             await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
