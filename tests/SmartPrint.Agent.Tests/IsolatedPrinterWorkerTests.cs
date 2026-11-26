@@ -54,7 +54,7 @@ public sealed class IsolatedPrinterWorkerTests
             childProcessRunner: runner);
 
         var exception = await Assert.ThrowsAsync<PrintExecutionBlockedException>(
-            () => executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None));
+            () => executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None, _ => Task.FromResult(true)));
 
         Assert.Equal("PRINT_WORKER_CRASHED_BEFORE_SUBMISSION", exception.ReasonCode);
     }
@@ -63,13 +63,13 @@ public sealed class IsolatedPrinterWorkerTests
     public async Task PrintWorkerCrashAfterSubmissionIsUncertainAndNeverAutomaticallyRetried()
     {
         var runner = new FakeChildProcessRunner(
-            new AgentChildProcessResult(unchecked((int)0xC0000374u), "READY\nSUBMITTING\n", "native driver crash", false));
+            new AgentChildProcessResult(unchecked((int)0xC0000374u), "READY\nAUTHORIZE_SPOOLER_SUBMISSION\nSUBMITTING\n", "native driver crash", false));
         var executor = new IsolatedWindowsPrintExecutor(
             NullLogger<IsolatedWindowsPrintExecutor>.Instance,
             childProcessRunner: runner);
 
         var exception = await Assert.ThrowsAsync<PrintSubmissionUncertainException>(
-            () => executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None));
+            () => executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None, _ => Task.FromResult(true)));
 
         Assert.Equal("PRINT_WORKER_CRASHED_AFTER_SUBMISSION", exception.ReasonCode);
     }
@@ -81,7 +81,7 @@ public sealed class IsolatedPrinterWorkerTests
         var runner = new FakeChildProcessRunner(
             new AgentChildProcessResult(
                 0,
-                "READY\nSUBMITTING\nRESULT|" + System.Text.Json.JsonSerializer.Serialize(
+                "READY\nAUTHORIZE_SPOOLER_SUBMISSION\nSUBMITTING\nRESULT|" + System.Text.Json.JsonSerializer.Serialize(
                     receipt, new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web)),
                 string.Empty,
                 false));
@@ -89,7 +89,7 @@ public sealed class IsolatedPrinterWorkerTests
             NullLogger<IsolatedWindowsPrintExecutor>.Instance,
             childProcessRunner: runner);
 
-        var result = await executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None);
+        var result = await executor.PrintAsync(CreateEntry(), Guid.NewGuid(), CancellationToken.None, _ => Task.FromResult(true));
 
         Assert.Equal(receipt, result);
     }
@@ -111,15 +111,29 @@ public sealed class IsolatedPrinterWorkerTests
         public int CallCount { get; private set; }
         public AgentChildProcessResult NextResult { get; set; } = initial;
 
-        public Task<AgentChildProcessResult> ExecuteAsync(
+        public async Task<AgentChildProcessResult> ExecuteAsync(
             string command,
             string standardInput,
             TimeSpan timeout,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
         {
             cancellationToken.ThrowIfCancellationRequested();
             CallCount++;
-            return Task.FromResult(NextResult);
+            if (beforeSpoolerSubmission is not null &&
+                NextResult.StandardOutput.Contains("AUTHORIZE_SPOOLER_SUBMISSION", StringComparison.Ordinal))
+            {
+                var allowed = await beforeSpoolerSubmission(cancellationToken);
+                if (!allowed)
+                {
+                    return new AgentChildProcessResult(
+                        10,
+                        "READY\nAUTHORIZE_SPOOLER_SUBMISSION\nBLOCKED|{\\"code\\":\\"SPOOLER_SUBMISSION_NOT_AUTHORISED\\",\\"message\\":\\"Denied by parent Agent.\\"}",
+                        string.Empty,
+                        false);
+                }
+            }
+            return NextResult;
         }
     }
 }
