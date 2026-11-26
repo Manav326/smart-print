@@ -60,7 +60,7 @@ import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
-import { useLocale, translateUi } from "./i18n";
+import { useLocale, translateUi, translateUiText } from "./i18n";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "station" | null;
@@ -170,7 +170,7 @@ function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: s
     <main className="auth-screen">
       <header className="auth-topbar">
         <BrandLockup className="auth-brand" />
-        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">Back to website</a></div>
+        <div className="auth-top-actions"><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/><a className="auth-home-link" href="/">{t("Back to website")}</a></div>
       </header>
       <section className="auth-card" style={{ maxWidth: 520, margin: "12vh auto" }}>
         <div className="auth-card-heading"><div className="auth-card-icon"><ShieldCheck size={20}/></div><div><span>APPLICATION SCOPE MISMATCH</span><h2>Access not available</h2><p>This signed-in account is not authorized for {scope}.</p></div></div>
@@ -1604,24 +1604,25 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setError("");
   };
 
-  const activePageTitle = active === "Settings" ? "Shop profile" : active;
+  const t = (value: string) => translateUiText(locale, value);
+  const activePageTitle = t(active === "Settings" ? "Shop profile" : active);
 
   if (loading && !profile) {
-    return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><BrandLockup className="boot-brand-lockup" /><div className="boot-title">Preparing your workspace</div><div className="boot-subtitle">Connecting securely to your shop…</div><div className="button-spinner boot-spinner"/></div></div>;
+    return <div className={dark ? "app-shell dark boot-screen" : "app-shell light boot-screen"}><div className="boot-card"><BrandLockup className="boot-brand-lockup" /><div className="boot-title">{t("Preparing your workspace")}</div><div className="boot-subtitle">{t("Connecting securely to your shop…")}</div><div className="button-spinner boot-spinner"/></div></div>;
   }
 
   return (
     <div className={`${dark ? "app-shell dark" : "app-shell light"}${sidebarCollapsed ? " sidebar-collapsed" : ""}`}>
       <aside className={sidebarOpen ? "sidebar sidebar-open" : "sidebar"}>
         <BrandLockup>
-          <button className="icon-button sidebar-close" aria-label="Close navigation" onClick={() => setSidebarOpen(false)}><X size={18}/></button>
+          <button className="icon-button sidebar-close" aria-label={t("Close navigation")} title={t("Close navigation")} onClick={() => setSidebarOpen(false)}><X size={18}/></button>
         </BrandLockup>
         <div className="workspace-switcher">
           <div className="shop-avatar">{(profile?.displayName || "S").slice(0,1).toUpperCase()}</div>
           <div className="workspace-copy"><strong>{profile?.displayName || "Your shop"}</strong><span>{profile?.businessName || "Shop workspace"}</span></div>
-          <span className="tenant-status-dot" title="Tenant workspace active"/>
+          <span className="tenant-status-dot" title={t("Tenant workspace active")}/>
         </div>
-        <nav className="primary-nav" aria-label="Shop navigation">
+        <nav className="primary-nav" aria-label={t("Shop navigation")}>
           {sectionGroups.map(({ label: groupLabel, items }) => (
             <div className="nav-group" key={groupLabel}>
               <div className="nav-label">{translateUi(locale, groupLabel === "DAILY WORK" ? "nav.dailyWork" : groupLabel === "DEVICES & CONNECTIVITY" ? "nav.devices" : groupLabel === "BUSINESS" ? "nav.business" : "nav.insights")}</div>
@@ -1649,14 +1650,14 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           ))}
         </nav>
       </aside>
-      {sidebarOpen && <button className="mobile-scrim" aria-label="Close navigation overlay" onClick={() => setSidebarOpen(false)}/>}
+      {sidebarOpen && <button className="mobile-scrim" aria-label={t("Close navigation overlay")} onClick={() => setSidebarOpen(false)}/>}
 
       <main className="main-panel">
         <header className="topbar">
           <div className="topbar-left">
             <button className="icon-button sidebar-toggle" aria-label={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} title={sidebarCollapsed ? "Expand navigation" : "Collapse navigation"} onClick={toggleSidebarCollapsed}>{sidebarCollapsed ? <PanelLeftOpen size={18}/> : <PanelLeftClose size={18}/>}</button>
-            <button className="icon-button mobile-menu" aria-label="Open navigation" onClick={() => setSidebarOpen(true)}><Menu size={20}/></button>
-            <div className="breadcrumb"><span>Shop workspace</span><span className="crumb-slash">/</span><strong>{activePageTitle}</strong></div>
+            <button className="icon-button mobile-menu" aria-label={t("Open navigation")} onClick={() => setSidebarOpen(true)}><Menu size={20}/></button>
+            <div className="breadcrumb"><span>{t("Shop workspace")}</span><span className="crumb-slash">/</span><strong>{activePageTitle}</strong></div>
           </div>
           <div className="topbar-actions">
             <div className="connection-pill" role="status" aria-live="polite" title={cloudStatus === "connected" ? "The latest shop data refresh succeeded." : cloudStatus === "checking" ? "Checking your shop connection." : "The latest shop data refresh could not reach the cloud service."}>
@@ -1664,7 +1665,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
               <span>{cloudStatus === "connected" ? "Cloud connected" : cloudStatus === "checking" ? "Checking cloud" : "Cloud unavailable"}</span>
             </div>
             <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="theme-toggle-compact"/>
-            <div className="service-status-row" aria-label="Live shop system status">
+            <div className="service-status-row" aria-label={t("Live shop system status")}>
               <span className={"service-status "+apiConnectionState} title="API connection"><i/>API {apiConnectionState === "connected" ? "Connected" : apiConnectionState === "degraded" ? "Degraded" : apiConnectionState === "offline" ? "Offline" : "Checking"}</span>
               <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : activeAgentCount > 0 ? "offline" : "checking")} title="Windows Agent heartbeat"><i/>Agent {onlineAgentCount > 0 ? onlineAgentCount+" online" : activeAgentCount > 0 ? "Offline" : "Not paired"}</span>
               <span className={"service-status "+(usablePrinterCount > 0 ? "connected" : offlinePrinterCount > 0 ? "offline" : "checking")} title="Active printer availability"><i/>Printers {usablePrinterCount > 0 ? usablePrinterCount+" available" : offlinePrinterCount > 0 ? offlinePrinterCount+" unavailable" : "Unavailable"}</span>
@@ -1675,17 +1676,17 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
               <button type="button" className="account-menu-trigger"
                 aria-label={`Account options for ${profile?.ownerName || "shop owner"}`}
                 aria-expanded={accountMenuOpen} aria-controls="shop-account-menu"
-                title="Account and shop settings"
+                title={t("Account and shop settings")}
                 onClick={() => setAccountMenuOpen(value => !value)}>
                 <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
                 <span className="account-menu-trigger-copy">
                   <strong>{profile?.ownerName || "Shop owner"}</strong>
-                  <small>Account</small>
+                  <small>{t("Account")}</small>
                 </span>
                 <ChevronDown size={14} aria-hidden="true"/>
               </button>
               {accountMenuOpen && (
-                <div className="account-menu-popover" id="shop-account-menu" aria-label="Account options">
+                <div className="account-menu-popover" id="shop-account-menu" aria-label={t("Account options")}>
                   <div className="account-menu-heading">
                     <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
                     <div>
@@ -1718,12 +1719,12 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
         <div className="content-wrap">
           <div className="page-heading">
-            <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : pageDescription(active)}</p></div>
+            <div><div className="eyebrow"><span className="eyebrow-line"/>SHOP WORKSPACE</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : t(pageDescription(active))}</p></div>
             <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
           </div>
 
-          {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label="Dismiss error"><X size={15}/></button></div>}
-          {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label="Dismiss message"><X size={15}/></button></div>}
+          {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label={t("Dismiss error")}><X size={15}/></button></div>}
+          {toast && <div className="inline-success" role="status"><Check size={15}/><span>{toast}</span><button onClick={() => setToast("")} aria-label={t("Dismiss message")}><X size={15}/></button></div>}
           {subscription && <SubscriptionExpiryReminder summary={subscription} onNavigate={() => navAction("Subscription")}/>}
 
           {active === "Overview" && <ShopAdPlacement placement="SHOP_OVERVIEW"/>}
@@ -1761,7 +1762,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
           {active === "Customers" && <CustomersPage token={tokens.accessToken}/>}
           {active === "Reports" && <ReportsPage token={tokens.accessToken}/>} 
 
-          <footer className="app-footer"><span>© 2026 SmartPrint by QuantaEdge</span><span><span className="footer-status"/> API session authenticated</span><span>Made for print shops, with care.</span></footer>
+          <footer className="app-footer"><span>© 2026 SmartPrint by QuantaEdge</span><span><span className="footer-status"/> {t("API session authenticated")}</span><span>{t("Made for print shops, with care.")}</span></footer>
         </div>
       </main>
 
@@ -1776,7 +1777,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {shopPhotoOrderDraft&&<PhotoStudio source={shopPhotoOrderDraft.source} mode="shop-create" dark={dark} photoPrices={{"35x45":pricing?.photo35x45Minor??0,"25x35":pricing?.photo25x35Minor??0,"2x2":pricing?.photo2x2Minor??0,"4x6":pricing?.photo4x6Minor??0}} onCancel={()=>setShopPhotoOrderDraft(null)} onApply={applyShopCreatedPhotoStudio}/>} 
       {eventHistory && <JobHistoryModal job={eventHistory.job} events={eventHistory.events} onClose={() => setEventHistory(null)}/>}
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
-      {actionDialog && <Modal title={actionDialog.title} subtitle="This action will be recorded against your shop account." onClose={closeActionDialog}>
+      {actionDialog && <Modal title={actionDialog.title} subtitle={t("This action will be recorded against your shop account.")} onClose={closeActionDialog}>
         <div className="in-app-dialog-body"><p>{actionDialog.message}</p>{actionDialog.inputLabel&&<label className="dialog-input-label">{actionDialog.inputLabel}<textarea autoFocus rows={3} maxLength={300} value={actionDialogValue} onChange={event=>setActionDialogValue(event.target.value)} placeholder="Enter at least 3 characters"/></label>}</div>
         <div className="modal-actions"><button className="secondary-button" onClick={closeActionDialog}>Cancel</button><button className="primary-button" disabled={!!actionDialog.inputLabel&&actionDialogValue.trim().length<3} onClick={submitActionDialog}>{actionDialog.confirmLabel}</button></div>
       </Modal>}
