@@ -29,7 +29,7 @@ function readInitialLocale(): UiLocale {
     // Continue to the cookie fallback when browser storage is unavailable.
   }
   try {
-    const cookie = document.cookie.split("; ").find(item => item.startsWith(STORAGE_KEY + "="));
+    const cookie = document.cookie.split(";").map(item => item.trim()).find(item => item.startsWith(STORAGE_KEY + "="));
     const saved = cookie ? resolveUiLocale(decodeURIComponent(cookie.slice(STORAGE_KEY.length + 1))) : null;
     if (saved) return saved;
   } catch {
