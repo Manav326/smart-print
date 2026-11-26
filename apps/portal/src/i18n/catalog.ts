@@ -1807,6 +1807,16 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Ready": "तैयार",
     "Busy": "व्यस्त",
     "Upload progress for {name}": "अपलोड प्रोग्रेस · {name}",
+    "Save photo-paper prints": "फोटो पेपर प्रिंट सेव करें",
+    "Save photo-paper prints to this job": "इस जॉब में फोटो पेपर प्रिंट सेव करें",
+    "Prepare photo-paper prints": "फोटो पेपर प्रिंट तैयार करें",
+    "Replace the unpaid job photo PDF; approval and dispatch still apply.": "बिना भुगतान वाली जॉब की फोटो PDF बदलें; मंज़ूरी और डिस्पैच की प्रक्रिया लागू रहेगी।",
+    "Prepared photo output replaces this upload; original stays untouched.": "तैयार फोटो आउटपुट इस अपलोड की जगह लेगा; ओरिजिनल में बदलाव नहीं होगा।",
+    "{count} saved": "{count} सेव",
+    "{count} photos · {perPage} per A4 sheet": "{count} फोटो · हर A4 शीट पर {perPage}",
+    "photos": "फोटो",
+    "per A4 sheet": "हर A4 शीट पर",
+    "saved": "सेव",
 
   },
   hinglish: {
@@ -3242,6 +3252,16 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Ready": "Ready",
     "Busy": "Busy",
     "Upload progress for {name}": "Upload progress · {name}",
+    "Save photo-paper prints": "Photo-paper prints save karein",
+    "Save photo-paper prints to this job": "Is job mein photo-paper prints save karein",
+    "Prepare photo-paper prints": "Photo-paper prints taiyaar karein",
+    "Replace the unpaid job photo PDF; approval and dispatch still apply.": "Unpaid job ki photo PDF replace karein; approval aur dispatch ke rules lagu rahenge.",
+    "Prepared photo output replaces this upload; original stays untouched.": "Prepared photo output is upload ko replace karega; original untouched rahegi.",
+    "{count} saved": "{count} saved",
+    "{count} photos · {perPage} per A4 sheet": "{count} photos · har A4 sheet par {perPage}",
+    "photos": "photos",
+    "per A4 sheet": "per A4 sheet",
+    "saved": "saved",
 
   },
 };
