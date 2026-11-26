@@ -1294,6 +1294,13 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Transfer sent": "ट्रांसफर भेज दिया गया",
     "Preparing": "तैयार हो रहा है",
     "Progress shows file transfer, not printing. A file is complete only after SmartPrint confirms it. Successful files stay saved if another file fails.": "प्रोग्रेस फ़ाइल ट्रांसफर दिखाती है, प्रिंटिंग नहीं। SmartPrint की पुष्टि के बाद ही फ़ाइल पूरी मानी जाती है। दूसरी फ़ाइल फेल होने पर भी सफल फ़ाइलें सेव रहती हैं।",
+    "This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.": "यह अनुरोध आपके मौजूदा सेशन से अलग है। इसकी स्थिति केवल संदर्भ के लिए दिखाई जाती है; यहाँ प्रिंटिंग, भुगतान या फ़ाइल में बदलाव उपलब्ध नहीं हैं।",
+    "Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.": "आपका पिछला ऑर्डर अपने मूल शॉप सेशन से जुड़ा रहता है। दस्तावेज़ की सामग्री निजी रहती है; यह पैनल केवल स्थिति की जानकारी दिखाता है।",
+    "This photo has already been submitted to the shop.": "यह फोटो पहले ही शॉप को भेजी जा चुकी है।",
+    "Open Photo Studio": "Photo Studio खोलें",
+    "Already sent to shop": "शॉप को पहले ही भेजा गया",
+    "Prepared PDF": "तैयार PDF",
+    "Upload status": "अपलोड की स्थिति",
 
   },
   hinglish: {
@@ -2214,7 +2221,14 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Progress shows file transfer, not printing. A file is complete only after SmartPrint confirms it. Successful files stay saved if another file fails.": "Progress file transfer dikhata hai, printing nahi. SmartPrint confirm kare tabhi file complete hai. Doosri file fail ho toh bhi successful files saved rahengi.",
 
     "Photo Studio": "Photo Studio",
-    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",
+    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",    "This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.": "Yeh request aapke current session se alag hai. Iska status sirf reference ke liye dikhaya gaya hai; yahan printing, payment ya file changes available nahi hain.",
+    "Your earlier order remains attached to its original shop session. Document contents stay private; this panel restores status metadata only.": "Aapka pehla order apne original shop session se juda rehta hai. Document content private rehta hai; yeh panel sirf status details dikhata hai.",
+    "This photo has already been submitted to the shop.": "Yeh photo pehle hi shop ko bheji ja chuki hai.",
+    "Open Photo Studio": "Photo Studio kholein",
+    "Already sent to shop": "Shop ko pehle hi bhej diya gaya",
+    "Prepared PDF": "Prepared PDF",
+    "Upload status": "Upload status",
+
   },
 };
 
