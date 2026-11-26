@@ -1143,6 +1143,13 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "PDF footer selected by the shop.": "शॉप ने PDF फ़ुटर चुना है।",
     "Reformatted or multi-copy exports may be flattened.": "रीफ़ॉर्मैट या कई कॉपी वाले एक्सपोर्ट फ़्लैट हो सकते हैं।",
     "Ask for an unbranded single-copy export when PDF structure matters.": "जब PDF की संरचना महत्वपूर्ण हो, तो बिना ब्रांडिंग वाला एक-कॉपी एक्सपोर्ट माँगें।",
+    "Private Printing is not ready at this shop yet. No new document has been uploaded. Ask the shop operator to reconnect the paired computer.": "इस शॉप पर Private Printing अभी तैयार नहीं है। कोई नया दस्तावेज़ अपलोड नहीं हुआ है। शॉप ऑपरेटर से पेयर किया गया कंप्यूटर फिर कनेक्ट करने को कहें।",
+    "Encrypted file received; waiting for shop confirmation": "एन्क्रिप्टेड फ़ाइल मिल गई; शॉप की पुष्टि का इंतज़ार है",
+    "Resume secure upload": "सुरक्षित अपलोड फिर शुरू करें",
+    "Retry pending secure uploads": "बाकी सुरक्षित अपलोड फिर से करें",
+    "Upload {count} file(s) securely": "{count} फ़ाइल सुरक्षित रूप से अपलोड करें",
+    "Upload {count} file(s) to shop": "{count} फ़ाइल शॉप पर अपलोड करें",
+    "Upload {count} file(s)": "{count} फ़ाइल अपलोड करें",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1909,6 +1916,13 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "PDF footer selected by the shop.": "Shop ne PDF footer select kiya hai.",
     "Reformatted or multi-copy exports may be flattened.": "Reformatted ya multiple-copy exports flatten ho sakte hain.",
     "Ask for an unbranded single-copy export when PDF structure matters.": "Jab PDF structure important ho, unbranded single-copy export maangein.",
+    "Private Printing is not ready at this shop yet. No new document has been uploaded. Ask the shop operator to reconnect the paired computer.": "Is shop par Private Printing abhi ready nahi hai. Koi naya document upload nahi hua. Shop operator se paired computer dobara connect karne ko kahein.",
+    "Encrypted file received; waiting for shop confirmation": "Encrypted file receive ho gayi; shop confirmation ka wait hai",
+    "Resume secure upload": "Secure upload resume karein",
+    "Retry pending secure uploads": "Pending secure uploads retry karein",
+    "Upload {count} file(s) securely": "{count} file(s) securely upload karein",
+    "Upload {count} file(s) to shop": "{count} file(s) shop par upload karein",
+    "Upload {count} file(s)": "{count} file(s) upload karein",
   },
 };
 
