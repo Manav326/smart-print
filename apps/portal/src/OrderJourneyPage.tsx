@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useLocale, translateUiText, formatUiCurrency } from "./i18n";
+import { useLocale, translateUiText, formatUiCurrency, type MessageValues } from "./i18n";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
@@ -29,7 +29,7 @@ const flowSteps: Array<{id:OrderJourneyStage;title:string;detail:string;icon:typ
   {id:"printing",title:"Printing",detail:"Shop computer prints",icon:Printer},
   {id:"ready",title:"Ready",detail:"Output checked and complete",icon:PackageCheck}
 ];
-function tx(locale: string, value: string, values: Record<string,string|number> = {}){return translateUiText(locale,value,values);}
+function tx(locale: string, value: string, values: MessageValues = {}){return translateUiText(locale,value,values);}
 function money(value:number,currency:string,locale:string){return formatUiCurrency(Math.max(0,value)/100,locale,currency||"INR");}
 function paymentLabel(payment:ShopPayment|null,stage:OrderJourneyStage,locale:string){
   if(!payment)return tx(locale,stage==="payment"?"Checkout not started":"Not due yet");
@@ -65,7 +65,7 @@ function FileActions({job,printers,agents,locale,onPreview,onApprove,onReject,on
   onDispatch:(job:ShopPrintJob)=>void;onConfirmOutput:(job:ShopPrintJob)=>void;
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
 }){
-  const t=(value:string,values:Record<string,string|number> = {})=>tx(locale,value,values);
+  const t=(value:string,values:MessageValues = {})=>tx(locale,value,values);
   const canEditPhoto=job.photoSourceAvailable===true&&!job.privatePrinting&&job.status==="AWAITING_SHOP_APPROVAL";
   const canRefund=(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&["VERIFIED","PARTIALLY_REFUNDED"].includes(job.payment?.status??"")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId;
   const expiredAgentLease = job.status==="LOCAL_QUEUE_CLAIMED" &&
@@ -155,7 +155,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
   onRetryPdfExport:(job:ShopPrintJob)=>void;onHistory:(job:ShopPrintJob)=>void;onOpenPhotoStudio:(job:ShopPrintJob)=>void;
   onResumeUnprintedBatch:(batchId:string,jobIds:string[])=>Promise<boolean>;
 }){
-  const t=(value:string, values: Record<string,string|number> = {})=>tx(locale,value,values);
+  const t=(value:string, values: MessageValues = {})=>tx(locale,value,values);
   const printer=printerSummary(journey.jobs,printers,agents,locale);
   const canReview=journey.canReview&&!!journey.batchId;
   const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
