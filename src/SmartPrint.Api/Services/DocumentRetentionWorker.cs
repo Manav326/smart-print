@@ -130,8 +130,8 @@ public sealed class DocumentRetentionWorker(
             if (hadStorageFailure) break;
         }
 
-        // Local Agent files are deleted by the Agent's own seven-day queue
-        // retention. Clear the server-side photo source hashes and editor JSON on
+        // Local Agent files are deleted by the Agent using the configured
+        // 72-hour completed-document retention policy. Clear the server-side photo source hashes and editor JSON on
         // the same schedule so DOB/name overlays are not retained in job metadata.
         var expiredLocalPhotoMetadata = await (
             from document in db.PrintDocuments
