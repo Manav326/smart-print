@@ -162,6 +162,5 @@ public sealed record PlatformOperationalSettingsResponse(
     int AgentRetentionSweepHours,
     bool AllowPaidJobClaimsWhenSuspended,
     bool AllowPrivatePrintingVirtualOutput,
-    bool TreatWorkingVirtualQueuesAsPhysicalForTesting,
     Guid? UpdatedByUserId,
     DateTimeOffset UpdatedUtc);
