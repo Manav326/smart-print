@@ -843,13 +843,13 @@ export default function PhotoStudio({
               <button
                 type="button"
                 className={styles.helpTooltipTrigger}
-                aria-label={"Help: "+panelTitle}
+                aria-label={t("Help: {panel}",{panel:panelTitle})}
                 aria-controls="photo-studio-help-panel"
                 aria-expanded={openHelpTool===activeTool}
                 onClick={()=>setOpenHelpTool(current=>current===activeTool?null:activeTool)}
               ><Info size={15}/></button>
             </div>
-            {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={panelTitle+" guidance"}>
+            {openHelpTool===activeTool&&<div id="photo-studio-help-panel" className={styles.helpTooltipPanel} role="region" aria-label={t("{panel} guidance",{panel:panelTitle})}>
               {cropPanel&&<>
                 <p>{t("Drag a photo to reframe it. Use the sliders for precise positioning.")}</p>
                 <p>{t("Crop zoom changes the print. Preview zoom changes only the editor view.")}</p>
@@ -1025,9 +1025,9 @@ export default function PhotoStudio({
           <div className={styles.contextToolbar}>
             <span>{t("PRINT SHEET PREVIEW")}</span>
             {outputPageCount>1&&<div className={styles.pageNavigator}>
-              <button type="button" id="photo-studio-previous-page" aria-label={isPhotoPaperLayout ? "Previous photo-paper page" : "Previous A4 page"} onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
+              <button type="button" id="photo-studio-previous-page" aria-label={t(isPhotoPaperLayout ? "Previous photo-paper page" : "Previous A4 page")} onClick={()=>setPreviewPage(current=>Math.max(0,current-1))} disabled={previewPageIndex===0}><ChevronLeft size={14}/></button>
               <span>Page {previewPageIndex+1} of {outputPageCount}</span>
-              <button type="button" id="photo-studio-next-page" aria-label={isPhotoPaperLayout ? "Next photo-paper page" : "Next A4 page"} onClick={()=>setPreviewPage(current=>Math.min(outputPageCount-1,current+1))} disabled={previewPageIndex>=outputPageCount-1}><ChevronRight size={14}/></button>
+              <button type="button" id="photo-studio-next-page" aria-label={t(isPhotoPaperLayout ? "Next photo-paper page" : "Next A4 page")} onClick={()=>setPreviewPage(current=>Math.min(outputPageCount-1,current+1))} disabled={previewPageIndex>=outputPageCount-1}><ChevronRight size={14}/></button>
             </div>}
             <span className={styles.toolbarDivider}/>
             <button type="button" onClick={() => setPreviewScale(value => Math.max(0.8, Number((value - 0.1).toFixed(2))))} disabled={previewScale <= 0.8} aria-label={t("Preview zoom out")}><ZoomOut size={15}/></button>
@@ -1061,7 +1061,7 @@ export default function PhotoStudio({
                   draggable={false}
                   role="img"
                   aria-describedby={openHelpTool==="crop"?"photo-studio-help-panel":undefined}
-                  aria-label={isPhotoPaperLayout ? `Photo-paper print ${previewPageIndex+1} of ${outputPageCount}` : "A4 page "+(previewPageIndex+1)+" of "+sheetCount+" with "+previewPhotoCount+" photos"}
+                  aria-label={isPhotoPaperLayout ? t("Photo-paper print {page} of {pages}",{page:previewPageIndex+1,pages:outputPageCount}) : t("A4 page {page} of {pages} with {photos} photos",{page:previewPageIndex+1,pages:sheetCount,photos:previewPhotoCount})}
                 />
                 <div className={styles.previewProtection} aria-hidden="true"/>
                 {textLayers.map(layer=><button
@@ -1075,7 +1075,7 @@ export default function PhotoStudio({
                     fontWeight:layer.bold?700:500,
                     fontSize:`${(layer.fontSizePt*25.4/72/A4_WIDTH_MM*100).toFixed(4)}cqw`
                   }}
-                  aria-label={"Select text: "+(layer.text||"Empty text")}
+                  aria-label={t("Select text: {text}",{text:layer.text||t("Empty text")})}
                   aria-pressed={selectedTextLayerId===layer.id}
                   data-testid="photo-studio-text-layer"
                   disabled={!textPanel}
