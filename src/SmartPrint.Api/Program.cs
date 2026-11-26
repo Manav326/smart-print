@@ -2258,7 +2258,15 @@ shop.MapPost("/qr-stations", async (
                 ["printerDeviceId"] = ["Select an active printer that belongs to this shop."]
             });
         }
-        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT"))
+        var selectedVirtualGrantActive = !environment.IsProduction() &&
+            await db.PrinterDevices.AnyAsync(printer =>
+                printer.Id == printerId && printer.TenantId == tenantId &&
+                printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId && grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId && grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > DateTimeOffset.UtcNow), ct);
+        if (selectedPrinterOutputMode is not ("PHYSICAL" or "PDF_EXPORT") && !selectedVirtualGrantActive)
         {
             return Results.ValidationProblem(new Dictionary<string, string[]>
             {
