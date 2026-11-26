@@ -30,6 +30,7 @@ public static class VirtualPrinterTestGrantPolicy
     public static bool IsGrantActive(
         Guid tenantId,
         Guid printerTenantId,
+        Guid grantTenantId,
         Guid? printerAgentDeviceId,
         Guid grantAgentDeviceId,
         string? printerIdentityFingerprint,
@@ -39,6 +40,7 @@ public static class VirtualPrinterTestGrantPolicy
         DateTimeOffset? revokedUtc,
         DateTimeOffset now) =>
         tenantId == printerTenantId &&
+        tenantId == grantTenantId &&
         printerAgentDeviceId == grantAgentDeviceId &&
         !string.IsNullOrWhiteSpace(printerIdentityFingerprint) &&
         string.Equals(printerIdentityFingerprint, grantIdentityFingerprint, StringComparison.Ordinal) &&
