@@ -1497,7 +1497,12 @@ shop.MapGet("/subscription", async (
 
     var printerCount = await db.PrinterDevices.AsNoTracking()
         .LongCountAsync(item => item.TenantId == tenantId && item.IsActive &&
-            (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT"), ct);
+            (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && item.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == item.TenantId &&
+                    grant.PrinterDeviceId == item.Id &&
+                    grant.AgentDeviceId == item.AgentDeviceId &&
+                    grant.IdentityFingerprint == item.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now))), ct);
     var agentDeviceCount = await db.AgentDevices.AsNoTracking()
         .LongCountAsync(item => item.TenantId == tenantId &&
                                 item.RevokedUtc == null && item.Status != "Revoked", ct);
@@ -3577,8 +3582,7 @@ shop.MapPatch("/print-jobs/{jobId:guid}/printer", async (
                        item.TenantId == tenantId &&
                        item.IsActive &&
                        item.AgentDeviceId != null &&
-                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
-                       (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
+                                              (item.OutputMode == "PHYSICAL" || item.OutputMode == "PDF_EXPORT") &&
                        ((item.OutputMode == "PDF_EXPORT" && !selectedJob.PrivatePrinting) ||
                         (item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                          (item.Status == "Ready" || item.Status == "Busy"))) &&
@@ -3979,9 +3983,13 @@ shop.MapPost("/print-jobs/{jobId:guid}/dispatch", async (Guid jobId, ClaimsPrinc
             equals new { agent.TenantId, AgentId = agent.Id }
         where printer.Id == job.PrinterDeviceId && printer.TenantId == tenantId &&
               printer.AgentDeviceId == job.ClaimedByAgentDeviceId && printer.IsActive &&
-              (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-              printer.QueueName != null && printer.QueueName != "" &&
-              (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+                            printer.QueueName != null && printer.QueueName != "" &&
+              (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now))) &&
               ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
                (printer.LastSeenUtc != null && printer.LastSeenUtc >= onlineAfter &&
                 (printer.Status == "Ready" || printer.Status == "Busy"))) &&
@@ -4401,8 +4409,7 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
     var printer = await db.PrinterDevices.AsNoTracking()
         .Where(item => item.Id == printerId && item.TenantId == tenantId &&
                        item.AgentDeviceId == agentId && item.IsActive &&
-                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
-                       item.OutputMode == "PHYSICAL" &&
+                                              item.OutputMode == "PHYSICAL" &&
                        item.QueueName != null && item.QueueName != "" &&
                        item.LastSeenUtc != null && item.LastSeenUtc >= onlineAfter &&
                        (item.Status == "Ready" || item.Status == "Busy"))
@@ -6181,8 +6188,7 @@ agentApi.MapGet("/private-relays/pending", async (
                   ticket.ExpiresUtc > now &&
                   printer.AgentDeviceId == device.Id &&
                   printer.IsActive &&
-                  (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-                  (printer.OutputMode == "PHYSICAL" ||
+                                    (printer.OutputMode == "PHYSICAL" ||
                    (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                   printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
                   (printer.Status == "Ready" || printer.Status == "Busy") &&
@@ -8048,9 +8054,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                       other.Status != "REFUNDED" &&
                       other.PrinterDeviceId != job.PrinterDeviceId)) &&
                   printer.AgentDeviceId == device.Id && printer.IsActive &&
-                  (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-                  printer.QueueName != null && printer.QueueName != "" &&
-                  (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+                                    printer.QueueName != null && printer.QueueName != "" &&
+                  (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now))) &&
                   (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                    (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                   ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
@@ -8082,9 +8092,13 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                 other.PrinterDeviceId != job.PrinterDeviceId)) &&
             db.PrinterDevices.Any(printer => printer.Id == job.PrinterDeviceId && printer.TenantId == device.TenantId &&
                 printer.AgentDeviceId == device.Id && printer.IsActive &&
-                (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-                printer.QueueName != null && printer.QueueName != "" &&
-                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT") &&
+                                printer.QueueName != null && printer.QueueName != "" &&
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now))) &&
                 (!job.PrivatePrinting || printer.OutputMode == "PHYSICAL" ||
                  (allowPrivateVirtualOutput && printer.OutputMode == "PDF_EXPORT")) &&
                 ((printer.OutputMode == "PDF_EXPORT" && !job.PrivatePrinting) ||
@@ -9117,7 +9131,12 @@ agentApi.MapPost("/printers/sync", async (
         .Select(printer => new { printer.QueueName, printer.IsActive, printer.OutputMode })
         .ToListAsync(ct);
     var selectedPrinterCount = tenantPrinters.LongCount(printer =>
-        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT"));
+        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now))));
 
     var existing = await db.PrinterDevices
         .Where(printer => printer.TenantId == device.TenantId &&
@@ -9189,7 +9208,12 @@ agentApi.MapPost("/printers/sync", async (
         {
             // Rescans never override the owner's active/inactive selection.
             var wasQuotaSelected = printer.IsActive &&
-                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT");
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId &&
+                    grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId &&
+                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now)));
             var driverChanged = !string.Equals(
                 printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
@@ -10958,8 +10982,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
               station.IsEnabled &&
               station.PrinterDeviceId != null &&
               printer.IsActive &&
-              (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-              printer.AgentDeviceId != null &&
+                            printer.AgentDeviceId != null &&
               !string.IsNullOrWhiteSpace(printer.QueueName) &&
               agent.RevokedUtc == null &&
               agent.LastSeenUtc != null &&
@@ -11184,8 +11207,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                         printer.TenantId == session.TenantId &&
                         printer.AgentDeviceId == expectedAgentId &&
                         printer.IsActive &&
-                        (!environment.IsProduction() || !printer.IsTestModeOverride) &&
-                        printer.QueueName != null && printer.QueueName != "")
+                                                printer.QueueName != null && printer.QueueName != "")
                     .Select(printer => new
                     {
                         printer.Id,
@@ -13767,8 +13789,7 @@ static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
                        item.TenantId == tenantId &&
                        item.AgentDeviceId == agentDeviceId &&
                        item.IsActive &&
-                       (!environment.IsProduction() || !item.IsTestModeOverride) &&
-                       item.QueueName != null && item.QueueName != "")
+                                              item.QueueName != null && item.QueueName != "")
         .Select(item => new { item.OutputMode, item.Status, item.LastSeenUtc })
         .SingleOrDefaultAsync(ct);
     var now = DateTimeOffset.UtcNow;
