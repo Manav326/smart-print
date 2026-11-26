@@ -263,6 +263,8 @@ function DownloadAction({
   releaseState: "loading" | "ready" | "error";
   onRefresh: () => Promise<void>;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const fileName = platform === "windows" ? "SmartPrint-Windows-Setup.exe" : "SmartPrint-Android.apk";
   const { download, start, cancel } = useFileDownload(fileName);
   const resolvedDownloadUrl = downloadUrl;
@@ -275,30 +277,30 @@ function DownloadAction({
 
   if (!available || !resolvedDownloadUrl) {
     if (releaseState === "error") {
-      return <button className="sp-download-unavailable sp-download-button" type="button" onClick={() => void onRefresh()}>Retry download availability</button>;
+      return <button className="sp-download-unavailable sp-download-button" type="button" onClick={() => void onRefresh()}>{t("Retry download availability")}</button>;
     }
-    return <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? "Checking download availability…" : platform === "windows" ? "Windows installer not published" : "Signed APK not published"}</span>;
+    return <span className="sp-download-unavailable sp-download-button" aria-disabled="true">{releaseState === "loading" ? t("Checking download availability…") : platform === "windows" ? t("Windows installer not published") : t("Signed APK not published")}</span>;
   }
 
   if (download.status === "downloading") {
     return (
       <div className="sp-download-progress" role="group" aria-label={`${label} progress`}>
         <div className="sp-download-progress-heading">
-          <span><span className="sp-download-live-dot"/> Downloading</span>
-          <strong>{percent === null ? "In progress" : `${percent}%`}</strong>
+          <span><span className="sp-download-live-dot"/> {t("Downloading")}</span>
+          <strong>{percent === null ? t("In progress") : `${percent}%`}</strong>
         </div>
         <div className="sp-download-progress-track" role="progressbar" aria-label={`${fileName} download progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
           <span className={percent === null ? "sp-download-progress-fill sp-download-progress-indeterminate" : "sp-download-progress-fill"} style={percent === null ? undefined : { width: `${percent}%` }}/>
         </div>
         <div className="sp-download-progress-details">
-          <span>{formatDownloadBytes(download.bytesReceived)} downloaded</span>
-          <span>{download.totalBytes ? `of ${formatDownloadBytes(download.totalBytes)}` : "Total size unavailable"}</span>
+          <span>{formatDownloadBytes(download.bytesReceived)} {t("downloaded")}</span>
+          <span>{download.totalBytes ? `of ${formatDownloadBytes(download.totalBytes)}` : t("Total size unavailable")}</span>
         </div>
         <div className="sp-download-speed-details">
           <span>{formatDownloadSpeed(download.bytesPerSecond)}</span>
           <span>{formatDownloadRemaining(remainingSeconds)}</span>
         </div>
-        <button className="sp-download-cancel" type="button" onClick={cancel}><X size={14}/> Cancel download</button>
+        <button className="sp-download-cancel" type="button" onClick={cancel}><X size={14}/> {t("Cancel download")}</button>
       </div>
     );
   }
@@ -306,8 +308,8 @@ function DownloadAction({
   if (download.status === "complete") {
     return (
       <div className="sp-download-result sp-download-result-success" role="status">
-        <div><Check size={15}/><span>Download complete</span><strong>{formatDownloadBytes(download.bytesReceived)}</strong></div>
-        <button type="button" onClick={() => void start(resolvedDownloadUrl, fallbackDownloadUrl)}><Download size={14}/> Download again</button>
+        <div><Check size={15}/><span>{t("Download complete")}</span><strong>{formatDownloadBytes(download.bytesReceived)}</strong></div>
+        <button type="button" onClick={() => void start(resolvedDownloadUrl, fallbackDownloadUrl)}><Download size={14}/> {t("Download again")}</button>
       </div>
     );
   }
