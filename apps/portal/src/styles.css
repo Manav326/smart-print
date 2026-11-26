@@ -70,7 +70,7 @@
 .auth-top-actions{display:flex;align-items:center;gap:22px}
 .auth-home-link{display:inline-flex;align-items:center;gap:6px;color:#aeb8ca;font-size:10px;font-weight:600;text-decoration:none;transition:color .18s}
 .auth-home-link:hover{color:#fff}
-@media(max-width:600px){.auth-top-actions{gap:10px}.auth-home-link{font-size:0}.auth-home-link svg{width:17px;height:17px}.auth-top-note{font-size:0}.auth-top-note svg{width:17px;height:17px}}
+@media(max-width:600px){.auth-topbar{height:auto;min-height:64px;flex-wrap:wrap;gap:8px}.auth-top-actions{gap:10px;flex-wrap:wrap}.auth-home-link{font-size:0}.auth-home-link svg{width:17px;height:17px}.auth-top-note{font-size:0}.auth-top-note svg{width:17px;height:17px}}
 
 .auth-layout{width:min(1110px,calc(100% - 48px));margin:auto;display:grid;grid-template-columns:1fr minmax(370px,440px);gap:clamp(45px,8vw,115px);align-items:center;padding:55px 0 62px;position:relative;z-index:1}
 .auth-story{max-width:510px}.auth-kicker{display:inline-flex;align-items:center;gap:8px;color:#b8aaff;font-size:9px;letter-spacing:1.8px;font-weight:700;margin-bottom:19px}.auth-story h1{font:800 clamp(38px,5vw,58px)/1.1 Manrope,sans-serif;letter-spacing:-2.4px;margin:0 0 18px}.auth-story h1 span{background:linear-gradient(90deg,#b6a9ff,#7fcef0);background-clip:text;-webkit-background-clip:text;color:transparent}
