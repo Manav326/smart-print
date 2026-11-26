@@ -52,7 +52,7 @@ Add this GitHub repository Actions variable using the exact publisher name shown
 |---|---|
 | `SMARTPRINT_WINDOWS_PUBLISHER` | Exact Partner Center publisher display name to embed in Windows installer metadata |
 
-Because the selected Microsoft developer account is Individual, confirm the exact public publisher identity shown in Partner Center before setting this value. The release build also requires the code-signing certificate's simple publisher name (certificate CN) to match this value; a mismatch fails closed. The Store installer build is withheld until this value is supplied.
+Because the selected Microsoft developer account is Individual, confirm the exact public publisher identity shown in Partner Center before setting this value. Use a code-signing certificate issued to the same publisher identity where possible, and verify its subject and chain with the certificate provider before configuring CI. The workflow independently checks certificate validity, the Code Signing EKU, and Authenticode trust; it does not assume the Partner Center display name is byte-for-byte identical to the certificate CN. The Store installer build is withheld until this value is supplied.
 
 ### C. WebView2 offline prerequisite
 
