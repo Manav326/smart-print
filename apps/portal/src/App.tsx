@@ -5604,6 +5604,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       });
     };
     const reportTransferProgress=(index:number,progress:{bytesSent:number;totalBytes:number;stage:string})=>{
+      if(progress.stage==="WAITING_FOR_SHOP") {
+        updateFileProgress(index,{
+          bytesSent:progress.bytesSent,
+          totalBytes:progress.totalBytes,
+          status:"WAITING_FOR_SHOP",
+          message:"Encrypted file received; waiting for shop confirmation"
+        });
+        return;
+      }
       updateFileProgress(index,{
         bytesSent:progress.bytesSent,
         totalBytes:progress.totalBytes,
