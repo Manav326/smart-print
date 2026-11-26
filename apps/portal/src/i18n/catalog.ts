@@ -2229,6 +2229,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Prepared PDF": "Prepared PDF",
     "Upload status": "Upload status",
 
+    "This request is separate from your current session. Its status is restored for reference only; printing, payment and file changes are not available here.": "Yeh request aapke current session se alag hai. Iska status sirf reference ke liye restore kiya gaya hai; yahan printing, payment aur file changes available nahi hain.",
   },
 };
 
