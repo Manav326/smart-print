@@ -11030,6 +11030,11 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
             printer.LastSeenUtc,
             printer.OutputMode,
             printer.CapabilitiesJson,
+            VirtualTestGrantActive = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == printer.TenantId && grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == printer.AgentDeviceId && grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now),
             agent.LocalEndpointsJson,
             agent.DocumentEncryptionPublicKey
         }
@@ -11061,7 +11066,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
         var printerIsLive = stationPrinter.LastSeenUtc is DateTimeOffset printerSeen &&
             printerSeen >= now.AddMinutes(-2) &&
             stationPrinter.Status is "Ready" or "Busy";
-        if (!PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), stationPrinter.OutputMode) ||
+        if (!PrivatePrintingOutputPolicy.IsEligible(allowPrivateVirtualOutput, environment.IsProduction(), stationPrinter.OutputMode, stationPrinter.VirtualTestGrantActive) ||
             !printerIsLive)
         {
             return Results.Conflict(new
@@ -11247,13 +11252,18 @@ publicApi.MapPost("/sessions/current/local-upload-tickets", async (
                         printer.Id,
                         printer.OutputMode,
                         printer.Status,
-                        printer.LastSeenUtc
+                        printer.LastSeenUtc,
+                        VirtualTestGrantActive = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                            !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                                grant.TenantId == printer.TenantId && grant.PrinterDeviceId == printer.Id &&
+                                grant.AgentDeviceId == printer.AgentDeviceId && grant.IdentityFingerprint == printer.IdentityFingerprint &&
+                                grant.RevokedUtc == null && grant.ExpiresUtc > queueCheckNow)
                     })
                     .ToListAsync(ct);
                 foreach (var printer in pendingPrinters)
                 {
                     if (PrivatePrintingOutputPolicy.IsEligible(
-                            allowVirtualOutput, environment.IsProduction(), printer.OutputMode) &&
+                            allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive) &&
                         printer.LastSeenUtc is not null &&
                         printer.LastSeenUtc >= queueCheckNow.AddMinutes(-2) &&
                         printer.Status is "Ready" or "Busy")
@@ -13824,11 +13834,19 @@ static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
                        item.AgentDeviceId == agentDeviceId &&
                        item.IsActive &&
                                               item.QueueName != null && item.QueueName != "")
-        .Select(item => new { item.OutputMode, item.Status, item.LastSeenUtc })
+        .Select(item => new
+        {
+            item.OutputMode, item.Status, item.LastSeenUtc,
+            VirtualTestGrantActive = item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == item.TenantId && grant.PrinterDeviceId == item.Id &&
+                    grant.AgentDeviceId == item.AgentDeviceId && grant.IdentityFingerprint == item.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > DateTimeOffset.UtcNow)
+        })
         .SingleOrDefaultAsync(ct);
     var now = DateTimeOffset.UtcNow;
     if (printer is null ||
-        !PrivatePrintingOutputPolicy.IsEligible(allowVirtualOutput, environment.IsProduction(), printer.OutputMode) ||
+        !PrivatePrintingOutputPolicy.IsEligible(allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive) ||
         printer.LastSeenUtc is null || printer.LastSeenUtc < now.AddMinutes(-2) ||
         printer.Status is not ("Ready" or "Busy"))
         return false;
