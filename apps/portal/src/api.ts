@@ -2392,6 +2392,7 @@ export interface CustomerJobStatus {
   privatePrinting?: boolean;
   privateDocumentPurgedUtc?: string | null;
   outputType?: "PHYSICAL" | "PDF_EXPORT" | "TEST_VIRTUAL" | string;
+  outputMode?: "PHYSICAL" | "PDF_EXPORT" | "UNSUPPORTED_VIRTUAL" | string | null;
   outputCompletedUtc?: string | null;
   updatedUtc: string;
   timeline?: Array<{ previousStatus?: string | null; newStatus: string; actorType: string; createdUtc: string }>;
