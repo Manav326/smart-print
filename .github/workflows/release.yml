@@ -270,7 +270,9 @@ jobs:
             "/DSmartPrintSignToolName=SmartPrintSignTool",
             "scripts/build-windows-installer.iss"
           )
-          $signToolCommand = 'SmartPrintSignTool="' + $signtool + '" sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
+          # Inno Setup requires $q placeholders for quotes embedded in a
+          # command-line SignTool definition; raw quotes are parsed as grouping.
+          $signToolCommand = 'SmartPrintSignTool=$q' + $signtool + '$q sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
           $signToolArg = "--signtool=$signToolCommand"
 
           $storeArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup")
