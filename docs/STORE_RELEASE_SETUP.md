@@ -13,7 +13,7 @@ This repository uses one versioned GitHub release to produce the website downloa
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
    - `BUILD-INFO.txt`: exact source commit, release tag and workflow run provenance.
    - `attestation.sigstore.json`: signed SLSA provenance bundle for the release binaries and build metadata.
-   - `SHA256SUMS.txt`: checksums for every release binary, build metadata and attestation bundle.
+   - `SHA256SUMS.txt`: checksums for every release binary and build metadata (the Sigstore bundle is independently signed).
 4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
 5. Review the published GitHub release assets and test the exact binaries.
 6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
@@ -23,7 +23,7 @@ A PR merge never submits an app to either public Store. A stable release build a
 
 ## Release provenance verification
 
-Each release includes a signed SLSA provenance attestation created by GitHub Actions. The release workflow attests the Windows and Android binaries plus `BUILD-INFO.txt`; the attestation bundle is included as `attestation.sigstore.json` and covered by the checksum manifest. The Store publishing workflow verifies the relevant artifact attestation before it calls either Store API. The publishing runners require GitHub CLI 2.102.0 or newer for secure attestation verification.
+Each release includes a signed SLSA provenance attestation created by GitHub Actions. The release workflow attests the Windows and Android binaries plus `BUILD-INFO.txt`; the attestation bundle is included as `attestation.sigstore.json` in the GitHub release. The checksum manifest covers the stable binaries and build metadata, while the Sigstore bundle is independently signed. The bundle is not copied to immutable R2 storage because its timestamped signature can differ when a release workflow is retried. The Store publishing workflow verifies the relevant artifact attestation before it calls either Store API. The publishing runners require GitHub CLI 2.102.0 or newer for secure attestation verification.
 
 You can independently verify a release artifact from a machine with GitHub CLI 2.102.0 or newer:
 
