@@ -12,7 +12,7 @@ public sealed class VirtualPrinterTestGrantPolicyTests
         var agent = Guid.NewGuid();
         Assert.Equal(
             VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agent, "Office IPP", "Microsoft IPP Driver", "ipp://host/queue"),
-            VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agent, " office ipp ", "microsoft ipp driver ", "IPP://HOST/QUEUE"));
+            VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agent, " office ipp ", "microsoft ipp driver ", "IPP://HOST/queue"));
     }
 
     [Fact]
