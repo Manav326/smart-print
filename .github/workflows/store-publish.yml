@@ -1,6 +1,12 @@
 name: Publish SmartPrint to Microsoft Store and Google Play
 
 on:
+  push:
+    paths:
+      - ".github/workflows/store-publish.yml"
+  pull_request:
+    paths:
+      - ".github/workflows/store-publish.yml"
   workflow_dispatch:
     inputs:
       release_tag:
@@ -40,7 +46,32 @@ permissions:
   contents: read
 
 jobs:
+  workflow-validation:
+    if: ${{ github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Parse Store publishing workflow YAML
+        shell: bash
+        run: |
+          python -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
+          python - <<'PY'
+          import pathlib
+          import yaml
+
+          path = pathlib.Path(".github/workflows/store-publish.yml")
+          data = yaml.safe_load(path.read_text(encoding="utf-8"))
+          if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
+              raise SystemExit("Store publishing workflow must contain a jobs mapping.")
+          expected = {"validate", "microsoft-store", "google-play", "workflow-validation"}
+          missing = expected.difference(data["jobs"])
+          if missing:
+              raise SystemExit(f"Missing Store publishing jobs: {sorted(missing)}")
+          print("Store publishing workflow YAML parsed and required jobs are present.")
+          PY
+
   validate:
+    if: ${{ github.event_name == 'workflow_dispatch' }}
     runs-on: ubuntu-latest
     outputs:
       source_sha: ${{ steps.verify-release-tag.outputs.source_sha }}
@@ -89,7 +120,7 @@ jobs:
 
   microsoft-store:
     needs: validate
-    if: ${{ inputs.publish_windows }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_windows }}
     runs-on: windows-latest
     environment: microsoft-store-production
     permissions:
@@ -217,7 +248,7 @@ jobs:
 
   google-play:
     needs: validate
-    if: ${{ inputs.publish_android }}
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_android }}
     runs-on: ubuntu-latest
     environment: ${{ inputs.android_track == 'production' && 'google-play-production' || 'google-play-testing' }}
     permissions:
