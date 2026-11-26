@@ -95,6 +95,10 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
       setError("Enter a revocation reason of at least five characters.");
       return;
     }
+    const confirmed = window.confirm(
+      `Revoke virtual test access for ${queue.displayName} at ${queue.shopName}? New dispatch authorisations will be denied immediately. A job already authorised at the Windows spooler boundary may still be in progress and must be reconciled; revocation does not erase output already produced.`
+    );
+    if (!confirmed) return;
     setBusyId(queue.id);
     setError("");
     setSuccess("");
@@ -129,13 +133,13 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
               return (
                 <article className="platform-ops-history-item" key={queue.tenantId + ":" + queue.id}>
                   <div className="platform-ops-heading">
-                    <div><strong>{queue.shopName} · {queue.displayName}</strong><small>{queue.shopSlug} · {queue.model} · {queue.connectionType} · {queue.status}</small><small>{queue.queueName || queue.connectionAddress || "Port not reported"} · Agent {queue.agentDeviceId || "not paired"}</small></div>
+                    <div><strong>{queue.shopName} · {queue.displayName}</strong><small>{queue.shopSlug} · {queue.model} · {queue.connectionType} · Queue state: {queue.status} · {queue.isActive ? "Enabled" : "Disabled"}</small><small>Windows queue: {queue.queueName || "Not reported"} · IPP endpoint / port: {queue.connectionAddress || "Not reported"}</small><small>Paired Agent: {queue.agentDeviceId || "Not paired"} · Identity: <code title={queue.identityFingerprint || "Identity unavailable"}>{queue.identityFingerprint ? queue.identityFingerprint.slice(0, 16) + "…" : "Unavailable"}</code></small></div>
                     <span className="neutral-chip">{activeGrant ? "Approved" : "Not approved"}</span>
                   </div>
                   {activeGrant
-                    ? <div><small>Approved {formatIstDateTime(activeGrant.createdUtc)} · expires {formatIstDateTime(activeGrant.expiresUtc)} · {activeGrant.reason}</small><div className="platform-ops-save-row"><button className="subtle-button" disabled={!!busyId} onClick={() => void revoke(queue, activeGrant.id)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : "Revoke approval"}</button></div></div>
+                    ? <div><small>Active grant · approved {formatIstDateTime(activeGrant.createdUtc)} by {activeGrant.approvedByName} · expires {formatIstDateTime(activeGrant.expiresUtc)}</small><small>Approval reason: {activeGrant.reason}</small><div className="platform-ops-save-row"><button className="subtle-button" disabled={!!busyId} onClick={() => void revoke(queue, activeGrant.id)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : "Revoke approval"}</button></div></div>
                     : <div><small>{latestGrant?.revokedUtc ? "Last grant revoked: " + (latestGrant.revocationReason || latestGrant.reason) : "No active approval. Queue must be paired and Ready/Busy before approval."}</small><div className="platform-ops-save-row"><button className="primary-button" disabled={!!busyId || !ready || !queue.agentDeviceId || !queue.identityFingerprint} onClick={() => void approve(queue)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>} Approve for 7 days</button></div></div>}
-                  {queue.grants.length > 0 && <details><summary>Approval history · {queue.grants.length} record(s)</summary><ul>{queue.grants.map(grant => <li key={grant.id}><strong>{grant.isActive ? "Active" : grant.revokedUtc ? "Revoked" : "Inactive · expired or identity changed"}</strong> · {formatIstDateTime(grant.createdUtc)} · expires {formatIstDateTime(grant.expiresUtc)} · approved by {grant.approvedByUserId} · {grant.reason}{grant.revokedUtc ? ` · revoked ${formatIstDateTime(grant.revokedUtc)} by ${grant.revokedByUserId || "system"}: ${grant.revocationReason || "No reason recorded"}` : ""}</li>)}</ul></details>}
+                  {queue.grants.length > 0 && <details><summary>Approval history · {queue.grants.length} record(s)</summary><ul>{queue.grants.map(grant => <li key={grant.id}><strong>{grant.isActive ? "Active" : grant.revokedUtc ? "Revoked" : "Inactive · expired or identity changed"}</strong> · {formatIstDateTime(grant.createdUtc)} · expires {formatIstDateTime(grant.expiresUtc)} · approved by {grant.approvedByName} · {grant.reason}{grant.revokedUtc ? ` · revoked ${formatIstDateTime(grant.revokedUtc)} by ${grant.revokedByName || "system"}: ${grant.revocationReason || "No reason recorded"}` : ""}</li>)}</ul></details>}
                 </article>
               );
             })}
