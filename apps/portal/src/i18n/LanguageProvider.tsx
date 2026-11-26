@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { DEFAULT_UI_LOCALE, getUiLocaleLanguage, resolveUiLocale, type UiLocale } from "./catalog";
+import { DEFAULT_UI_LOCALE, getUiLocaleDirection, getUiLocaleLanguage, resolveUiLocale, type UiLocale } from "./catalog";
 
 const STORAGE_KEY = "smartprint-ui-locale";
 const LEGACY_STORAGE_KEYS = [
@@ -62,7 +62,7 @@ export function LanguageProvider({ children }: { children: ReactNode }) {
     setLocaleState(next);
     if (typeof document !== "undefined") {
       document.documentElement.lang = getUiLocaleLanguage(next);
-      document.documentElement.dir = "ltr";
+      document.documentElement.dir = getUiLocaleDirection(next);
     }
     if (persist) persistLocale(next);
   }, []);
