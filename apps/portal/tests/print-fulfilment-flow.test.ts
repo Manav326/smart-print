@@ -93,7 +93,7 @@ test("saved Photo Studio sheets join the chooser selection and wait for the fina
   assert.doesNotMatch(picker, /uploadCustomerDocument|dispatchShopPrintJob/);
   assert.match(main, /Add selected files \(\$\{chooserSelection\.size\}\)/);
   assert.match(main, /setChooserFileSelected\(file, !selected\)/);
-  assert.match(app, /privatePrinting&&uploadWaitingCount>0\?"Check secure upload status":privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
+  assert.match(app, /privatePrinting&&uploadWaitingCount>0&&uploadFailedCount===0\?"Check secure upload status":privatePrinting&&uploadFailedCount>0\?"Retry pending secure uploads":privatePrinting\?"Upload "\+pendingFilesCount\+" file\(s\) securely"/);
 });
 
 test("successful upload releases decrypted ID and Photo Studio staging but preserves both encrypted libraries", () => {
