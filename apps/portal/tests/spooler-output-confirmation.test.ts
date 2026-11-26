@@ -192,3 +192,12 @@ test("the API gates completion and private-source purge on fresh output proof or
   assert.match(route, /manualQueueReconciliationConfirmed/);
   assert.match(route, /SHOP_OPERATOR_CONFIRMED_PHYSICAL_OUTPUT_AFTER_QUEUE_RECONCILIATION/);
 });
+
+
+test("virtual test output is never presented as ready for customer collection", () => {
+  const orderJourney = read("../src/OrderJourneyPage.tsx");
+  assert.match(orderJourney, /const readyStatuses = new Set\(\["COMPLETED","PDF_EXPORTED"\]\)/);
+  assert.match(orderJourney, /job\.status==="TEST_OUTPUT_READY"&&job\.outputType==="TEST_VIRTUAL"&&job\.outputMode==="UNSUPPORTED_VIRTUAL"/);
+  assert.match(orderJourney, /Virtual test completed · not for collection/);
+  assert.match(orderJourney, /job\.outputType!=="TEST_VIRTUAL"/);
+});
