@@ -1722,7 +1722,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
         <div className="content-wrap">
           <div className="page-heading">
             <div><div className="eyebrow"><span className="eyebrow-line"/>{t("SHOP WORKSPACE")}</div><h1>{active === "Overview" ? `Welcome, ${(profile?.ownerName || "there").split(" ")[0]}` : activePageTitle}</h1><p>{active === "Overview" ? "Your shop setup and operations, all in one place." : t(pageDescription(active))}</p></div>
-            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> Create QR station</button>}</div>
+            <div className="heading-actions"><span className="date-chip"><Clock3 size={15}/>{today}</span>{active === "QR Stations" && <button className="primary-button" onClick={() => setModal("station")}><Plus size={16}/> {t("Create QR station")}</button>}</div>
           </div>
 
           {error && <div className="inline-error" role="alert"><span>{error}</span><button onClick={() => setError("")} aria-label={t("Dismiss error")}><X size={15}/></button></div>}
@@ -1781,7 +1781,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       {refundJob && <RefundModal job={refundJob} token={tokens.accessToken} busy={busyJobId===refundJob.id} onClose={()=>setRefundJob(null)} onSubmit={values=>void recordFileRefund(refundJob,values)}/>} 
       {actionDialog && <Modal title={actionDialog.title} subtitle={t("This action will be recorded against your shop account.")} onClose={closeActionDialog}>
         <div className="in-app-dialog-body"><p>{actionDialog.message}</p>{actionDialog.inputLabel&&<label className="dialog-input-label">{actionDialog.inputLabel}<textarea autoFocus rows={3} maxLength={300} value={actionDialogValue} onChange={event=>setActionDialogValue(event.target.value)} placeholder="Enter at least 3 characters"/></label>}</div>
-        <div className="modal-actions"><button className="secondary-button" onClick={closeActionDialog}>Cancel</button><button className="primary-button" disabled={!!actionDialog.inputLabel&&actionDialogValue.trim().length<3} onClick={submitActionDialog}>{actionDialog.confirmLabel}</button></div>
+        <div className="modal-actions"><button className="secondary-button" onClick={closeActionDialog}>{t("Cancel")}</button><button className="primary-button" disabled={!!actionDialog.inputLabel&&actionDialogValue.trim().length<3} onClick={submitActionDialog}>{actionDialog.confirmLabel}</button></div>
       </Modal>}
     </div>
   );
@@ -1829,8 +1829,8 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
           : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
       <div className="form-hint">{t("The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.")}</div>
       <div className="modal-actions">
-        <button type="button" className="secondary-button" onClick={onClose}>Done</button>
-        <button type="button" className="primary-button" onClick={onOpenPayments}>Open Payments <ArrowRight size={15}/></button>
+        <button type="button" className="secondary-button" onClick={onClose}>{t("Done")}</button>
+        <button type="button" className="primary-button" onClick={onOpenPayments}>{t("Open Payments")} <ArrowRight size={15}/></button>
       </div>
     </div>
   </Modal>;
@@ -1924,7 +1924,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
       {!enabledPhotoSizes&&<p className="form-error" role="alert">{t("No photo sizes are priced. Configure Photo Printing under Pricing before creating an order.")}</p>}
       {!hasPaymentMethod&&<p className="form-error" role="alert">{t("No payment method is enabled. Configure UPI or cash under Payment Settings.")}</p>}
       {error&&<p className="form-error" role="alert">{error}</p>}
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button type="submit" className="primary-button" disabled={!canContinue}>Open Photo Studio <ArrowRight size={15}/></button></div>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Cancel")}</button><button type="submit" className="primary-button" disabled={!canContinue}>{t("Open Photo Studio")} <ArrowRight size={15}/></button></div>
     </form>
   </Modal>;
 }
@@ -2075,7 +2075,7 @@ function CustomersPage({ token }: { token: string }) {
               <>
                 <div className="customer-history-summary"><strong>{history.totalJobs}</strong><span>{t("print jobs at this shop")}</span></div>
                 {history.jobs.length === 0
-                  ? <div className="empty-search">No print jobs are available for this customer yet.</div>
+                  ? <div className="empty-search">{t("No print jobs are available for this customer yet.")}</div>
                   : <div className="customer-history-list">
                     {history.jobs.map(job => {
                       const netPaid = job.payment
@@ -2193,7 +2193,7 @@ function ReportsPage({ token }: { token: string }) {
               </div>)}</div>}
           </section>
         </div>
-        {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> Check the actual pages before any manual retry. These jobs are not counted as completed.</span></div>}
+        {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> {t("Check the actual pages before any manual retry. These jobs are not counted as completed.")}</span></div>}
         <div className="reports-footnote">Report window: {date(summary.fromUtc)} – {date(summary.toUtc)}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
       </>}
     </section>
@@ -2241,18 +2241,18 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
       </div>
       <div className="dashboard-grid">
         <section className="panel activity-empty-panel">
-          <div className="panel-heading"><div><h2>Customer activity</h2><p>Recent uploads and quote requests from your QR stations</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
+          <div className="panel-heading"><div><h2>{t("Customer activity")}</h2><p>{t("Recent uploads and quote requests from your QR stations")}</p></div><span className="neutral-chip">{printJobs.length} recent jobs</span></div>
           {printJobs.length===0 ? <div className="activity-empty-content"><div className="activity-empty-art"><div className="activity-art-sheet"><FileText size={25}/><i/><i/><i/></div><div className="activity-art-printer"><Printer size={27}/></div><span className="activity-art-spark">✦</span></div><h3>{t("Ready when your first customer is")}</h3><p>{t("Set your prices and share a QR station. Customer uploads will appear here as soon as they arrive.")}</p><button className="text-action" onClick={() => onNavigate(printers.length ? "QR Stations" : "Printers")}>{printers.length ? "Open QR stations" : "Add your first printer"} <span>→</span></button></div> :
             <div className="activity-job-list">
               {printJobs.slice(0,4).map(job=><div className="activity-job-row" key={job.id}><div className="activity-job-icon"><FileText size={16}/></div><div className="activity-job-copy"><strong>{job.jobNumber}</strong><span>{job.document.originalFileName} · {job.printKind==="PHOTO" ? `${job.photoCount??0} photos · ${job.photoSizeCode??""} · ${job.photosPerPage??"layout not recorded"} per A4 page · ${job.pageCount} A4 pages` : `${job.pageCount} pages`}</span></div><div className="activity-job-status"><Status label={prettyStatus(job.status)} tone={job.status==="AWAITING_CUSTOMER_APPROVAL"||job.status==="AWAITING_SHOP_APPROVAL"?"amber":"blue"}/><small>{formatIstTime(job.createdUtc)}</small></div></div>)}
-              <button className="text-action" onClick={()=>onNavigate("Print Queue")}>Open print queue <span>→</span></button>
+              <button className="text-action" onClick={()=>onNavigate("Print Queue")}>{t("Open print queue")} <span>→</span></button>
             </div>}
         </section>
         <section className="panel printer-panel">
-          <div className="panel-heading"><div><h2>Printer setup</h2><p>Registered shop devices</p></div><button className="text-action" onClick={() => onNavigate("Printers")}>Manage <span>→</span></button></div>
+          <div className="panel-heading"><div><h2>{t("Printer setup")}</h2><p>{t("Registered shop devices")}</p></div><button className="text-action" onClick={() => onNavigate("Printers")}>{t("Manage")} <span>→</span></button></div>
           <div className="printer-summary"><div className="printer-summary-icon"><Printer size={19}/></div><div><strong>{printers.length} registered</strong><span>{t("Live hardware status awaits the local agent")}</span></div><div className="health-score neutral-score">—</div></div>
           <div className="device-list">{printers.slice(0,4).map(printer=><Device key={printer.id} name={printer.displayName} detail={`${printer.manufacturer} · ${printer.connectionType}`} state={printer.status} tone={printer.status.toLowerCase()==="ready"?"green":"slate"}/>)}{printers.length===0 && <div className="mini-empty">{t("No printers registered yet.")}</div>}</div>
-          <button className="text-action full-action" onClick={() => onNavigate("Printers")}>View all printers <span>→</span></button>
+          <button className="text-action full-action" onClick={() => onNavigate("Printers")}>{t("View all printers")} <span>→</span></button>
         </section>
       </div>
       <section className="panel setup-panel">
@@ -2828,7 +2828,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   return (
     <>
     <section className="panel collection-panel">
-      <div className="collection-header"><div><h2>{t("Customer QR stations")}</h2><p>{t("Each station has a permanent public link. Every scan creates a separate short-lived customer session.")}</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> Create station</button></div>
+      <div className="collection-header"><div><h2>{t("Customer QR stations")}</h2><p>{t("Each station has a permanent public link. Every scan creates a separate short-lived customer session.")}</p></div><button className="primary-button" onClick={onAdd}><Plus size={16}/> {t("Create station")}</button></div>
       {stations.length===0 ? <EmptyModule icon={<QrCode size={24}/>} title={t("Your first QR station starts here")} text={t("Create a station for a counter or printer. The QR code identifies the station; every scan gets a separate expiring customer session.")} actionLabel={t("Create QR station")} onAction={onAdd}/> :
       <div className="station-grid">{stations.map(station=><article className="station-card" key={station.id}><div className="station-card-head"><div className="station-icon"><QrCode size={18}/></div><div className="station-head-copy"><strong>{station.displayName}</strong><span>{station.isEnabled?"Accepting new sessions":"Disabled"}</span></div><Status label={station.isEnabled?"Enabled":"Disabled"} tone={station.isEnabled?"green":"slate"}/></div>
         {station.publicUrl
@@ -2942,7 +2942,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </div>
       {enrollmentCode&&<div className="agent-code-panel">
         <div><span>{t("ONE-TIME PAIRING CODE")}</span><strong>{enrollmentCode.code}</strong><small>Expires {formatIstTime(enrollmentCode.expiresUtc)}</small></div>
-        <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> Copy code</button>
+        <button className="secondary-button" onClick={()=>void copyText(enrollmentCode.code)}><Copy size={14}/> {t("Copy code")}</button>
       </div>}
       <div className="agent-command-panel">
         <div><span>{t("GUIDED WINDOWS INSTALLER")}</span><strong>{t("Download and run SmartPrint Windows Setup on the shop computer.")}</strong><small>{t("Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.")}</small></div>
@@ -2951,7 +2951,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>{t("Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.")}</span></div>
-      <div className="agent-generate-row"><span>{t("Pairing codes are single use. Generating a new one does not revoke already paired computers.")}</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
+      <div className="agent-generate-row"><span>{t("Pairing codes are single use. Generating a new one does not revoke already paired computers.")}</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> {t("Generate pairing code")}</>}</button></div>
       </>}
     </section>
     {desktop && <ShopConnectionPanel connected={connected} localApiReady={localAgentStatus?.localApiReachable===true}/>}
@@ -3065,11 +3065,11 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
 
   return <section className="panel local-network-panel">
     <div className="local-network-heading">
-      <div><span className="eyebrow"><span className="eyebrow-line"/>SHOP CONNECTION</span><h2>{t("Customer upload connection")}</h2><p>{t("Choose the Wi-Fi or hotspot customers will use to send documents.")}</p></div>
+      <div><span className="eyebrow"><span className="eyebrow-line"/>{t("SHOP CONNECTION")}</span><h2>{t("Customer upload connection")}</h2><p>{t("Choose the Wi-Fi or hotspot customers will use to send documents.")}</p></div>
       <Status label={loading?"Checking…":statusLabel} tone={loading?"slate":statusTone}/>
     </div>
-    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> Checking available connections…</div>:error&&!snapshot
-      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>{t("Could not check this computer")}</strong><p>{t("SmartPrint is not responding yet. Make sure the desktop app is open, then try again.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Try again</button></div>
+    {loading&&!snapshot?<div className="local-network-loading"><span className="button-spinner"/> {t("Checking available connections…")}</div>:error&&!snapshot
+      ? <div className="local-network-empty"><Wifi size={20}/><div><strong>{t("Could not check this computer")}</strong><p>{t("SmartPrint is not responding yet. Make sure the desktop app is open, then try again.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>{t("Try again")}</button></div>
       : <>
       {snapshot?.networks.length?<>
         <label className="local-network-choice">Shop Wi-Fi or hotspot
@@ -3084,9 +3084,9 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
         {!connected?<p className="local-network-copy">{t("Connect this computer to your shop first. The phone check will be available when setup is complete.")}</p>:!localApiReady?<p className="local-network-copy">{t("SmartPrint is preparing the shop connection. The phone check will be available when the print service is ready.")}</p>:<>
           <div className="local-network-actions">
             <button className="primary-button" type="button" onClick={()=>void beginPhoneTest()} disabled={saving||!!test||!hasSelectedNetwork||!localApiReady}>
-              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> Check with another phone</>}
+              {saving?<span className="button-spinner"/>:<><QrCode size={16}/> {t("Check with another phone")}</>}
             </button>
-            <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> Refresh</button>
+            <button className="secondary-button" type="button" onClick={()=>void refresh()} disabled={saving}><RotateCcw size={15}/> {t("Refresh")}</button>
           </div>
           {test&&<div className="local-phone-test">
             <div className="local-phone-qr"><QRCode value={test.phoneTestUrl} size={190} level="M" bgColor="#ffffff" fgColor="#111827"/></div>
@@ -3103,7 +3103,7 @@ function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localA
           ].filter(Boolean).join(" · ")} {readiness.lastFailureCode?"(Last issue: "+readiness.lastFailureCode+") ":""}Retry after the shop computer/Agent has recovered.</small></span></div>}
           {expired&&<div className="local-network-result warning"><Clock3 size={17}/><span><strong>{t("Phone not connected yet")}</strong><small>{t("Check that the second phone is on the selected Wi-Fi or hotspot. Some hotspots block devices from communicating; try shop Wi-Fi instead.")}</small></span></div>}
         </>}
-      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>{t("No shop connection found")}</strong><p>{t("Connect this computer to the shop Wi-Fi or hotspot, then refresh.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>Refresh</button></div>}
+      </>:<div className="local-network-empty"><Wifi size={20}/><div><strong>{t("No shop connection found")}</strong><p>{t("Connect this computer to the shop Wi-Fi or hotspot, then refresh.")}</p></div><button className="secondary-button" type="button" onClick={()=>void refresh()}>{t("Refresh")}</button></div>}
     </>}
     {error&&<div className="local-network-error" role="alert">{error}</div>}
   </section>;
@@ -3158,19 +3158,19 @@ function PricingPage({ pricing, onSave, busy }: {
     }}>
       <div className="pricing-group-heading"><strong>{t("Single-sided printing")}</strong><span>{t("Price per A4 printed side")}</span></div>
       <div className="pricing-input-grid">
-        <label htmlFor="pricing-mono-per-side">Black & white <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Black & white" id="pricing-mono-per-side" value={mono} onChange={e=>setMono(e.target.value)} required/></span></label>
-        <label htmlFor="pricing-colour-per-side">Colour <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Colour" id="pricing-colour-per-side" value={colour} onChange={e=>setColour(e.target.value)} required/></span></label>
+        <label htmlFor="pricing-mono-per-side">{t("Black & white")} <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Black & white" id="pricing-mono-per-side" value={mono} onChange={e=>setMono(e.target.value)} required/></span></label>
+        <label htmlFor="pricing-colour-per-side">{t("Colour")} <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0.01" max="1000" step="0.01" aria-label="Colour" id="pricing-colour-per-side" value={colour} onChange={e=>setColour(e.target.value)} required/></span></label>
       </div>
       <div className="pricing-group-heading"><strong>{t("Double-sided printing")}</strong><span>{t("Price per physical A4 sheet (two sides)")}</span></div>
       <div className="pricing-input-grid">
-        <label htmlFor="pricing-mono-duplex">Black & white duplex <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Black & white duplex" id="pricing-mono-duplex" value={monoDuplex} onChange={e=>setMonoDuplex(e.target.value)}/></span></label>
-        <label htmlFor="pricing-colour-duplex">Colour duplex <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Colour duplex" id="pricing-colour-duplex" value={colourDuplex} onChange={e=>setColourDuplex(e.target.value)}/></span></label>
+        <label htmlFor="pricing-mono-duplex">{t("Black & white duplex")} <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Black & white duplex" id="pricing-mono-duplex" value={monoDuplex} onChange={e=>setMonoDuplex(e.target.value)}/></span></label>
+        <label htmlFor="pricing-colour-duplex">{t("Colour duplex")} <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Colour duplex" id="pricing-colour-duplex" value={colourDuplex} onChange={e=>setColourDuplex(e.target.value)}/></span></label>
       </div>
       <div className="pricing-group-heading"><strong>{t("Minimum order")}</strong><span>{t("Applied if the calculated print total is lower")}</span></div>
-      <label htmlFor="pricing-minimum-charge">Minimum job charge <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="100000" step="0.01" aria-label="Minimum job charge" id="pricing-minimum-charge" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
+      <label htmlFor="pricing-minimum-charge">{t("Minimum job charge")} <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="100000" step="0.01" aria-label="Minimum job charge" id="pricing-minimum-charge" value={minimum} onChange={e=>setMinimum(e.target.value)}/></span></label>
       <div className="pricing-group-heading"><strong>{t("Photo printing")}</strong><span>{t("Price per finished photo · ₹0 disables a size")}</span></div><div className="pricing-input-grid photo-pricing-grid"><label htmlFor="pricing-photo-35x45">35 × 45 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="35 × 45 mm" id="pricing-photo-35x45" value={photo35x45} onChange={e=>setPhoto35x45(e.target.value)}/></span></label><label htmlFor="pricing-photo-25x35">25 × 35 mm <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="25 × 35 mm" id="pricing-photo-25x35" value={photo25x35} onChange={e=>setPhoto25x35(e.target.value)}/></span></label><label htmlFor="pricing-photo-2x2">2 × 2 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="2 × 2 inch" id="pricing-photo-2x2" value={photo2x2} onChange={e=>setPhoto2x2(e.target.value)}/></span></label><label htmlFor="pricing-photo-4x6">4 × 6 inch <span className="price-input-wrap"><span aria-hidden="true">₹</span><input type="number" min="0" step="0.01" aria-label="4 × 6 inch" id="pricing-photo-4x6" value={photo4x6} onChange={e=>setPhoto4x6(e.target.value)}/></span></label></div><div className="settings-summary"><ShieldCheck size={16}/><span>{t("Photo rates are per finished photo, not per A4 sheet. The quote records the rate used.")}</span></div>
        <div className="pricing-group-heading"><strong>{t("ID card printing")}</strong><span>{t("Price per prepared ID card · ₹0 disables ID card quotes")}</span></div>
-       <label htmlFor="pricing-id-document">Prepared ID card (one A4 sheet) <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Prepared ID card" id="pricing-id-document" value={idDocumentPrice} onChange={e=>setIdDocumentPrice(e.target.value)}/></span></label>
+       <label htmlFor="pricing-id-document">{t("Prepared ID card (one A4 sheet)")} <span className="price-input-wrap minimum-price"><span aria-hidden="true">₹</span><input type="number" min="0" max="1000" step="0.01" aria-label="Prepared ID card" id="pricing-id-document" value={idDocumentPrice} onChange={e=>setIdDocumentPrice(e.target.value)}/></span></label>
        <div className="settings-summary"><ShieldCheck size={16}/><span>{t("ID cards use this dedicated flat rate, independent of ordinary document page prices and minimum job charge.")}</span></div>
       <div className="settings-summary"><ShieldCheck size={16}/><span>{t("Customer payment gateway setup is separate and is not active yet. This screen configures print quotations only; no money is collected here.")}</span></div>
       <div className="settings-actions"><button className="primary-button" disabled={busy||!valid||toMinor(mono)<=0||toMinor(colour)<=0}>{busy?<span className="button-spinner"/>:"Save print prices"}</button></div>
@@ -3217,7 +3217,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
         </div>}
       </div>
       <div className="payment-method-card">
-        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>Cash at counter</strong><small>{cashEnabled?"Enabled · customers can pay at the counter.":"Disabled · customers will not see cash at the counter."}</small></div><label className="switch"><input id="payment-cash-enabled" type="checkbox" aria-label="Enable cash at counter" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
+        <div className="payment-method-heading"><div className="payment-method-icon"><Printer size={19}/></div><div><strong>{t("Cash at counter")}</strong><small>{cashEnabled?"Enabled · customers can pay at the counter.":"Disabled · customers will not see cash at the counter."}</small></div><label className="switch"><input id="payment-cash-enabled" type="checkbox" aria-label="Enable cash at counter" checked={cashEnabled} onChange={event=>setCashEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
       </div>
       <div className="payment-method-card instant-payment-setting">
         <div className="payment-method-heading"><div className="payment-method-icon"><Zap size={19}/></div><div><strong>{t("Instant payment after upload")}</strong><small>Customers can pay as soon as the rate-card quote is calculated, without a separate shop pre-approval. Once payment starts, file decisions are locked; after payment is verified, refund rejected files before printer handoff.</small></div><label className="switch"><input id="payment-instant-enabled" type="checkbox" aria-label="Enable instant payment after upload" checked={instantPaymentEnabled} onChange={event=>setInstantPaymentEnabled(event.target.checked)}/><span aria-hidden="true"/></label></div>
@@ -3320,10 +3320,10 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   const queueBatches=Array.from(batchMap.values());
 
   return <section className="panel queue-panel live-queue-panel">
-    <div className="collection-header"><div><h2>Print jobs</h2><p>{t("Customer QR uploads and shop-created photo orders use the same review, payment and printing queue.")}</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><button className="primary-button" type="button" onClick={onCreatePhotoOrder}><ImageIcon size={14}/> New photo order</button><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, customer, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> Search</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> Refresh queue</button></div></div>
+    <div className="collection-header"><div><h2>{t("Print jobs")}</h2><p>{t("Customer QR uploads and shop-created photo orders use the same review, payment and printing queue.")}</p></div><div className="queue-header-actions"><span className="setup-count">{queueBatches.length} batches shown</span><button className="primary-button" type="button" onClick={onCreatePhotoOrder}><ImageIcon size={14}/> {t("New photo order")}</button><form className="queue-search-form" onSubmit={event=>{event.preventDefault();void onSearch(searchInput);}}><input aria-label="Search all print jobs" type="search" maxLength={120} placeholder="Job, customer, file or printer" value={searchInput} onChange={event=>setSearchInput(event.target.value)}/><button className="secondary-button" type="submit"><Search size={13}/> {t("Search")}</button></form><button className="secondary-button queue-refresh-button" onClick={()=>void refreshQueue()} disabled={refreshRunning.current}><Activity size={13}/> {t("Refresh queue")}</button></div></div>
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>{t("Auto refresh")}</strong><small>{autoRefresh?"On":"Off"}</small></label>
-      <label className="queue-refresh-interval">Refresh every <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> seconds</label>
+      <label className="queue-refresh-interval">{t("Refresh every")} <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> {t("seconds")}</label>
       <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
     </div>
     {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} {reviewBatches.length===1?"batch":"batches"} need review</strong><span>{t("Review includes every file in the batch. New files start accepted; rejected files stay excluded until restored.")}</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>{t("Loading full batch…")}</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
@@ -3462,9 +3462,9 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                 }}>{t("Adjust options")}</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview original"}</button>
                 {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&(job.outputSizeBytes??0)<=100*1024*1024&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>{t("Preview saved PDF")}</button>}
-                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>History</button>
-                {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>Accept</button>}
-                {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>Reject file</button>}
+                <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>{t("History")}</button>
+                {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>{t("Accept")}</button>}
+                {["AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT"].includes(job.status)&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onReject(job)}>{t("Reject file")}</button>}
                 {(job.status==="PAID_AUTHORISED"||job.status==="REJECTED")&&(job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED")&&!job.localQueueReceivedUtc&&!job.claimedByAgentDeviceId&&<button className="subtle-button reject-action" disabled={busyJobId===job.id} onClick={()=>onRefund(job)}>{job.status==="REJECTED"?"Refund rejected file":"Review pages / refund"}</button>}
                 {job.status==="LOCAL_QUEUE_READY"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onDispatch(job)}>{job.outputMode==="UNSUPPORTED_VIRTUAL"?"Run virtual test":job.privatePrinting&&job.outputMode==="PDF_EXPORT"?"Create test PDF":job.outputMode==="PDF_EXPORT"?"Save PDF":"Start printing"}</button>}
                 {job.status==="OUTPUT_UNCONFIRMED"&&job.outputMode==="PDF_EXPORT"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onRetryPdfExport(job)}>{job.privatePrinting&&job.outputType==="TEST_VIRTUAL"?"Retry test PDF":"Save PDF again"}</button>}
@@ -3493,7 +3493,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   setEditingPrintSettings(current=>current?{...current,orientation}:current);
                 }}><option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option></select></label>
                 <div className="queue-settings-actions">
-                  <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>Cancel</button>
+                  <button className="secondary-button" type="button" onClick={()=>{setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>{t("Cancel")}</button>
                   <button className="primary-button" type="button" disabled={busyJobId===job.id||!editingPrintSettings} onClick={()=>{if(editingPrintSettings)void onUpdateSettings(job,editingPrintSettings);setEditingSettingsJobId(null);setEditingPrintSettings(null);}}>{t("Send revised quote")}</button>
                 </div>
               </div>}
@@ -3545,14 +3545,14 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
     <section className="batch-review-overview" aria-label="Batch review summary">
       <div className="batch-review-overview-heading"><div><span>{t("REVIEW SUMMARY")}</span><strong>{jobs.length} {jobs.length===1?"file":"files"} in this batch</strong><small>{t("Included files stay in one checkout. Excluded files will not be charged.")}</small></div><div className="batch-review-total"><small>{t("Accepted value · valid quotes only")}</small><strong>{formatMoney(acceptedTotal,jobs[0]?.currency??"INR")}</strong></div></div>
       <div className="batch-review-stats">
-        <span className="included"><b>{acceptedCount}</b> included</span>
+        <span className="included"><b>{acceptedCount}</b> {t("included")}</span>
         <span className="excluded"><b>{rejectedCount}</b> {t("excluded")}</span>
-        <span className="output"><b>{acceptedOutputSides}</b> document output sides</span>
-        {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> ID-card A4 sheets</span>}
-        {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> photo A4 pages</span>}
-        {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> need a fresh quote</span>}
+        <span className="output"><b>{acceptedOutputSides}</b> {t("document output sides")}</span>
+        {acceptedIdSheets>0&&<span className="id-cards"><b>{acceptedIdSheets}</b> {t("ID-card A4 sheets")}</span>}
+        {acceptedPhotoPages>0&&<span className="photos"><b>{acceptedPhotoPages}</b> {t("photo A4 pages")}</span>}
+        {quoteRefreshRequiredCount>0&&<span className="refresh"><b>{quoteRefreshRequiredCount}</b> {t("need a fresh quote")}</span>}
       </div>
-      <div className="batch-review-output-note"><span><strong>{t("Document output mix")}</strong></span><span><i className="mono-dot"/> B&W <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> Colour <strong>{acceptedColourPages}</strong></span></div>
+      <div className="batch-review-output-note"><span><strong>{t("Document output mix")}</strong></span><span><i className="mono-dot"/> {t("B&W")} <strong>{acceptedMonoPages}</strong></span><span><i className="colour-dot"/> {t("Colour")} <strong>{acceptedColourPages}</strong></span></div>
     </section>
     <div className="batch-review-list">{folders.map(folderName=>{
       const folderJobs=jobs.filter(job=>(job.batchGroupName??"Loose files")===folderName);
@@ -3722,7 +3722,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
       {method==="UPI"&&<label>{t("Refund transaction reference")}<input value={reference} onChange={event=>setReference(event.target.value)} maxLength={100} placeholder={t("Enter the refund UPI reference")} required/></label>}
       <label>{t("Reason for rejecting these pages")}<textarea rows={3} maxLength={300} value={reason} onChange={event=>setReason(event.target.value)} required/></label>
       <label className="refund-confirm-line"><input type="checkbox" checked={confirmed} onChange={event=>setConfirmed(event.target.checked)}/><span>{t("I confirm that I have already returned the exact additional amount shown above. SmartPrint records the refund; it does not send money automatically.")}</span></label>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:t("Record refund and reject selected pages")}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Cancel")}</button><button className="primary-button" disabled={busy||estimating||!canSubmit}>{busy?<span className="button-spinner"/>:t("Record refund and reject selected pages")}</button></div>
     </form>}
     {estimate&&additional===0&&<div className="refund-form"><p>{t("Select at least one additional page that produces a positive refund from the original quote. No page is rejected until a refund can be recorded.")}</p><div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Close")}</button></div></div>}
   </Modal>;
@@ -3902,7 +3902,7 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
         </>}
         {saveError && <div className="inline-error account-edit-error" role="alert">{saveError}</div>}
         <div className="modal-actions">
-          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="button" className="secondary-button" onClick={onClose} disabled={busy}>{t("Cancel")}</button>
           <button className="primary-button" disabled={busy || !ownerName.trim() || !email.trim() || (emailChanged && !currentPassword)}>
             {busy ? <span className="button-spinner"/> : "Save personal details"}
           </button>
@@ -3934,7 +3934,7 @@ function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavi
           </button>
         ))}
       </div>
-      <p className="help-modal-note">These shortcuts open the existing shop tools. They do not change your settings or print jobs.</p>
+      <p className="help-modal-note">{t("These shortcuts open the existing shop tools. They do not change your settings or print jobs.")}</p>
     </Modal>
   );
 }
@@ -3949,9 +3949,9 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title={t("Create a QR station")} subtitle={t("Give customers a clear entry point for this counter or printer.")} onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>{t("Station name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={t("e.g. Front counter")} required maxLength={120}/></label>
-      <label>{t("Default printer")} <span className="field-hint">Optional · only approved virtual test queues are included</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">{t("No default printer")}</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <label>{t("Default printer")} <span className="field-hint">{t("Optional · only approved virtual test queues are included")}</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">{t("No default printer")}</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
-      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>Cancel</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
+      <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Cancel")}</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>
   </Modal>;
 }
@@ -4662,7 +4662,7 @@ function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssisted
     </div>
     {!nativeAppMode&&<p>{t("Check whether this phone can reach the shop's local print computer. This check does not upload your document.")}</p>}
     {!localAgent?.endpoints.length
-      ? <div className="entry-local-agent-message" role="status"><strong>Local transfer unavailable.</strong> {message}</div>
+      ? <div className="entry-local-agent-message" role="status"><strong>{t("Local transfer unavailable.")}</strong> {message}</div>
       : checkStatus==="insecure"
       ? <div className="entry-local-agent-message">
           <small>{message}</small>
@@ -4884,7 +4884,7 @@ function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:N
       ? <img className="customer-native-pdf-page" src={"data:image/jpeg;base64,"+current.image} alt={"Print sheet "+(current.pageIndex+1)+" of "+current.pageCount+", containing PDF pages "+current.firstSourcePage+" to "+current.lastSourcePage}/>
       : <div className="customer-native-pdf-empty">
           {current===null||current.loading
-            ? <><span className="button-spinner"/><span>Preparing print layout preview…</span></>
+            ? <><span className="button-spinner"/><span>{t("Preparing print layout preview…")}</span></>
             : <><FileText size={22}/><strong>{t("Preview unavailable")}</strong><span>{t("The print layout could not be previewed on this device. You can still upload the original PDF.")}</span></>}
         </div>}
     {current?.image&&<div className="customer-native-pdf-layout-note">
@@ -6578,8 +6578,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               </div>
               : <div className="customer-folder-defaults">
               <div><span>{t("Colour")}</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>B&W</button>
-                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>Colour</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
               </div></div>
               <div><span>{t("Sides")}</span><div className="customer-choice-row">
                 <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
@@ -6647,8 +6647,8 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
                    }}/></label>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>B&W</button>
-                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>Colour</button>
+                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>{t("Colour")}</button>
                 </div>
                 <div className="customer-choice-row">
                   <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
@@ -6676,7 +6676,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      const pagesPerSheet=Number(event.currentTarget.value)||1;
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
                    }}>
-                    <option value={1}>1 page per sheet</option>
+                    <option value={1}>{t("1 page per sheet")}</option>
                     {nupOptions.map(value=><option key={value} value={value}>{value} pages per sheet</option>)}
                   </select></label>}
                   {nupOptions.length===0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<p className="customer-advanced-help">Multiple pages per sheet is unavailable. {nupUnavailableReason}</p>}
@@ -6704,7 +6704,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             :"Shop Wi-Fi uses HTTP. This transfer is not encrypted in transit."}</CustomerInlineNotice>
       :<CustomerInlineNotice kind="info" title={t("Check shop Wi-Fi")}>{t("Tap Check shop Wi-Fi above and allow local-network access.")}</CustomerInlineNotice>)}
     {files.length>0&&uploadMode==="CLOUD"&&<CustomerInlineNotice kind="info" title={t("Secure HTTPS transfer")}>{t("Your files are encrypted while being sent to the shop.")}</CustomerInlineNotice>}
-    {previewUrl&&file&&<div className="customer-file-preview" role="region" aria-label={`Preview for ${file.name}`}><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?t("This photo has already been submitted to the shop."):t("Open Photo Studio")} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?t("Already sent to shop"):t("Open Photo Studio")}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<CustomerInlineNotice kind="info" title={t("Photo printing unavailable")}>{t("Ask the shop to enable photo printing and set its rates.")}</CustomerInlineNotice>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<CustomerInlineNotice kind="info" title={t("Photo already sent")}>{t("The shop can prepare it from the review queue. No second upload is needed.")}</CustomerInlineNotice>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>Preview only. <InfoTooltip label="Prepared file"><span>The final prepared file stays in your print workflow.</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>{t("Photo sheet prepared for this shop")}</strong><span>{t("Preview unavailable.")} <InfoTooltip label={t("Prepared PDF")}><span>{t("The prepared PDF stays in your print workflow.")}</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">{t("Preview unavailable.")} <InfoTooltip label={t("Upload status")}><span>{t("You can still upload this file normally.")}</span></InfoTooltip></small>:<>
+    {previewUrl&&file&&<div className="customer-file-preview" role="region" aria-label={`Preview for ${file.name}`}><div className="customer-file-label"><FileText size={15}/><span>{photoSettingsByFileFingerprint[customerFileFingerprint(file)]?"Prepared photo sheet":"Selected document"} · {file.name}</span>{isCustomerImage(file)&&photoRatesAvailable&&<button type="button" className="customer-file-studio-button" disabled={busy||batchLockedForPayment||photoAlreadyUploaded} title={photoAlreadyUploaded?t("This photo has already been submitted to the shop."):t("Open Photo Studio")} onClick={()=>openPhotoStudio(file)}><ImageIcon size={14}/> {photoAlreadyUploaded?t("Already sent to shop"):t("Open Photo Studio")}</button>}</div>{isCustomerImage(file)&&!photoRatesAvailable&&<CustomerInlineNotice kind="info" title={t("Photo printing unavailable")}>{t("Ask the shop to enable photo printing and set its rates.")}</CustomerInlineNotice>}{isCustomerImage(file)&&photoAlreadyUploaded&&photoRatesAvailable&&<CustomerInlineNotice kind="info" title={t("Photo already sent")}>{t("The shop can prepare it from the review queue. No second upload is needed.")}</CustomerInlineNotice>}{isCustomerPdf(file)?photoSettingsByFileFingerprint[customerFileFingerprint(file)]?(()=>{const pages=photoPreviewPagesByFingerprint[customerFileFingerprint(file)]??[];return pages.length?<div className="customer-edited-photo-preview"><div className="customer-edited-photo-frame"><img src={pages[Math.min(selectedPreparedPhotoPage,pages.length-1)]} alt={"Prepared photo sheet page "+(selectedPreparedPhotoPage+1)}/><span>SmartPrint by QuantaEdge</span></div>{pages.length>1&&<div className="customer-edited-photo-pages" aria-label="Prepared A4 pages">{pages.map((url,index)=><button type="button" key={url} aria-pressed={selectedPreparedPhotoPage===index} onClick={()=>setSelectedPreparedPhotoPage(index)}><img src={url} alt={"Page "+(index+1)+" thumbnail"}/><span>Page {index+1}</span></button>)}</div>}<small>{t("Preview only.")} <InfoTooltip label="Prepared file"><span>{t("The final prepared file stays in your print workflow.")}</span></InfoTooltip></small></div>:<div className="customer-private-photo-preview"><ShieldCheck size={20}/><strong>{t("Photo sheet prepared for this shop")}</strong><span>{t("Preview unavailable.")} <InfoTooltip label={t("Prepared PDF")}><span>{t("The prepared PDF stays in your print workflow.")}</span></InfoTooltip></span></div>})():nativeAppMode?smartPrintNativePdfPreviewTokens.has(file)?<CustomerNativePdfPreview token={smartPrintNativePdfPreviewTokens.get(file)!} preview={nativePdfPreview} onPage={page=>requestCustomerPdfPreviewPage(smartPrintNativePdfPreviewTokens.get(file)!,page)}/>:<small className="customer-upload-local-note">{t("Preview unavailable.")} <InfoTooltip label={t("Upload status")}><span>{t("You can still upload this file normally.")}</span></InfoTooltip></small>:<>
   <iframe src={browserNupPreview?.url||previewUrl} title={browserNupPreview?.url?file.name+" N-up print preview":file.name+" preview"}/>
   {browserNupPreview&&<div className="customer-nup-browser-preview" role="region" aria-label={t("Pages per sheet preview")}>
     {browserNupPreview.loading
@@ -6839,10 +6839,10 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <div className="customer-batch-print-total"><span><strong>{t("Total output")}</strong><small>{t("Page sides and prepared A4 sheets, grouped by print type")}</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
         </div>
       </details>}
-      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>Standalone JPG/PNG documents count as one page each.</span><span>ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.</span><span>Photo printing is priced per finished photo; the A4 page count is shown for planning.</span><span>Duplex printing can place two output sides on one physical sheet.</span><span>Rejected or refunded files are excluded from the total.</span></InfoTooltip></p>
+      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh>0?"Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop. ":""}This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them. <InfoTooltip label="How your quote is calculated"><span>Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.</span><span>{t("Standalone JPG/PNG documents count as one page each.")}</span><span>{t("ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.")}</span><span>{t("Photo printing is priced per finished photo; the A4 page count is shown for planning.")}</span><span>{t("Duplex printing can place two output sides on one physical sheet.")}</span><span>{t("Rejected or refunded files are excluded from the total.")}</span></InfoTooltip></p>
     </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/>:"Send batch to shop"}</button>}
-      {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>Request a fresh quote</button>}
+      {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>{t("Request a fresh quote")}</button>}
     {jobStatus&&<div className="customer-job-state" role="status" aria-live="polite"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
       <strong>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?t("Virtual printer test completed · no physical print was made"):t("Development test PDF generated · no physical print was made")):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?t("Your print is ready — your document has been removed from the shop computer"):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?t("Your print is ready — removing your document from the shop computer"):nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?t("Your request is with the shop"):jobStatus.status==="AWAITING_PAYMENT"?t("Your quote is ready for payment"):jobStatus.status==="LOCAL_QUEUE_CLAIMED"?t("Shop computer is preparing your file"):jobStatus.status==="LOCAL_QUEUE_READY"?t("Your file is ready for printing"):jobStatus.status==="PRINT_AUTHORISED"?t("Waiting for the shop computer"):jobStatus.status==="PRINT_SUBMITTING"?t("Your document is being sent to the printer"):jobStatus.status==="SPOOLER_ACCEPTED"?t("The printer queue accepted your document"):jobStatus.status==="PRINTING"?t("Your document is printing"):jobStatus.status==="OUTPUT_UNCONFIRMED"?t("The shop is checking your print"):jobStatus.status==="COMPLETED"?t("Your print is ready"):jobStatus.status==="PDF_EXPORTED"?t("Your PDF is ready"):jobStatus.status==="REFUNDED"?t("This file was fully refunded"):jobStatus.status==="CANCELLED"?t("This request was cancelled"):jobStatus.status==="FAILED"?t("This request could not be completed"):jobStatus.status==="PAID_AUTHORISED"?t("Your payment is verified"):jobStatus.status==="REJECTED"?t("The shop could not accept this request"):jobStatus.status==="QUOTE_EXPIRED"?t("Your quote has expired"):t("Your request is being reviewed")}</strong>
       <small className="customer-job-updated">{t("Last updated · {date}",{date:formatIstDateTime(jobStatus.updatedUtc)})}</small>
@@ -6866,14 +6866,14 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="REJECTED"?t("The shop could not accept this file. Please ask the shop for help.")
         :jobStatus.status==="QUOTE_EXPIRED"?t("The price has expired. Please request a fresh quote.")
         :t("Your request is being processed. Refresh to check again.")}</p>
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>The authorised test output is ready. The shop copy is being securely removed.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>The test output is not physical fulfilment and is not ready for collection.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>Removing the shop copy</strong>Your pages are printed. SmartPrint is securely removing the shop copy.</span></div>}
-      {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>Shop copy removed</strong>Your file has been removed from the shop computer. The original on your device is unchanged.</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>{t("Removing the shop copy")}</strong>{t("The authorised test output is ready. The shop copy is being securely removed.")}</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>{t("Shop copy removed")}</strong>{t("The test output is not physical fulfilment and is not ready for collection.")}</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>{t("Removing the shop copy")}</strong>{t("Your pages are printed. SmartPrint is securely removing the shop copy.")}</span></div>}
+      {jobStatus.privatePrinting&&jobStatus.status!=="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>{t("Shop copy removed")}</strong>{t("Your file has been removed from the shop computer. The original on your device is unchanged.")}</span></div>}
       {payment&&!!payment.refundedAmountMinor&&payment.refundedAmountMinor>0&&<div className="customer-refund-note"><Wallet size={16}/><span><strong>{money(payment.refundedAmountMinor,payment.currency)} returned</strong> for rejected pages ({rejectedPageList(jobStatus.rejectedPageNumbersJson)}). {money(Math.max(0,payment.amountMinor-payment.refundedAmountMinor),payment.currency)} remains paid; only accepted pages proceed to printing.</span></div>}
       {jobStatus.pdfBrandingEnabled&&<div className="customer-branding-note">
         <ShieldCheck size={16}/>
-        <span><strong>{t("PDF footer selected by the shop.")}</strong> <InfoTooltip label={t("PDF footer details")}><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>{t("Reformatted or multi-copy exports may be flattened.")}</span><span>{t("Ask for an unbranded single-copy export when PDF structure matters.")}</span></InfoTooltip></span>
+        <span><strong>{t("PDF footer selected by the shop.")}</strong> <InfoTooltip label={t("PDF footer details")}><span>{t("Footer only appears on PDFs with a verified blank bottom margin.")}</span><span>{t("Digitally signed or interactive PDFs remain unchanged.")}</span><span>{t("Original uploads and physical prints are never altered.")}</span><span>{t("Image-to-PDF exports currently remain unbranded.")}</span><span>{t("Branding off preserves a single-copy full-document PDF byte-for-byte.")}</span><span>{t("Reformatted or multi-copy exports may be flattened.")}</span><span>{t("Ask for an unbranded single-copy export when PDF structure matters.")}</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.filter(event=>event.previousStatus!==event.newStatus).length&&<div className="customer-state-timeline">{jobStatus.timeline.filter(event=>event.previousStatus!==event.newStatus).map((event,index)=><div key={event.createdUtc+"-"+index}><i/><span><strong>{customerStatusLabel(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
       {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>{t("Your order history is saved. You can start another print session when ready.")}</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
@@ -6963,7 +6963,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           fileName={"smartprint-batch-payment-"+batchPayment.id.slice(0,12)+".png"}
         />
         <div className="customer-payment-reference">
-          <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
+          <label className="customer-reference-field">{t("UPI transaction ID (UTR)")}<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
             <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
           <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/> :nativeAppMode?t("Submit UTR"):t("Submit batch payment reference")}</button>
           <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>{t("The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.")}</CustomerInlineNotice>
