@@ -1,6 +1,7 @@
 import { useEffect, useState, type ChangeEvent, type FormEvent, type CSSProperties } from "react";
 import PhotoStudio, { type PreparedPhotoSheet, type PhotoStudioEditorSettings } from "./PhotoStudio";
 import { resolvePhotoSourceMimeType } from "./photo-source-policy";
+import { useLocale, translateUiText } from "./i18n";
 
 type PrivatePhotoStudioBridge = {
   postMessage: (value: string) => void;
@@ -284,7 +285,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         onCancel={()=>{setSource(null);setEditingDocumentId(null);setInitialSettings(undefined);setError("");}}
         onApply={savePreparedSheets}
       />
-      {saving&&<div role="status" style={{position:"fixed",inset:0,zIndex:10000,display:"grid",placeItems:"center",background:"rgba(8,16,30,.72)",color:"#fff",fontWeight:700}}>Saving privately…</div>}
+      {saving&&<div role="status" style={{position:"fixed",inset:0,zIndex:10000,display:"grid",placeItems:"center",background:"rgba(8,16,30,.72)",color:"#fff",fontWeight:700}}>{t("Saving privately…")}</div>}
       {error&&<div role="alert" style={{position:"fixed",left:16,right:16,bottom:16,zIndex:10001,padding:14,borderRadius:10,background:"#fff0f0",color:"#9a2626",fontSize:13}}>{error}</div>}
     </>;
   }
@@ -294,79 +295,79 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
       <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:12,marginBottom:18}}>
         <div>
           <div style={{fontSize:10,fontWeight:800,letterSpacing:".14em",color:"var(--accent,#5366c9)"}}>SMARTPRINT BY QUANTAEDGE</div>
-          <h1 style={{fontSize:26,lineHeight:1.2,margin:"7px 0 4px"}}>Photo Studio</h1>
-          <p style={{fontSize:13,lineHeight:1.5,margin:0,color:"var(--muted,#64748b)"}}>Your private photo sheets, saved on this device.</p>
+          <h1 style={{fontSize:26,lineHeight:1.2,margin:"7px 0 4px"}}>{t("Photo Studio")}</h1>
+          <p style={{fontSize:13,lineHeight:1.5,margin:0,color:"var(--muted,#64748b)"}}>{t("Your private photo sheets, saved on this device.")}</p>
         </div>
-        <button type="button" onClick={refreshLibrary} disabled={libraryLoading} style={{border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",color:"inherit",borderRadius:10,padding:"9px 12px",fontWeight:700}}>Refresh</button>
+        <button type="button" onClick={refreshLibrary} disabled={libraryLoading} style={{border:"1px solid var(--border,#dbe2ec)",background:"var(--card,#fff)",color:"inherit",borderRadius:10,padding:"9px 12px",fontWeight:700}}>{t("Refresh")}</button>
       </header>
 
       <section style={{padding:17,border:"1px solid var(--border,#dbe2ec)",borderRadius:16,background:"var(--card,#fff)",marginBottom:18,boxShadow:"0 8px 24px rgba(20,38,66,.05)"}}>
-        <div style={{fontSize:16,fontWeight:750}}>Prepare one photo</div>
-        <p style={{fontSize:12,lineHeight:1.5,color:"var(--muted,#64748b)",margin:"5px 0 12px"}}>Choose one original photo. Crop and enhance it, then set the number of copies and photos per A4 sheet in the editor. Your original and finished sheet remain encrypted on this device.</p>
+        <div style={{fontSize:16,fontWeight:750}}>{t("Prepare one photo")}</div>
+        <p style={{fontSize:12,lineHeight:1.5,color:"var(--muted,#64748b)",margin:"5px 0 12px"}}>{t("Choose one original photo. Crop and enhance it, then set the number of copies and photos per A4 sheet in the editor. Your original and finished sheet remain encrypted on this device.")}</p>
         <label htmlFor="private-photo-source" style={{display:"inline-flex",alignItems:"center",gap:8,padding:"11px 15px",borderRadius:10,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:13,fontWeight:750,cursor:"pointer"}}>
-          Choose one photo
+          {t("Choose one photo")}
           <input key={inputKey} id="private-photo-source" type="file" accept="image/jpeg,image/png,.jpg,.jpeg,.png" onChange={chooseSource} style={{position:"absolute",width:1,height:1,opacity:0,pointerEvents:"none"}}/>
         </label>
       </section>
 
       <section>
         <div style={{display:"flex",alignItems:"baseline",justifyContent:"space-between",gap:10,marginBottom:10}}>
-          <h2 style={{fontSize:18,margin:0}}>Saved photo documents</h2>
+          <h2 style={{fontSize:18,margin:0}}>{t("Saved photo documents")}</h2>
           <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{documents.length} saved</span>
         </div>
-        {libraryLoading&&<p role="status" style={{fontSize:13,color:"var(--muted,#64748b)"}}>Loading your private documents…</p>}
+        {libraryLoading&&<p role="status" style={{fontSize:13,color:"var(--muted,#64748b)"}}>{t("Loading your private documents…")}</p>}
         {!libraryLoading&&documents.length===0&&<div style={{padding:22,border:"1px dashed var(--border,#c8d1df)",borderRadius:14,textAlign:"center",background:"var(--card,#fff)"}}>
-          <strong style={{fontSize:14}}>No saved photo sheets yet</strong>
-          <p style={{fontSize:12,color:"var(--muted,#64748b)",margin:"6px 0 0"}}>Your prepared documents will appear here. You can print them later through a connected shop.</p>
+          <strong style={{fontSize:14}}>{t("No saved photo sheets yet")}</strong>
+          <p style={{fontSize:12,color:"var(--muted,#64748b)",margin:"6px 0 0"}}>{t("Your prepared documents will appear here. You can print them later through a connected shop.")}</p>
         </div>}
         <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(min(100%,310px),1fr))",gap:12}}>
           {documents.map(document=><article key={document.id} style={{display:"flex",gap:12,alignItems:"stretch",minWidth:0,padding:12,border:"1px solid var(--border,#dbe2ec)",borderRadius:14,background:"var(--card,#fff)",boxShadow:"0 4px 14px rgba(20,38,66,.04)"}}>
             <div style={{width:88,flex:"0 0 88px",alignSelf:"flex-start",position:"relative",overflow:"hidden",borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"#fff",aspectRatio:"210/297"}}>
               {document.thumbnailBase64
-                ? <img src={"data:image/jpeg;base64,"+document.thumbnailBase64} alt={"Preview of "+document.title} style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
-                : <div style={{display:"grid",placeItems:"center",height:"100%",fontSize:10,color:"#64748b"}}>A4 PHOTO</div>}
+                ? <img src={"data:image/jpeg;base64,"+document.thumbnailBase64} alt={t("Preview of {name}", { name: document.title })} style={{width:"100%",height:"100%",objectFit:"contain",display:"block"}}/>
+                : <div style={{display:"grid",placeItems:"center",height:"100%",fontSize:10,color:"#64748b"}}>{t("A4 PHOTO")}</div>}
               <span style={{position:"absolute",left:3,right:3,bottom:4,fontSize:6,fontWeight:800,textAlign:"center",color:"#46536e",background:"rgba(255,255,255,.74)",padding:2}}>SmartPrint by QuantaEdge</span>
             </div>
             <div style={{minWidth:0,flex:1,display:"flex",flexDirection:"column",gap:5}}>
               <strong style={{fontSize:14,lineHeight:1.35,overflowWrap:"anywhere"}}>{document.title||"Photo sheet"}</strong>
               <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{photoSizeLabel(document.sizeCode)} · {document.photoCount} photos · {document.photosPerPage} per A4 sheet</span>
-              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.pageCount} A4 {document.pageCount===1?"page":"pages"} · {document.resolutionDpi||300} DPI</span>
+              <span style={{fontSize:11,color:"var(--muted,#64748b)"}}>{document.pageCount} A4 {t(document.pageCount===1?"page":"pages")} · {document.resolutionDpi||300} DPI</span>
               <div style={{display:"flex",alignItems:"center",gap:8,marginTop:"auto",flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>openPreview(document)} style={{padding:"7px 12px",borderRadius:8,border:0,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:12,fontWeight:750}}>View</button>
-                <button type="button" aria-label={"More actions for "+document.title} aria-expanded={menuDocumentId===document.id} onClick={()=>setMenuDocumentId(value=>value===document.id?null:document.id)} style={{width:34,height:32,borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:20,lineHeight:1}}>⋮</button>
+                <button type="button" onClick={()=>openPreview(document)} style={{padding:"7px 12px",borderRadius:8,border:0,background:"var(--accent,#4f5fc4)",color:"#fff",fontSize:12,fontWeight:750}}>{t("View")}</button>
+                <button type="button" aria-label={t("More actions for {name}", { name: document.title })} aria-expanded={menuDocumentId===document.id} onClick={()=>setMenuDocumentId(value=>value===document.id?null:document.id)} style={{width:34,height:32,borderRadius:8,border:"1px solid var(--border,#dbe2ec)",background:"transparent",color:"inherit",fontSize:20,lineHeight:1}}>⋮</button>
               </div>
               {menuDocumentId===document.id&&<div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
-                <button type="button" onClick={()=>beginEdit(document)} style={actionStyle}>Edit</button>
-                <button type="button" onClick={()=>beginRename(document)} style={actionStyle}>Rename</button>
-                <button type="button" onClick={()=>deleteDocument(document)} style={{...actionStyle,color:"#b42318"}}>Delete</button>
+                <button type="button" onClick={()=>beginEdit(document)} style={actionStyle}>{t("Edit")}</button>
+                <button type="button" onClick={()=>beginRename(document)} style={actionStyle}>{t("Rename")}</button>
+                <button type="button" onClick={()=>deleteDocument(document)} style={{...actionStyle,color:"#b42318"}}>{t("Delete")}</button>
               </div>}
             </div>
           </article>)}
         </div>
       </section>
 
-      <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.</p>
+      <p style={{fontSize:11,lineHeight:1.5,color:"var(--muted,#64748b)",marginTop:18}}>{t("To print a saved sheet: tap Back to Home, scan the shop's QR code, then select the sheet under Photo Studio private documents in the shop's file picker. The preview carries SmartPrint security and QuantaEdge branding; the actual print sheet is clean.")}</p>
       {status&&<p role="status" style={{fontSize:12,color:"var(--accent,#5366c9)",marginTop:12}}>{status}</p>}
       {error&&<p role="alert" style={{fontSize:12,color:"#bd3434",marginTop:12}}>{error}</p>}
     </section>
 
     {renameTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setRenameTarget(null);}} style={{position:"fixed",inset:0,zIndex:1000,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.52)"}}>
       <form onSubmit={submitRename} role="dialog" aria-modal="true" aria-labelledby="photo-rename-title" style={{width:"min(100%,380px)",padding:20,borderRadius:14,background:"var(--card,#fff)",color:"var(--text,#172033)",boxShadow:"0 20px 54px rgba(0,0,0,.22)"}}>
-        <h2 id="photo-rename-title" style={{fontSize:17,margin:"0 0 12px"}}>Rename photo document</h2>
-        <input autoFocus maxLength={80} value={renameValue} onChange={event=>setRenameValue(event.target.value)} aria-label="Document name" style={{width:"100%",boxSizing:"border-box",padding:11,borderRadius:8,border:"1px solid var(--border,#c8d1df)",background:"var(--surface,#fff)",color:"inherit"}}/>
+        <h2 id="photo-rename-title" style={{fontSize:17,margin:"0 0 12px"}}>{t("Rename photo document")}</h2>
+        <input autoFocus maxLength={80} value={renameValue} onChange={event=>setRenameValue(event.target.value)} aria-label={t("Document name")} style={{width:"100%",boxSizing:"border-box",padding:11,borderRadius:8,border:"1px solid var(--border,#c8d1df)",background:"var(--surface,#fff)",color:"inherit"}}/>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8,marginTop:14}}>
-          <button type="button" onClick={()=>setRenameTarget(null)} style={actionStyle}>Cancel</button>
-          <button type="submit" style={{...actionStyle,background:"var(--accent,#4f5fc4)",color:"#fff",borderColor:"transparent"}}>Save name</button>
+          <button type="button" onClick={()=>setRenameTarget(null)} style={actionStyle}>{t("Cancel")}</button>
+          <button type="submit" style={{...actionStyle,background:"var(--accent,#4f5fc4)",color:"#fff",borderColor:"transparent"}}>{t("Save name")}</button>
         </div>
       </form>
     </div>}
 
     {deleteTarget&&<div role="presentation" onClick={event=>{if(event.target===event.currentTarget)setDeleteTarget(null);}} style={{position:"fixed",inset:0,zIndex:1050,display:"grid",placeItems:"center",padding:18,background:"rgba(10,18,32,.56)"}}>
       <section role="dialog" aria-modal="true" aria-labelledby="photo-delete-title" style={{width:"min(100%,380px)",padding:20,borderRadius:14,background:"var(--card,#fff)",color:"var(--text,#172033)",boxShadow:"0 20px 54px rgba(0,0,0,.22)"}}>
-        <h2 id="photo-delete-title" style={{fontSize:17,margin:"0 0 10px"}}>Delete private photo document?</h2>
-        <p style={{fontSize:13,lineHeight:1.55,color:"var(--muted,#64748b)",margin:"0 0 16px"}}>Delete “{deleteTarget.title}” and its saved original photo from this device? This cannot be undone.</p>
+        <h2 id="photo-delete-title" style={{fontSize:17,margin:"0 0 10px"}}>{t("Delete private photo document?")}</h2>
+        <p style={{fontSize:13,lineHeight:1.55,color:"var(--muted,#64748b)",margin:"0 0 16px"}}>{t("Delete “{name}” and its saved original photo from this device? This cannot be undone.", { name: deleteTarget.title })}</p>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
-          <button type="button" onClick={()=>setDeleteTarget(null)} style={actionStyle}>Keep document</button>
+          <button type="button" onClick={()=>setDeleteTarget(null)} style={actionStyle}>{t("Keep document")}</button>
           <button type="button" onClick={confirmDeleteDocument} style={{...actionStyle,background:"#b42318",color:"#fff",borderColor:"transparent"}}>Delete</button>
         </div>
       </section>
@@ -376,25 +377,25 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
       <header style={{display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,padding:"4px 2px 12px"}}>
         <div style={{minWidth:0}}>
           <strong style={{fontSize:14,display:"block",overflowWrap:"anywhere"}}>{preview.title}</strong>
-          <span style={{fontSize:11,opacity:.78}}>Private preview · Page {preview.pageIndex+1} of {preview.pageCount}</span>
+          <span style={{fontSize:11,opacity:.78}}>{t("Private preview · Page {page} of {pages}", { page: preview.pageIndex+1, pages: preview.pageCount })}</span>
         </div>
-        <button type="button" onClick={closePreview} style={{padding:"8px 12px",border:"1px solid #ffffff55",borderRadius:8,background:"transparent",color:"#fff"}}>Close</button>
+        <button type="button" onClick={closePreview} style={{padding:"8px 12px",border:"1px solid #ffffff55",borderRadius:8,background:"transparent",color:"#fff"}}>{t("Close")}</button>
       </header>
       <div style={{minHeight:0,display:"grid",placeItems:"center",overflow:"auto"}}>
         {preview.image
           ? <div style={{position:"relative",width:"min(100%,620px)",maxHeight:"100%",aspectRatio:"210/297",background:"#fff",boxShadow:"0 12px 36px rgba(0,0,0,.4)"}}>
-              <img src={"data:image/jpeg;base64,"+preview.image} alt={"A4 photo-sheet preview, page "+(preview.pageIndex+1)} style={{display:"block",width:"100%",height:"100%",objectFit:"contain"}}/>
+              <img src={"data:image/jpeg;base64,"+preview.image} alt={t("A4 photo-sheet preview, page {page}", { page: preview.pageIndex+1 })} style={{display:"block",width:"100%",height:"100%",objectFit:"contain"}}/>
               <div aria-hidden="true" style={{position:"absolute",inset:0,pointerEvents:"none",display:"grid",placeItems:"center",backgroundImage:"repeating-linear-gradient(135deg,transparent 0 66px,rgba(35,48,74,.035) 66px 68px)"}}>
                 <span style={{position:"absolute",left:"7%",right:"7%",top:"42%",transform:"rotate(-28deg)",fontSize:"clamp(10px,2vw,16px)",lineHeight:2.2,fontWeight:900,letterSpacing:".18em",textAlign:"center",color:"rgba(38,52,78,.15)"}}>SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW</span>
                 <strong style={{position:"absolute",left:"8%",right:"8%",bottom:"7%",padding:"8px 10px",border:"1px solid rgba(44,59,84,.22)",borderRadius:5,background:"rgba(255,255,255,.55)",color:"rgba(28,43,69,.72)",fontSize:"clamp(10px,1.8vw,15px)",letterSpacing:".12em",textAlign:"center"}}>SmartPrint by QuantaEdge</strong>
               </div>
             </div>
-          : <div role="status" style={{fontSize:13,opacity:.8}}>Preparing secure preview…</div>}
+          : <div role="status" style={{fontSize:13,opacity:.8}}>{t("Preparing secure preview…")}</div>}
       </div>
       <footer style={{display:"flex",alignItems:"center",justifyContent:"center",gap:16,paddingTop:12}}>
-        <button type="button" disabled={preview.pageIndex===0} onClick={()=>changePreviewPage(preview.pageIndex-1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>Previous</button>
-        <span style={{fontSize:12}}>Page {preview.pageIndex+1} / {preview.pageCount}</span>
-        <button type="button" disabled={preview.pageIndex>=preview.pageCount-1} onClick={()=>changePreviewPage(preview.pageIndex+1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>Next</button>
+        <button type="button" disabled={preview.pageIndex===0} onClick={()=>changePreviewPage(preview.pageIndex-1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>{t("Previous")}</button>
+        <span style={{fontSize:12}}>{t("Page {page} / {pages}", { page: preview.pageIndex+1, pages: preview.pageCount })}</span>
+        <button type="button" disabled={preview.pageIndex>=preview.pageCount-1} onClick={()=>changePreviewPage(preview.pageIndex+1)} style={{...actionStyle,background:"#ffffff12",color:"#fff",borderColor:"#ffffff55"}}>{t("Next")}</button>
       </footer>
     </div>}
   </main>;
