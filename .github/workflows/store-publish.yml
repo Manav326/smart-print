@@ -182,8 +182,19 @@ jobs:
           $probeFile = Join-Path $env:RUNNER_TEMP "SmartPrint-Store-public-range-probe.bin"
           $response = Invoke-WebRequest -Uri $publicUrl -Method Get -Headers @{ Range = "bytes=0-0" } -OutFile $probeFile -MaximumRedirection 5
           if ($response.StatusCode -ne 206) { throw "Public Store installer URL did not honor a one-byte HTTP range request (expected 206)." }
-          if ($response.Headers["Content-Range"] -notmatch "^bytes 0-0/") { throw "Public Store installer URL returned an invalid Content-Range header." }
+          if ($response.Headers["Content-Range"] -notmatch "^bytes 0-0/(\d+)$") { throw "Public Store installer URL returned an invalid Content-Range header." }
+          $publicLength = [Int64]$Matches[1]
+          if ($publicLength -ne (Get-Item $file).Length) { throw "Public Store installer URL reports a different content length than the signed release artifact." }
           if ((Get-Item $probeFile).Length -ne 1) { throw "Public Store installer URL returned an invalid range response body." }
+          $localStream = [System.IO.File]::OpenRead($file)
+          $probeStream = [System.IO.File]::OpenRead($probeFile)
+          try {
+            if ($localStream.ReadByte() -ne $probeStream.ReadByte()) { throw "Public Store installer URL did not serve the expected artifact bytes." }
+          }
+          finally {
+            $localStream.Dispose()
+            $probeStream.Dispose()
+          }
           Remove-Item -LiteralPath $probeFile -Force
           "WINDOWS_STORE_PACKAGE_URL=$publicUrl" >> $env:GITHUB_ENV
           Write-Host "Verified immutable public installer URL and byte-range delivery: $publicUrl"
