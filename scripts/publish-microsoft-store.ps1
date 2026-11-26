@@ -38,7 +38,7 @@ if ($baseUri.AbsolutePath -notin @("", "/") -or $baseUri.Query -or $baseUri.Frag
 }
 
 $packageUrl = "$($baseUri.GetLeftPart([UriPartial]::Authority))/$ReleaseTag/SmartPrint-Windows-Store-Setup.exe"
-$documentationUrl = "https://raw.githubusercontent.com/Manav326/smart-print/main/docs/windows-installer-exit-codes.md"
+$documentationUrl = "https://raw.githubusercontent.com/Manav326/smart-print/$ReleaseTag/docs/windows-installer-exit-codes.md"
 $apiBase = "https://api.store.microsoft.com"
 $tokenUri = "https://login.microsoftonline.com/$TenantId/oauth2/v2.0/token"
 
