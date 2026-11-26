@@ -207,7 +207,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
     <div className={styles.orderSignals}>
       <div className={styles.signalRow}><span className={styles.signalIcon+(journey.payment?.status==="VERIFIED"||journey.payment?.status==="PARTIALLY_REFUNDED"?" "+styles.signalGood:"")}><CreditCard size={15}/></span><div><strong>Payment</strong><small>{paymentLabel(journey.payment,journey.stage)} · {money(journey.payment?.amountMinor??journey.quotedAmountMinor,journey.currency)}</small></div></div>
       <div className={styles.signalRow}><span className={styles.signalIcon+(printer.ready?" "+styles.signalGood:"")}><Printer size={15}/></span><div><strong>{printer.name}</strong><small>{printer.detail}</small></div></div>
-      {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} file(s) need attention. Check physical output before retrying.</span></div>}
+      {journey.attentionJobs.length>0&&<div className={styles.attentionLine}><AlertTriangle size={14}/><span>{journey.attentionJobs.length} file(s) need attention. Check the original output destination before retrying.</span></div>}
     </div>
     <div className={styles.cardWorkflowActions}>
       {canReview&&<button type="button" className={styles.actionButton} onClick={()=>onReviewBatch(journey.batchId!)}><FileText size={14}/> Review all files</button>}
@@ -227,7 +227,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
       {filesExpanded&&<div className={styles.orderFileDetails} id={"order-files-"+journey.key}>
         {journey.batchId&&unprintedResumeCandidates.length>0&&<section className={styles.resumePanel} aria-label="Resume files verified as unprinted">
           <div className={styles.resumePanelHeading}>
-            <strong>Resume files with zero pages printed</strong>
+            <strong>{virtualTestResume?"Retry virtual tests with zero output":"Resume files with zero pages printed"}</strong>
             <span>Only files with a fresh Windows queue-absence check, a known page total and a secured copy on the original computer appear here.</span>
           </div>
           <div className={styles.resumeCandidateList}>
@@ -247,9 +247,11 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
               </label>;
             })}
           </div>
-          <p>Before continuing, check the original Windows queue and paper tray for each selected file. Files with any printed pages or unknown page counts cannot be retried here.</p>
+          <p>{virtualTestResume
+            ?"Before continuing, verify that each exact job is absent from the original virtual Windows queue and that no test output artifact was created. Files with any recorded pages or unknown page counts cannot be retried."
+            :"Before continuing, check the original Windows queue and paper tray for each selected file. Files with any printed pages or unknown page counts cannot be retried here."}</p>
           <button type="button" className={styles.resumeButton} disabled={resumeBusy||effectiveSelectedResumeJobIds.length===0} onClick={()=>void resumeSelectedUnprintedFiles()}>
-            {resumeBusy?"Authorising selected files":`Resume ${effectiveSelectedResumeJobIds.length} selected file(s)`}
+            {resumeBusy?"Authorising selected files":virtualTestResume?`Retry ${effectiveSelectedResumeJobIds.length} virtual test(s)`:`Resume ${effectiveSelectedResumeJobIds.length} selected file(s)`}
           </button>
         </section>}
         {journey.jobs.map((job,index)=><div className={styles.orderFileItem} key={job.id}>
