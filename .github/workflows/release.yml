@@ -719,6 +719,8 @@ jobs:
             upload_binary "SmartPrint-Android.apk"
             upload_binary "SmartPrint-Android.aab"
           fi
+          upload_binary "BUILD-INFO.txt"
+          upload_binary "attestation.sigstore.json"
           manifest_digest="$(sha256sum artifacts/SHA256SUMS.txt | awk '{print $1}')"
           set +e
           existing_manifest_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --output json 2>&1)"
@@ -759,7 +761,7 @@ jobs:
           prefix = os.environ["RELEASE_TAG"]
           endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
           artifacts = Path("artifacts")
-          files = ["SmartPrint-Windows-Setup.exe", "SHA256SUMS.txt"]
+          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "attestation.sigstore.json", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
@@ -811,7 +813,7 @@ jobs:
           base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
           portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
           tag = os.environ["RELEASE_TAG"]
-          files = ["SmartPrint-Windows-Setup.exe", "SHA256SUMS.txt"]
+          files = ["SmartPrint-Windows-Setup.exe", "BUILD-INFO.txt", "attestation.sigstore.json", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
@@ -862,7 +864,9 @@ jobs:
               binaries.add("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
               binaries.update({"SmartPrint-Android.apk", "SmartPrint-Android.aab"})
-          expected = binaries | {"SHA256SUMS.txt"}
+          provenance_assets = {"BUILD-INFO.txt", "attestation.sigstore.json"}
+          expected_assets = binaries | provenance_assets
+          expected = expected_assets | {"SHA256SUMS.txt"}
           headers = {
               "Accept": "application/vnd.github+json",
               "Authorization": f"Bearer {token}",
@@ -872,10 +876,10 @@ jobs:
           for line in (artifact_dir / "SHA256SUMS.txt").read_text(encoding="utf-8").splitlines():
               digest, filename = line.split(maxsplit=1)
               checksums[filename.lstrip("*")] = digest
-          if set(checksums) != binaries:
+          if set(checksums) != expected_assets:
               raise SystemExit(
-                  "SHA256SUMS.txt does not match the packages enabled for this release. "
-                  f"Expected {sorted(binaries)}, found {sorted(checksums)}."
+                  "SHA256SUMS.txt does not match the release packages and provenance files. "
+                  f"Expected {sorted(expected_assets)}, found {sorted(checksums)}."
               )
           for filename, expected_digest in checksums.items():
               actual_digest = hashlib.sha256((artifact_dir / filename).read_bytes()).hexdigest()
