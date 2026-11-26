@@ -714,10 +714,10 @@ test("customer-facing print choices explain privacy versus connection without ch
  assert.match(app,/batchQuoteBreakdown\.totalOutputPagesAndSheets/);
  assert.match(app,/className="customer-batch-quote-lines"/);
  assert.match(app,/<details className="customer-batch-quote-details">/);
- assert.match(app,/<strong>Normal documents<\/strong>/);
- assert.match(app,/<strong>ID cards<\/strong>/);
- assert.match(app,/<strong>Photo printing<\/strong>/);
- assert.match(app,/<strong>Total output<\/strong>/);
+ assert.match(app,/<strong>\{t\("Normal documents"\)\}<\/strong>/);
+ assert.match(app,/<strong>\{t\("ID cards"\)\}<\/strong>/);
+ assert.match(app,/<strong>\{t\("Photo printing"\)\}<\/strong>/);
+ assert.match(app,/<strong>\{t\("Total output"\)\}<\/strong>/);
  assert.match(app,/output sides after N-up and copies/);
  assert.match(app,/UPI transaction ID \(UTR\)/);
  assert.match(app,/Find it in your UPI app under payment details or transaction history/);
