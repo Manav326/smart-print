@@ -809,11 +809,11 @@ export default function PhotoStudio({
       : mode === "shop"
         ? "Replace the unpaid job photo PDF; approval and dispatch still apply."
         : "Prepared photo output replaces this upload; original stays untouched.";
-  const actionLabel = mode === "private-library" ? "Save private sheet" : mode === "shop-create" ? "Create photo order" : mode === "shop" ? "Save sheet to this job" : "Prepare A4 sheet";
-  const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? "Save photo-paper prints" : mode === "shop" ? "Save photo-paper prints to this job" : "Prepare photo-paper prints") : actionLabel;
-  const busyLabel = preparationProgress ?? (mode === "private-library" ? "Saving privately…" : mode === "shop-create" ? "Creating photo order…" : mode === "shop" ? "Saving to the existing job…" : "Preparing your photo output…");
+  const actionLabel = mode === "private-library" ? t("Save private sheet") : mode === "shop-create" ? t("Create photo order") : mode === "shop" ? t("Save sheet to this job") : t("Prepare A4 sheet");
+  const outputActionLabel = isPhotoPaperLayout ? (mode === "private-library" ? t("Save photo-paper prints") : mode === "shop" ? t("Save photo-paper prints to this job") : t("Prepare photo-paper prints")) : actionLabel;
+  const busyLabel = preparationProgress ? t(preparationProgress) : mode === "private-library" ? t("Saving privately…") : mode === "shop-create" ? t("Creating photo order…") : mode === "shop" ? t("Saving to the existing job…") : t("Preparing your photo output…");
   const cropPanel=activeTool==="crop",lookPanel=activeTool==="look",textPanel=activeTool==="text",backgroundPanel=activeTool==="background";
-  const panelTitle=cropPanel?"Crop & position":lookPanel?"Photo look":textPanel?"Text layers":backgroundPanel?"Photo background":"Photo sheet & form details";
+  const panelTitle=cropPanel?t("Crop & position"):lookPanel?t("Photo look"):textPanel?t("Text layers"):backgroundPanel?t("Photo background"):t("Photo sheet & form details");
 
   return (
     <div ref={dialogRef} className={styles.overlay + (dark ? " " + styles.dark : "")} role="dialog" aria-modal="true" aria-labelledby="photo-studio-title" aria-busy={busy} tabIndex={-1}>
@@ -822,7 +822,7 @@ export default function PhotoStudio({
           <span className={styles.brandMark}><ImageIcon size={17}/></span>
           <span><strong id="photo-studio-title">{t("Photo Studio")}</strong><small>{mode === "private-library" ? t("PRIVATE · ON THIS DEVICE") : mode === "shop-create" ? t("SHOP · NEW PHOTO ORDER") : mode === "shop" ? t("SHOP · EDIT EXISTING JOB") : t("CUSTOMER · BEFORE UPLOAD")}</small></span>
         </div>
-        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm photo` : "A4 · 210 × 297 mm"}</span><span>{t("PDF target · 300 DPI")}</span></div>
+        <div className={styles.topbarMeta}><span>{isPhotoPaperLayout ? `${size.widthMm} × ${size.heightMm} mm ${t("photo")}` : "A4 · 210 × 297 mm"}</span><span>{t("PDF target · 300 DPI")}</span></div>
         <button type="button" className={styles.iconButton} onClick={onCancel} disabled={busy} aria-label={t("Close Photo Studio")} title={t("Close")}><X size={18}/></button>
       </header>
 
