@@ -1836,6 +1836,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Enter a document name.": "दस्तावेज़ का नाम दर्ज करें।",
     "photo": "फोटो",
     "Prepared ID card": "तैयार ID कार्ड",
+    "This signed-in account is not authorized for {scope}.": "यह साइन-इन अकाउंट {scope} के लिए अधिकृत नहीं है।",
+    "Sign out and use another account": "साइन आउट करें और दूसरा अकाउंट उपयोग करें",
 
   },
   hinglish: {
@@ -3300,6 +3302,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Enter a document name.": "Document ka naam enter karein.",
     "photo": "photo",
     "Prepared ID card": "Prepared ID card",
+    "This signed-in account is not authorized for {scope}.": "Yeh signed-in account {scope} ke liye authorised nahi hai.",
+    "Sign out and use another account": "Sign out karein aur doosra account use karein",
 
   },
 };
