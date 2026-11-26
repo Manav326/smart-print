@@ -7,13 +7,13 @@ This repository uses one versioned GitHub release to produce the website downloa
 1. Merge tested changes to `main`.
 2. The existing main-CI release automation creates a stable `vX.Y.Z` tag and runs `.github/workflows/release.yml`.
 3. The release workflow builds:
-   - `SmartPrint-Windows-Setup.exe`: existing website beta installer (kept separate).
-   - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate and WebView2 standalone URL are configured.
+   - `SmartPrint-Windows-Setup.exe`: signed, offline website installer when Windows signing inputs are configured; otherwise the existing unsigned beta installer is retained.
+   - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate, WebView2 standalone URL and exact Partner Center publisher name are configured.
    - `SmartPrint-Android.apk`: website/direct-download Android package.
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
    - `SHA256SUMS.txt`: checksums for the artifacts produced.
 4. The workflow creates a GitHub release. When Cloudflare R2 is configured, immutable versioned website assets are uploaded and verified there.
-5. Review the draft assets and test the exact binaries.
+5. Review the published GitHub release assets and test the exact binaries.
 6. Run **Actions → Publish SmartPrint to Microsoft Store and Google Play**, choose the tag and tracks, and set `confirm_publication=true`.
 7. Microsoft receives the signed installer URL through the Store Submission API. Google Play receives the signed AAB. Production jobs use protected GitHub Environments.
 
@@ -40,7 +40,7 @@ Add these GitHub repository Actions secrets:
 | `WINDOWS_CODESIGN_PFX_BASE64` | Single-line Base64 of the PFX file |
 | `WINDOWS_CODESIGN_PFX_PASSWORD` | PFX export password |
 
-The workflow signs the SmartPrint desktop/Agent PE binaries and final Store installer with SHA-256 and an RFC 3161 timestamp, then verifies each signature. The Microsoft WebView2 runtime remains Microsoft-signed and is verified, not re-signed.
+The workflow signs the SmartPrint desktop/Agent PE binaries and both final Windows installers with SHA-256 and an RFC 3161 timestamp. Inno Setup also signs the generated uninstallers. Both production installers are offline and include the Microsoft WebView2 Evergreen Standalone Runtime. The Microsoft WebView2 runtime remains Microsoft-signed and is verified, not re-signed.
 
 If the certificate is hardware-backed/non-exportable, do not export or weaken it. The current workflow expects an exportable PFX; ask for a Trusted Signing/HSM integration change before using a hardware-backed certificate.
 
@@ -56,7 +56,7 @@ Because the selected Microsoft developer account is Individual, confirm the publ
 
 ### C. WebView2 offline prerequisite
 
-The Store installer must be standalone/offline. The existing website installer continues using its existing bootstrapper; the Store installer uses the Microsoft Evergreen **Standalone Installer x64**, not the small Evergreen Bootstrapper.
+Both production Windows installers must be standalone/offline. The release workflow uses the Microsoft Evergreen **Standalone Installer x64**, not the small Evergreen Bootstrapper, for the signed website and Store packages. If signing inputs are absent, only the interim unsigned website beta installer is produced.
 
 1. Open the official [Microsoft WebView2 download page](https://developer.microsoft.com/microsoft-edge/webview2/).
 2. Under **Evergreen Standalone Installer**, select **x64**.
