@@ -9162,15 +9162,28 @@ agentApi.MapPost("/printers/sync", async (
     var entitlement = await entitlements.GetForTenantAsync(device.TenantId, ct);
     var tenantPrinters = await db.PrinterDevices.AsNoTracking()
         .Where(printer => printer.TenantId == device.TenantId)
-        .Select(printer => new { printer.QueueName, printer.IsActive, printer.OutputMode })
-        .ToListAsync(ct);
-    var selectedPrinterCount = tenantPrinters.LongCount(printer =>
-        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
+        .Select(printer => new
+        {
+            printer.Id,
+            printer.TenantId,
+            printer.AgentDeviceId,
+            printer.IdentityFingerprint,
+            printer.QueueName,
+            printer.IsActive,
+            printer.OutputMode,
+            VirtualTestGrantActive = !environment.IsProduction() &&
+                printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                db.VirtualPrinterTestGrants.Any(grant =>
                     grant.TenantId == printer.TenantId &&
                     grant.PrinterDeviceId == printer.Id &&
                     grant.AgentDeviceId == printer.AgentDeviceId &&
                     grant.IdentityFingerprint == printer.IdentityFingerprint &&
-                    grant.RevokedUtc == null && grant.ExpiresUtc > now))));
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now)
+        })
+        .ToListAsync(ct);
+    var selectedPrinterCount = tenantPrinters.LongCount(printer =>
+        printer.IsActive && (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" ||
+            (printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && printer.VirtualTestGrantActive)));
 
     var existing = await db.PrinterDevices
         .Where(printer => printer.TenantId == device.TenantId &&
@@ -9240,14 +9253,19 @@ agentApi.MapPost("/printers/sync", async (
         }
         else
         {
-            // Rescans never override the owner's active/inactive selection.
+            // A grant remains valid only for the exact current Agent/queue/driver/port
+            // identity. A changed identity invalidates approval and deselects the queue.
+            var discoveredFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
+                device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName);
+            var hasActiveVirtualGrant = !environment.IsProduction() &&
+                discovered.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                await db.VirtualPrinterTestGrants.AnyAsync(grant =>
+                    grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
+                    grant.AgentDeviceId == device.Id && grant.IdentityFingerprint == discoveredFingerprint &&
+                    grant.RevokedUtc == null && grant.ExpiresUtc > now, ct);
             var wasQuotaSelected = printer.IsActive &&
-                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" || (!environment.IsProduction() && printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && db.VirtualPrinterTestGrants.Any(grant =>
-                    grant.TenantId == printer.TenantId &&
-                    grant.PrinterDeviceId == printer.Id &&
-                    grant.AgentDeviceId == printer.AgentDeviceId &&
-                    grant.IdentityFingerprint == printer.IdentityFingerprint &&
-                    grant.RevokedUtc == null && grant.ExpiresUtc > now)));
+                (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" ||
+                 (printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual && hasActiveVirtualGrant));
             var driverChanged = !string.Equals(
                 printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
@@ -9257,13 +9275,12 @@ agentApi.MapPost("/printers/sync", async (
             printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
             printer.OutputMode = discovered.OutputMode;
             printer.IsTestModeOverride = false;
-            printer.IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
-                device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName);
+            printer.IdentityFingerprint = discoveredFingerprint;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
             printer.CapabilitiesJson = AgentPrinterSyncRules.ResolveCapabilitiesJson(
                 printer.CapabilitiesJson, discovered.CapabilitiesJson, driverChanged);
-            if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL")
+            if (discovered.OutputMode == "UNSUPPORTED_VIRTUAL" && !hasActiveVirtualGrant)
             {
                 printer.IsActive = false;
                 if (wasQuotaSelected) selectedPrinterCount--;
