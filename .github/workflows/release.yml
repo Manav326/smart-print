@@ -98,6 +98,7 @@ jobs:
     runs-on: windows-latest
     outputs:
       store_available: ${{ steps.store-package.outputs.available }}
+      store_signer_thumbprint: ${{ steps.store-package.outputs.signer_thumbprint }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -389,6 +390,7 @@ jobs:
       ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
       ANDROID_SIGNER_SHA256: ${{ needs.android-release.outputs.signer_sha256 }}
       WINDOWS_STORE_PACKAGE_AVAILABLE: ${{ needs.windows-setup.outputs.store_available }}
+      WINDOWS_STORE_SIGNER_THUMBPRINT: ${{ needs.windows-setup.outputs.store_signer_thumbprint }}
       RELEASE_SOURCE_SHA: ${{ needs.validate-release-config.outputs.source_sha }}
     steps:
       - name: Download Windows installer
@@ -422,6 +424,7 @@ jobs:
           workflow_run_id=$GITHUB_RUN_ID
           workflow_run_number=$GITHUB_RUN_NUMBER
           android_upload_cert_sha256=${ANDROID_SIGNER_SHA256:-not-built}
+          windows_store_signer_thumbprint=${WINDOWS_STORE_SIGNER_THUMBPRINT:-not-built}
           EOF
           files=(SmartPrint-Windows-Setup.exe BUILD-INFO.txt)
           if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
