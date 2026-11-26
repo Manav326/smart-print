@@ -4272,7 +4272,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       sessionStorage.removeItem("qrtoprint.customer-session");
     };
     void restore().catch(exception=>{
-      if(mounted)setError(exception instanceof Error?exception.message:"This QR station is unavailable.");
+      if(mounted)setError(exception instanceof Error?exception.message:t("This QR station is unavailable."));
     }).finally(()=>{if(mounted)setLoading(false);});
     return ()=>{mounted=false;};
   },[publicCode]);
@@ -4293,7 +4293,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
       sessionStorage.removeItem("qrtoprint.customer-session");
       setResult(value);
     }catch(exception){
-      setError(exception instanceof Error?exception.message:"Could not start a new print session.");
+      setError(exception instanceof Error?exception.message:t("Could not start a new print session."));
     }finally{
       setLoading(false);
     }
@@ -4339,7 +4339,7 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
     <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
       {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?translateUi(locale,"common.loading"):t("Connecting to your print shop")}</h1>{!nativeAppMode&&<p>{t("Creating a secure, time-limited session for this QR station.")}</p>}</>:
-      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">{t("STATION UNAVAILABLE")}</div><h1>{nativeAppMode?t("Shop unavailable"):t("This QR station can't be reached")}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
+      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">{t("STATION UNAVAILABLE")}</div><h1>{nativeAppMode?t("Shop unavailable"):t("This QR station can't be reached")}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>{t("Try again")}</button></>:
       result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">{t("SECURE SESSION CREATED")}</div><h1>{nativeAppMode?result.shop.displayName:translateUi(locale,"customer.welcome",{shopName:result.shop.displayName})}</h1><p>{nativeAppMode?t("Shop connected."):t("Your phone is connected to this shop's print station.")}</p>
         <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||t("Shop print counter")}</strong><span>{nativeAppMode?(result.printer?.status||t("Printer not selected")):result.printer?result.printer.manufacturer+" · "+result.printer.model : t("The shop will select a printer for your job.")}</span></div><Status label={result.printer?.status||t("Session ready")} tone="blue"/></div>
         <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?t("Secure session · Expires {expires}",{expires:formatIstTime(result.expiresUtc)}):t("This session expires at {expires}. Your document access stays limited to this shop session.",{expires:formatIstTime(result.expiresUtc)})}</span></div>
