@@ -677,7 +677,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  assert.match(app,/<CustomerNativePdfPreview[\s\S]*onPage=/);
  assert.match(app,/event\.previousStatus!==event\.newStatus/);
  assert.match(app,/customerStatusTone\(jobStatus\.status\)/);
- assert.match(app,/Last updated · \{formatIstDateTime\(jobStatus\.updatedUtc\)\}/);
+ assert.match(app,/t\("Last updated · \{date\}",\{date:formatIstDateTime\(jobStatus\.updatedUtc\)\}\)/);
  assert.match(api,/previousStatus\?: string \| null/);
  assert.match(program,/new \{ item\.PreviousStatus, item\.NewStatus, item\.ActorType, item\.CreatedUtc \}/);
  assert.match(css,/\.customer-native-pdf-preview/);
