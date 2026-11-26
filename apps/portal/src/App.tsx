@@ -2397,7 +2397,8 @@ function PrintersPage({
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
   const selectedPrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT")
+    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
+      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
   );
   const selectablePrinters = printers.filter(printer =>
     !printer.isActive && isPrinterReadyForSelection(printer, agents)
