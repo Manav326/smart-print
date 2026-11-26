@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocale, translateUiText } from "./i18n";
 import { formatIstDate } from "./date-time";
 import { CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, History, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import {
