@@ -2155,3 +2155,5 @@ export function formatUiDate(value: Date | number | string, localeValue: unknown
 export function formatUiCurrency(value: number, localeValue: unknown, currency = "INR"): string {
   return new Intl.NumberFormat(getUiLocaleLanguage(localeValue), { style: "currency", currency }).format(value);
 }
+    "Photo Studio": "Photo Studio",
+    "Connecting to your print shop": "Aapki print shop se connect ho rahe hain",
