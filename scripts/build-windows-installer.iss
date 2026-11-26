@@ -34,6 +34,10 @@ ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=artifacts\agent-installer
 OutputBaseFilename={#SmartPrintOutputBaseFilename}
+#ifdef SmartPrintSignToolName
+SignTool={#SmartPrintSignToolName}
+SignedUninstaller=yes
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
