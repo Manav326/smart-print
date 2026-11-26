@@ -34,12 +34,15 @@ if ($runtimeSignature.Status -ne [System.Management.Automation.SignatureStatus]:
 }
 $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
 $thumbprint = $null
+$importedCertificates = @()
 try {
   [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
   $pfxPassword = ConvertTo-SecureString $env:WINDOWS_CODESIGN_PFX_PASSWORD -AsPlainText -Force
-  $signingCertificate = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $pfxPassword | Where-Object { $_.HasPrivateKey } | Select-Object -First 1)
+  $importedCertificates = @(Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation Cert:\CurrentUser\My -Password $pfxPassword)
+  $signingCertificate = @($importedCertificates | Where-Object { $_.HasPrivateKey })
   if ($signingCertificate.Count -ne 1) { throw "The PFX did not import exactly one code-signing certificate with a private key." }
   $certificate = $signingCertificate[0]
+  $thumbprint = $certificate.Thumbprint
   $now = [DateTime]::UtcNow
   if ($now -lt $certificate.NotBefore.ToUniversalTime() -or $now -gt $certificate.NotAfter.ToUniversalTime()) {
     throw "The Windows code-signing certificate is not currently valid."
@@ -56,7 +59,6 @@ try {
     throw "The code-signing certificate subject does not contain the configured Partner Center publisher identity."
   }
   Write-Host "Using code-signing certificate publisher identity: $certificatePublisher"
-  $thumbprint = $certificate.Thumbprint
   $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
     Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
   if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
@@ -147,7 +149,13 @@ finally {
   if (Test-Path -LiteralPath $pfxPath) {
     Remove-Item -LiteralPath $pfxPath -Force -ErrorAction SilentlyContinue
   }
-  if (-not [string]::IsNullOrWhiteSpace($thumbprint)) {
+  foreach ($importedCertificate in $importedCertificates) {
+    if ($importedCertificate -and -not [string]::IsNullOrWhiteSpace($importedCertificate.Thumbprint)) {
+      Remove-Item -LiteralPath "Cert:\CurrentUser\My\$($importedCertificate.Thumbprint)" -Force -ErrorAction SilentlyContinue
+    }
+  }
+  if (-not [string]::IsNullOrWhiteSpace($thumbprint) -and
+      $importedCertificates.Thumbprint -notcontains $thumbprint) {
     Remove-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint" -Force -ErrorAction SilentlyContinue
   }
 }
