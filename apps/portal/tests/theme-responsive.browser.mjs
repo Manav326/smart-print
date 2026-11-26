@@ -1522,7 +1522,7 @@ try {
     await page.getByLabel("Email address").fill("theme-qa@example.invalid");
     await page.locator('input[autocomplete="current-password"]').fill("ThemeQa-Password-2026!");
     const signInLabel = route.auth === "admin" ? "Sign in to administration" : "Sign in";
-    await page.getByRole("button", { name: signInLabel }).click();
+    await page.locator("form").getByRole("button", { name: signInLabel, exact: true }).click();
     await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-in must restore Dark.`);
     await page.reload({ waitUntil: "domcontentloaded" });
