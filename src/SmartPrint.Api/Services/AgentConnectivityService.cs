@@ -49,8 +49,7 @@ public sealed record AgentPrinterSyncResult(
 
 public sealed class AgentConnectivityService(
     SmartPrintDbContext db,
-    TenantEntitlementService entitlements,
-    IHostEnvironment environment)
+    TenantEntitlementService entitlements)
 {
     public async Task<AgentHeartbeatResult> HeartbeatAsync(
         AgentDevice device,
@@ -103,7 +102,12 @@ public sealed class AgentConnectivityService(
 
         // Preserve the Agent's discovered output classification. Virtual queues are
         // authorised separately by a tenant/printer/Agent/identity-bound grant.
-        var normalized = validation.Printers;
+        var normalized = validation.Printers
+            .Select(discovered => discovered with
+            {
+                OutputMode = PrinterTypePolicy.ResolveOutputMode(discovered.OutputMode)
+            })
+            .ToArray();
         var now = DateTimeOffset.UtcNow;
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
         await entitlements.AcquireQuotaLockAsync(device.TenantId, TenantQuotaResource.Printer, cancellationToken);
