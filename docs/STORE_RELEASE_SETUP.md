@@ -174,6 +174,8 @@ The Play production workflow creates a 10% staged rollout (`inProgress`) rather 
 
 For every feature or bug-fix release, increment the stable semantic version (new `vX.Y.Z` tag). The existing release automation creates the binaries from the exact tested commit. The same publishing workflow updates the X64 Microsoft Store package URL and uploads the AAB to the selected Play track. Do not overwrite an already-published release or reuse an old tag. Keep the package ID `com.quantaedge.smartprint` and Android upload key unchanged.
 
+If a release build fails after uploading immutable R2 objects, rerun the **same GitHub Actions workflow run** (Actions → failed run → Re-run jobs). Do not start a second workflow_dispatch for the same tag: `GITHUB_RUN_NUMBER` contributes to the Android versionCode and Agent side-by-side folder name, so a new run for the same tag intentionally produces different bytes and the immutable R2 guard will reject it. If the same tag has already been published, create a new semantic version instead.
+
 
 
 ### Existing Windows customer updates — separate requirement
