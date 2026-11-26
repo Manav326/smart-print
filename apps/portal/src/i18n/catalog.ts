@@ -358,7 +358,7 @@ const uiCatalogs = { english, hindi, hinglish } as const;
 
 export type UiLocale = keyof typeof uiCatalogs;
 export type MessageKey = keyof typeof english;
-export type MessageValues = Record<string, string | number>;
+export type MessageValues = Record<string, string | number | null | undefined>;
 type LocaleMetadata = {
   label: string;
   nativeLabel: string;
@@ -3786,7 +3786,7 @@ export function translateUiText(localeValue: unknown, sourceText: string, values
   const locale = normalizeUiLocale(localeValue);
   const template = screenTextCatalogs[locale][sourceText] ?? sourceText;
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) =>
-    Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match
+    Object.prototype.hasOwnProperty.call(values, name) && values[name] !== null && values[name] !== undefined ? String(values[name]) : match
   );
 }
 
@@ -3829,7 +3829,7 @@ export function translateUi(localeValue: unknown, key: keyof typeof english | st
   const fallback = uiCatalogs[fallbackLocale] as Record<string, string>;
   const template = catalog[key] ?? fallback[key] ?? key;
   return template.replace(/\{([a-zA-Z][a-zA-Z0-9_]*)\}/g, (match, name: string) =>
-    Object.prototype.hasOwnProperty.call(values, name) ? String(values[name]) : match
+    Object.prototype.hasOwnProperty.call(values, name) && values[name] !== null && values[name] !== undefined ? String(values[name]) : match
   );
 }
 
