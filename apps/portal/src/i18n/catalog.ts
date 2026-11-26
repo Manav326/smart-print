@@ -369,7 +369,16 @@ const hindi: Record<keyof typeof english, string> = {
   "upi.saved": "भुगतान QR आपके डिवाइस पर सहेज दिया गया है।",
   "upi.saveCancelled": "QR सहेजना रद्द कर दिया गया।",
   "errors.network": "कनेक्शन में समस्या है। इंटरनेट जाँचें और फिर कोशिश करें।",
-  "errors.generic": "कुछ गलत हो गया। कृपया फिर कोशिश करें।"
+  "errors.generic": "कुछ गलत हो गया। कृपया फिर कोशिश करें।",
+  "public.howItWorks": "यह कैसे काम करता है",
+  "public.forShops": "दुकानों के लिए",
+  "public.forCustomers": "ग्राहकों के लिए",
+  "public.downloads": "डाउनलोड",
+  "public.forPrintShops": "प्रिंट दुकानों के लिए",
+  "public.heroTitle": "आपके फ़ोन से सीधे प्रिंटर तक। बिना बार-बार फ़ाइल भेजे।",
+  "public.heroDescription": "SmartPrint स्थानीय प्रिंट दुकानों और ग्राहकों को जोड़ता है। दुकान का QR स्कैन करें, हर फ़ाइल के लिए कॉपी और रंग चुनें और जाँच के लिए अनुरोध भेजें।",
+  "public.createShop": "अपनी दुकान ऑनलाइन लाएँ",
+  "public.seeHow": "जानें यह कैसे काम करता है"
 };
 
 export function translateUi(localeValue: unknown, key: keyof typeof english | string, values: MessageValues = {}): string {
