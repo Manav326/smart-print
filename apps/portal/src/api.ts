@@ -1768,7 +1768,8 @@ async function uploadCustomerPrivateRelay(
   ticket: CustomerLocalUploadTicket,
   grantToken: string,
   privateUpload: PrivateQsp2UploadFactory | null,
-  onStage?: CustomerPrivateRelayStageCallback
+  onStage?: CustomerPrivateRelayStageCallback,
+  onProgress?: CustomerUploadProgressCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
   // Check the canonical ticket before attempting a second transport.
@@ -2202,7 +2203,7 @@ export async function uploadCustomerDocumentLocally(
         // printer readiness or a fresh Agent key snapshot. The status endpoint
         // decides whether a transfer already exists; no new payload is sent.
         return uploadCustomerPrivateRelay(
-          sessionToken, file, ticket, grantToken, null, onStage
+          sessionToken, file, ticket, grantToken, null, onStage, onProgress
         );
       }
     } else {
@@ -2326,7 +2327,7 @@ export async function uploadCustomerDocumentLocally(
 
   if (privatePrinting) {
     return uploadCustomerPrivateRelay(
-      sessionToken, file, ticket, grantToken, privateUpload, onStage
+      sessionToken, file, ticket, grantToken, privateUpload, onStage, onProgress
     );
   }
 
