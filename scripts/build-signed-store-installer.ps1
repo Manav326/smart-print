@@ -82,10 +82,33 @@ try {
   }
   if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
   foreach ($file in $peFiles) {
+    $existingSignature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+    if ($existingSignature.Status -eq [System.Management.Automation.SignatureStatus]::Valid) {
+      # Keep Microsoft and third-party vendor signatures intact. Re-signing a
+      # valid framework/runtime binary with SmartPrint's certificate would
+      # replace the original publisher identity without adding security value.
+      & $signtool verify /pa /all $file.FullName
+      if ($LASTEXITCODE -ne 0) {
+        throw "An existing valid publisher signature did not pass SignTool verification: $($file.FullName)."
+      }
+      Write-Host "Preserved existing trusted signature for $($file.Name): $($existingSignature.SignerCertificate.Subject)"
+      continue
+    }
+
+    if ($existingSignature.Status -ne [System.Management.Automation.SignatureStatus]::NotSigned) {
+      throw "A bundled PE file has an invalid or untrusted existing signature ($($existingSignature.Status)); refusing to replace it: $($file.FullName)."
+    }
+
     & $signtool sign /fd SHA256 /td SHA256 /tr "http://timestamp.digicert.com" /sha1 $thumbprint $file.FullName
     if ($LASTEXITCODE -ne 0) { throw "Code signing failed for $($file.FullName)." }
+    $signedSignature = Get-AuthenticodeSignature -LiteralPath $file.FullName
+    if ($signedSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or
+        $signedSignature.SignerCertificate.Thumbprint -ne $thumbprint) {
+      throw "SmartPrint Authenticode verification did not confirm the configured signing certificate for $($file.FullName)."
+    }
     & $signtool verify /pa /all $file.FullName
     if ($LASTEXITCODE -ne 0) { throw "Authenticode verification failed for $($file.FullName)." }
+    Write-Host "Signed unsigned SmartPrint PE payload: $($file.Name)"
   }
   $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
   # Keep the already-built unsigned website installer untouched.
