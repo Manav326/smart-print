@@ -613,8 +613,8 @@ jobs:
             upload_binary "SmartPrint-Android.aab"
           fi
           manifest_digest="$(sha256sum artifacts/SHA256SUMS.txt | awk '{print $1}')"
-          existing_manifest="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --query 'Metadata.sha256' --output text 2>/dev/null || true)"
-          if [[ -n "$existing_manifest" && "$existing_manifest" != "None" ]]; then
+          if existing_manifest_json="$(aws s3api head-object --bucket "$CLOUDFLARE_R2_BUCKET" --key "$object_prefix/SHA256SUMS.txt" --endpoint-url "$endpoint" --region auto --output json 2>/dev/null)"; then
+            existing_manifest="$(python -c 'import json,sys; print(json.load(sys.stdin).get("Metadata", {}).get("sha256", ""))' <<<"$existing_manifest_json")"
             if [[ "$existing_manifest" != "$manifest_digest" ]]; then
               echo "::error::Refusing to overwrite immutable R2 checksum manifest for tag $RELEASE_TAG."
               exit 1
@@ -645,7 +645,7 @@ jobs:
           prefix = os.environ["RELEASE_TAG"]
           endpoint = f"https://{os.environ['CLOUDFLARE_R2_ACCOUNT_ID']}.r2.cloudflarestorage.com"
           artifacts = Path("artifacts")
-          files = ["SmartPrint-Windows-Setup.exe"]
+          files = ["SmartPrint-Windows-Setup.exe", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
@@ -697,7 +697,7 @@ jobs:
           base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
           portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
           tag = os.environ["RELEASE_TAG"]
-          files = ["SmartPrint-Windows-Setup.exe"]
+          files = ["SmartPrint-Windows-Setup.exe", "SHA256SUMS.txt"]
           if os.environ.get("WINDOWS_STORE_PACKAGE_AVAILABLE") == "true":
               files.append("SmartPrint-Windows-Store-Setup.exe")
           if os.environ.get("ANDROID_RELEASE_AVAILABLE") == "true":
