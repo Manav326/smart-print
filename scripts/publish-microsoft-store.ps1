@@ -48,7 +48,7 @@ $token = Invoke-RestMethod -Method Post -Uri $tokenUri -ContentType "application
     client_id = $ClientId
     client_secret = $ClientSecret
     scope = "https://api.store.microsoft.com/.default"
-}
+} -TimeoutSec 60
 if ([string]::IsNullOrWhiteSpace($token.access_token)) {
     throw "Microsoft identity endpoint did not return an access token."
 }
@@ -69,6 +69,7 @@ function Invoke-StoreApi {
         Method = $Method
         Uri = "$apiBase$Path"
         Headers = $headers
+        TimeoutSec = 60
         ErrorAction = "Stop"
     }
     if ($null -ne $Body) {
@@ -110,7 +111,7 @@ function Invoke-StoreApi {
             if ($retryAfterSeconds -le 0) {
                 $retryAfterSeconds = [Math]::Min(30, [Math]::Pow(2, $attempt))
             }
-            $retryAfterSeconds = [Math]::Min(60, [Math]::Max(1, $retryAfterSeconds))
+            $retryAfterSeconds = [Math]::Min(300, [Math]::Max(1, $retryAfterSeconds))
             Write-Warning "Microsoft Store API returned HTTP $statusCode for $Method $Path. Retrying in $retryAfterSeconds seconds (attempt $attempt of $maxAttempts)."
             Start-Sleep -Seconds $retryAfterSeconds
         }
