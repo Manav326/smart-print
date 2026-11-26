@@ -54,9 +54,11 @@ public static class VirtualPrinterTestGrantPolicy
         string? status,
         DateTimeOffset? printerLastSeenUtc,
         bool grantActive,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool isProduction)
     {
-        if (!string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) ||
+        if (isProduction ||
+            !string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) ||
             !grantActive ||
             printerLastSeenUtc is null ||
             printerLastSeenUtc < now - MaximumInventoryAge)
