@@ -161,10 +161,14 @@ jobs:
           if ($storedHash -ne $hash) { throw "The stored Microsoft Store package bytes do not match the signed release artifact." }
           Remove-Item -LiteralPath $verifiedCopy -Force
           $publicUrl = "$($env:PUBLIC_DOWNLOAD_BASE_URL.TrimEnd('/'))/$env:RELEASE_TAG/SmartPrint-Windows-Store-Setup.exe"
-          $response = Invoke-WebRequest -Uri $publicUrl -Method Head -MaximumRedirection 5
-          if ($response.StatusCode -lt 200 -or $response.StatusCode -ge 300) { throw "Public Store installer URL did not return a successful response." }
+          $probeFile = Join-Path $env:RUNNER_TEMP "SmartPrint-Store-public-range-probe.bin"
+          $response = Invoke-WebRequest -Uri $publicUrl -Method Get -Headers @{ Range = "bytes=0-0" } -OutFile $probeFile -MaximumRedirection 5
+          if ($response.StatusCode -ne 206) { throw "Public Store installer URL did not honor a one-byte HTTP range request (expected 206)." }
+          if ($response.Headers["Content-Range"] -notmatch "^bytes 0-0/") { throw "Public Store installer URL returned an invalid Content-Range header." }
+          if ((Get-Item $probeFile).Length -ne 1) { throw "Public Store installer URL returned an invalid range response body." }
+          Remove-Item -LiteralPath $probeFile -Force
           "WINDOWS_STORE_PACKAGE_URL=$publicUrl" >> $env:GITHUB_ENV
-          Write-Host "Verified immutable public installer URL: $publicUrl"
+          Write-Host "Verified immutable public installer URL and byte-range delivery: $publicUrl"
 
       - name: Submit Windows package for Microsoft certification
         shell: pwsh
