@@ -141,7 +141,27 @@ The publishing script patches only the existing X64 package, commits the package
 
 Do not commit the JSON key or paste it into chat. The app's package name is fixed in the workflow as `com.quantaedge.smartprint`.
 
-For the Windows Store listing, prepare the app description, short description, category, age rating, 1:1 Store logo and current Windows screenshots. Partner Center's listing editor validates the exact image dimensions and file types for each asset slot; use those displayed requirements rather than resizing one image into every slot.
+For the Windows Store listing, prepare the app description, short description, category, age rating, 1:1 Store logo and current Windows screenshots. For a desktop-only EXE app, prepare:
+- **1:1 box-art Store logo:** PNG, square aspect ratio. Microsoft's EXE listing requires this asset; Partner Center validates the accepted pixel dimensions for the selected slot.
+- **Desktop screenshots:** PNG, landscape or portrait, at least 1366 × 768, no more than 50 MB each. One is required; prepare four or more, up to ten.
+- **Description:** required, up to 10,000 characters.
+- **Applicable license terms:** required, up to 10,000 characters (for example, the actual proprietary/commercial license terms that apply to SmartPrint).
+- **Short description:** recommended, up to 1,000 characters.
+- **Features:** optional, up to 20 entries, max 200 characters each.
+- **What's new:** optional, up to 1,500 characters per release.
+- **Search terms:** optional, up to seven terms, each max 40 characters, 21 unique words total.
+- **Support contact, website and privacy policy:** provide real, monitored contact details and public HTTPS URLs.
+
+For Google Play, prepare:
+- **App icon:** 512 × 512 PNG, 32-bit with alpha.
+- **Feature graphic:** 1024 × 500 JPEG or 24-bit PNG, no alpha.
+- **Phone screenshots:** 2–8 PNG/JPEG images, each up to 8 MB, each side 320–3,840 pixels. Use actual SmartPrint Android screens, not Windows screenshots.
+- **Short description:** up to 80 characters.
+- **Full description:** up to 4,000 characters.
+- **Privacy policy URL and Data Safety answers:** must match actual data collection, sharing and retention.
+- **App category, contact email and website:** actual product/support information.
+
+Do not create fake feature claims or show screens that are not in the released app. Capture current UI from real QA builds. If you want, the same core brand assets can be adapted to each Store's required aspect ratio, but do not stretch a single image across all slots.
 
 If this is a personal Play developer account created after 13 November 2023, Google may require at least 12 opted-in closed-testers for 14 continuous days before production access. Complete the Play Console testing requirement before selecting production.
 
