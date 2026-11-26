@@ -1111,7 +1111,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       await confirmShopPrintOutput(tokens.accessToken, job.id, manualQueueReconciliation);
       setToast(manualQueueReconciliation
         ? "Output manually reconciled after checking the Windows queue and physical pages."
-        : "Physical {t("output confirmed")} by the shop operator.");
+        : t("Physical output confirmed by the shop operator."));
       await reload();
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : "Could not confirm physical output.");
