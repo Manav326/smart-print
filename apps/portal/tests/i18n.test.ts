@@ -48,7 +48,7 @@ test("screen copy uses pretranslated dictionaries and preserves English source f
 
 test("shop, printer and refund workflows use pretranslated screen copy", () => {
   assert.equal(translateUiText("hindi", "Driver capabilities"), "ड्राइवर की क्षमताएँ");
-  assert.equal(translateUiText("hinglish", "Driver capabilities"), "Driver capabilities");
+  assert.equal(translateUiText("hinglish", "Driver capabilities"), "Driver ki capabilities");
   assert.equal(translateUiText("hindi", "PDF saved"), "PDF सेव हो गई");
   assert.equal(translateUiText("hinglish", "PDF saved"), "PDF save ho gayi");
   assert.equal(
