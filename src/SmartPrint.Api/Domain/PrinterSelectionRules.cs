@@ -17,7 +17,8 @@ public static class PrinterSelectionRules
         bool agentRevoked,
         DateTimeOffset? agentLastSeenUtc,
         DateTimeOffset now,
-        bool virtualTestGrantActive = false)
+        bool virtualTestGrantActive,
+        bool isProduction)
     {
         var freshAfter = now.AddMinutes(-2);
         if (!agentOnline || agentRevoked ||
@@ -29,7 +30,7 @@ public static class PrinterSelectionRules
 
         var physical = string.Equals(outputMode, "PHYSICAL", StringComparison.OrdinalIgnoreCase);
         var authorisedVirtual = string.Equals(outputMode, "UNSUPPORTED_VIRTUAL", StringComparison.OrdinalIgnoreCase) &&
-            virtualTestGrantActive;
+            virtualTestGrantActive && !isProduction;
         if (!physical && !authorisedVirtual)
             return false;
 
