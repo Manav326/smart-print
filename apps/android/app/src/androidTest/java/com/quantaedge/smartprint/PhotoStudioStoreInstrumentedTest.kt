@@ -38,12 +38,12 @@ class PhotoStudioStoreInstrumentedTest {
             .put("photosPerPage", 10)
             .put("pageCount", 2)
             .put("resolutionDpi", 300)
-            .put("photoOutputLayout", "PHOTO_PAPER")
+            .put("photoOutputLayout", "A4_SHEET")
             .put("photoPaperFinish", "MATTE")
             .put("editorSettings", JSONObject()
                 .put("zoom", 1.2)
                 .put("focusX", 40)
-                .put("photoOutputLayout", "PHOTO_PAPER")
+                .put("photoOutputLayout", "A4_SHEET")
                 .put("photoPaperFinish", "MATTE"))
 
         val prepared = store.savePreparedOutput(pdfBytes, sourceBytes, metadata)
@@ -60,10 +60,10 @@ class PhotoStudioStoreInstrumentedTest {
             encryptedMetadata.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 80, 72)))
         assertEquals(1, store.listPrepared().size)
         assertEquals(13, store.readMetadata(prepared).optInt("photoCount"))
-        assertEquals("PHOTO_PAPER", store.readMetadata(prepared).optString("photoOutputLayout"))
+        assertEquals("A4_SHEET", store.readMetadata(prepared).optString("photoOutputLayout"))
         assertEquals("MATTE", store.readMetadata(prepared).optString("photoPaperFinish"))
         val pickerUploadSettings = store.readUploadSettings(prepared)
-        assertEquals("PHOTO_PAPER", pickerUploadSettings.optString("photoOutputLayout"))
+        assertEquals("A4_SHEET", pickerUploadSettings.optString("photoOutputLayout"))
         assertEquals("MATTE", pickerUploadSettings.optString("photoPaperFinish"))
         assertEquals("Passport photo", store.readPickerMetadata(prepared)?.optString("title"))
         assertEquals(2, store.readMetadata(prepared).optInt("pageCount"))
@@ -122,6 +122,36 @@ class PhotoStudioStoreInstrumentedTest {
         assertTrue("Deleting a private photo sheet also removes its encrypted source and metadata.",
             !File(store.root, "$id.source").exists() && !File(store.root, "$id.meta").exists())
         assertFalse(prepared.exists())
+        isolatedFiles.deleteRecursively()
+    }
+
+    @Test
+    fun currentPhotoPaperSettingsArePreservedForNativeUpload() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val isolatedFiles = File(context.cacheDir, "photo-store-current-layout-" + UUID.randomUUID()).apply { mkdirs() }
+        val isolatedCache = File(isolatedFiles, "cache").apply { mkdirs() }
+        val store = PhotoStudioStore(isolatedFiles, isolatedCache)
+        val metadata = JSONObject()
+            .put("title", "4x6 photo print")
+            .put("sourceName", "photo.jpg")
+            .put("sourceMime", "image/jpeg")
+            .put("sizeCode", "4x6")
+            .put("photoCount", 1)
+            .put("photosPerPage", 1)
+            .put("pageCount", 1)
+            .put("resolutionDpi", 300)
+            .put("photoOutputLayout", "PHOTO_PAPER")
+            .put("photoPaperFinish", "GLOSSY")
+
+        val prepared = store.savePreparedOutput(testPdf(), testJpeg(), metadata)
+        val uploadSettings = store.readUploadSettings(prepared)
+        assertEquals("4x6", uploadSettings.optString("sizeCode"))
+        assertEquals(1, uploadSettings.optInt("photoCount"))
+        assertEquals(1, uploadSettings.optInt("photosPerPage"))
+        assertEquals("PHOTO_PAPER", uploadSettings.optString("photoOutputLayout"))
+        assertEquals("GLOSSY", uploadSettings.optString("photoPaperFinish"))
+
+        store.deletePrepared(prepared)
         isolatedFiles.deleteRecursively()
     }
 
