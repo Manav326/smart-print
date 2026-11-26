@@ -100,7 +100,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       setPage(subscriptions);
       setPlans(catalogue);
     }).catch(exception => {
-      if (current) setError(exception instanceof Error ? exception.message : t("Could not load subscription administration."));
+      if (current) setError(exception instanceof Error ? exception.message : "Could not load subscription administration.");
     }).finally(() => {
       if (current) setLoading(false);
     });
@@ -148,7 +148,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       setHistoryTenant(null);
       setRefreshKey(value => value + 1);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("The subscription could not be assigned."));
+      setError(exception instanceof Error ? exception.message : "The subscription could not be assigned.");
     } finally {
       setBusy(false);
     }
@@ -167,7 +167,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     try {
       setHistory(await getPlatformSubscriptionHistory(tokens.accessToken, tenant.id));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not load subscription history."));
+      setError(exception instanceof Error ? exception.message : "Could not load subscription history.");
     } finally {
       setHistoryLoading(false);
     }
@@ -189,7 +189,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       </div>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {success && <div className="inline-successt(" role=")statust("><CheckCircle2 size={15}/><span>{success}</span><button className=")icon-buttont(" onClick={() => setSuccess(")t(")} aria-label={t(")Dismiss")}><X size={14}/></button></div>}
+      {success && <div className="inline-success" role="status"><CheckCircle2 size={15}/><span>{success}</span><button className="icon-button" onClick={() => setSuccess("")} aria-label={t("Dismiss")}><X size={14}/></button></div>}
 
       <section className="panel platform-tenants-panel">
         <div className="platform-tenants-heading">
