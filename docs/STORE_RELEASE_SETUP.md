@@ -153,9 +153,9 @@ For the Windows Store listing, prepare the app description, short description, c
 - **Support contact, website and privacy policy:** provide real, monitored contact details and public HTTPS URLs.
 
 For Google Play, prepare:
-- **App icon:** 512 × 512 PNG, 32-bit with alpha.
+- **App icon:** 512 × 512 PNG, 32-bit with alpha, maximum 1 MB.
 - **Feature graphic:** 1024 × 500 JPEG or 24-bit PNG, no alpha.
-- **Phone screenshots:** 2–8 PNG/JPEG images, each up to 8 MB, each side 320–3,840 pixels. Use actual SmartPrint Android screens, not Windows screenshots.
+- **Phone screenshots:** 2–8 PNG/JPEG images, each up to 8 MB, each side 320–3,840 pixels. Prefer at least four actual SmartPrint Android screens at 1080p or higher for promotional eligibility; use actual app screens, not Windows screenshots.
 - **Short description:** up to 80 characters.
 - **Full description:** up to 4,000 characters.
 - **Privacy policy URL and Data Safety answers:** must match actual data collection, sharing and retention.
