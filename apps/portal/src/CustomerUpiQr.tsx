@@ -45,8 +45,8 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    }
    if(!copied)throw new Error(t("Clipboard access is unavailable."));
    setStatusTone("success");
-   setStatus(t(label === "UPI ID" ? "UPI ID copied." : "Amount copied."));
-  }catch(e){setError(e instanceof Error?e.message:"Could not copy "+label.toLowerCase()+".");}
+   setStatus(t(label === t("UPI ID") ? t("UPI ID copied.") : t("Amount copied.")));
+  }catch(e){setError(e instanceof Error?e.message:t("Could not copy ")+label.toLowerCase()+".");}
  }
 
  async function download(){
@@ -89,7 +89,7 @@ export default function CustomerUpiQr({uri,payeeName,upiId,amount,amountMinor,fi
    const downloadedUrl=pngUrl;window.setTimeout(()=>URL.revokeObjectURL(downloadedUrl),1500);pngUrl=null;
    setStatusTone("info");
    setStatus(t("QR image download started."));
-  }catch(e){setError(e instanceof Error?e.message:"The QR image could not be downloaded.");}
+  }catch(e){setError(e instanceof Error?e.message:t("The QR image could not be downloaded."));}
   finally{if(svgUrl)URL.revokeObjectURL(svgUrl);if(pngUrl)URL.revokeObjectURL(pngUrl);if(!waitingForNativeSave)setBusy(false);}
  }
  return <div className="customer-upi-details">
