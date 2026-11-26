@@ -866,6 +866,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Review the full file list before paying or submitting a reference.": "भुगतान या रेफरेंस भेजने से पहले पूरी फ़ाइल सूची जाँचें।",
     "Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.": "आपका बैच भुगतान रेफरेंस मिल गया है। किसी भी स्वीकृत फ़ाइल को अनुमति देने से पहले शॉप को पूरी राशि सत्यापित करनी होगी।",
     "Batch payment verified. Accepted files are authorised for the shop's print queue.": "बैच भुगतान सत्यापित है। स्वीकृत फ़ाइलें शॉप की प्रिंट कतार के लिए अधिकृत हैं।",
+    "Physical output confirmed by the shop operator.": "शॉप ऑपरेटर ने वास्तविक प्रिंट आउटपुट की पुष्टि की।",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1355,6 +1356,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Review the full file list before paying or submitting a reference.": "Payment ya reference submit karne se pehle poori file list check karein.",
     "Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.": "Aapka batch payment reference mil gaya hai. Accepted file authorise hone se pehle shop ko full amount verify karna hoga.",
     "Batch payment verified. Accepted files are authorised for the shop's print queue.": "Batch payment verify ho gaya. Accepted files shop ki print queue ke liye authorised hain.",
+    "Physical output confirmed by the shop operator.": "Shop operator ne physical print output confirm kiya.",
   },
 };
 
