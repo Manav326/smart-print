@@ -1013,6 +1013,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Cancel download": "डाउनलोड रद्द करें",
     "{label} progress": "{label} की डाउनलोड प्रगति",
     "{fileName} download progress": "{fileName} डाउनलोड प्रगति",
+    "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed.": "इस कंप्यूटर का एक्सेस रद्द किया गया है और यह अपने आप फिर कनेक्ट नहीं होगा। शॉप तैयार होने पर Reconnect this computer चुनें; पेयरिंग कोड की ज़रूरत नहीं है।",
+    "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed.": "Windows इस कंप्यूटर की सेव की गई पेयरिंग नहीं पढ़ सका। नीचे पेयर किए गए कंप्यूटर की सूची जाँचें; पुरानी एंट्री सक्रिय हो तो उसका एक्सेस रद्द करें, फिर Repair connection चुनें। कोड दर्ज करने की ज़रूरत नहीं है।",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1649,6 +1651,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Cancel download": "Download cancel karein",
     "{label} progress": "{label} ki download progress",
     "{fileName} download progress": "{fileName} download progress",
+    "This computer was revoked and will not reconnect automatically. Select Reconnect this computer when your shop is ready; no pairing code is needed.": "Is computer ka access revoke hua hai aur yeh automatically reconnect nahi hoga. Shop ready ho toh Reconnect this computer choose karein; pairing code ki zaroorat nahi.",
+    "Windows could not read this computer's saved pairing. Check the paired-computer list below; revoke its old entry if it is still active, then select Repair connection. No code entry is needed.": "Windows is computer ki saved pairing read nahi kar saka. Neeche paired computer list check karein; purani entry active ho toh revoke karein, phir Repair connection choose karein. Code enter karne ki zaroorat nahi.",
   },
 };
 
