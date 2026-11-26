@@ -174,6 +174,24 @@ The Play production workflow creates a 10% staged rollout (`inProgress`) rather 
 
 For every feature or bug-fix release, increment the stable semantic version (new `vX.Y.Z` tag). The existing release automation creates the binaries from the exact tested commit. The same publishing workflow updates the X64 Microsoft Store package URL and uploads the AAB to the selected Play track. Do not overwrite an already-published release or reuse an old tag. Keep the package ID `com.quantaedge.smartprint` and Android upload key unchanged.
 
+
+
+### Existing Windows customer updates — separate requirement
+
+Microsoft explicitly states that Store-submitted EXE/MSI apps do **not** receive Store-pushed updates for existing users. The publisher's app or installer must handle those updates. The current SmartPrint repository has no Tauri/Windows in-app updater configured.
+
+Until an updater is implemented, existing Windows customers must manually download and rerun the latest signed installer. The release workflow updates the Store's versioned package URL for new installs and certification, but does not silently update already-installed Windows copies.
+
+Google Play handles Android app updates for users who installed SmartPrint through Play, subject to their device's auto-update settings. Direct APK users continue to need a website update mechanism.
+
+A separate Windows updater should be designed to:
+- read the installed distribution channel (website or Store);
+- fetch a signed, versioned update manifest;
+- verify the installer hash and Authenticode publisher before execution;
+- prompt the user before installation and elevation;
+- update the desktop app and Windows Agent together, preserving pairing, settings and print data;
+- support rollback and prevent downgrade/replay.
+
 ## What this automation does not do
 
 - It cannot create the initial Partner Center product, complete the initial age-rating/listing setup, accept agreements or bypass Store certification.
