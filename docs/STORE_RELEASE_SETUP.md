@@ -7,7 +7,7 @@ This repository uses one versioned GitHub release to produce the website downloa
 1. Merge tested changes to `main`.
 2. The existing main-CI release automation creates a stable `vX.Y.Z` tag and runs `.github/workflows/release.yml`.
 3. The release workflow builds:
-   - `SmartPrint-Windows-Setup.exe`: signed, offline website installer when Windows signing inputs are configured; otherwise the existing unsigned beta installer is retained.
+   - `SmartPrint-Windows-Setup.exe`: intentionally unsigned website/direct-download installer, retaining the existing WebView2 bootstrapper behaviour.
    - `SmartPrint-Windows-Store-Setup.exe`: signed, offline x64 Store installer, only when the Windows signing certificate, WebView2 standalone URL and exact Partner Center publisher name are configured.
    - `SmartPrint-Android.apk`: website/direct-download Android package.
    - `SmartPrint-Android.aab`: signed Google Play App Bundle.
@@ -40,7 +40,7 @@ Add these GitHub repository Actions secrets:
 | `WINDOWS_CODESIGN_PFX_BASE64` | Single-line Base64 of the PFX file |
 | `WINDOWS_CODESIGN_PFX_PASSWORD` | PFX export password |
 
-The workflow signs the SmartPrint desktop/Agent PE binaries and both final Windows installers with SHA-256 and an RFC 3161 timestamp. Inno Setup also signs the generated uninstallers. Both production installers are offline and include the Microsoft WebView2 Evergreen Standalone Runtime. The Microsoft WebView2 runtime remains Microsoft-signed and is verified, not re-signed.
+The workflow signs every detected SmartPrint desktop/Agent PE binary and the final Microsoft Store installer with SHA-256 and an RFC 3161 timestamp. Inno Setup also signs the Store installer's generated uninstaller. The Store installer is offline and includes the Microsoft WebView2 Evergreen Standalone Runtime. The website installer remains intentionally unsigned and retains the existing WebView2 bootstrapper behaviour. The Microsoft WebView2 runtime remains Microsoft-signed and is verified, not re-signed.
 
 If the certificate is hardware-backed/non-exportable, do not export or weaken it. The current workflow expects an exportable PFX; ask for a Trusted Signing/HSM integration change before using a hardware-backed certificate.
 
@@ -52,11 +52,11 @@ Add this GitHub repository Actions variable using the exact publisher name shown
 |---|---|
 | `SMARTPRINT_WINDOWS_PUBLISHER` | Exact Partner Center publisher display name to embed in Windows installer metadata |
 
-Because the selected Microsoft developer account is Individual, confirm the public publisher identity shown in Partner Center before setting this value. The Store installer build is withheld until this value is supplied.
+Because the selected Microsoft developer account is Individual, confirm the exact public publisher identity shown in Partner Center before setting this value. The release build also requires the code-signing certificate's simple publisher name (certificate CN) to match this value; a mismatch fails closed. The Store installer build is withheld until this value is supplied.
 
 ### C. WebView2 offline prerequisite
 
-Both production Windows installers must be standalone/offline. The release workflow uses the Microsoft Evergreen **Standalone Installer x64**, not the small Evergreen Bootstrapper, for the signed website and Store packages. If signing inputs are absent, only the interim unsigned website beta installer is produced.
+The Microsoft Store installer must be standalone/offline. The release workflow uses the Microsoft Evergreen **Standalone Installer x64**, not the small Evergreen Bootstrapper, for the signed Store package. The existing website installer intentionally retains its current bootstrapper-based direct-download behaviour. If signing inputs are absent, only the unsigned website installer is produced.
 
 1. Open the official [Microsoft WebView2 download page](https://developer.microsoft.com/microsoft-edge/webview2/).
 2. Under **Evergreen Standalone Installer**, select **x64**.
@@ -182,9 +182,9 @@ The Play production workflow creates a 10% staged rollout (`inProgress`) rather 
 ## Running a release
 
 1. Ensure all required secrets/variables are present.
-2. Merge approved work to `main`; the existing main-CI automation creates a stable tag and runs the release build.
+2. Merge approved work to `main`; the existing main-CI automation creates a stable tag and runs the release build. Every release job checks out that exact tag, and the validation job rejects tags that do not point to a commit reachable from `main`.
 3. Open the resulting GitHub release and review the installer, APK, AAB, Store installer (if configured), and checksums.
-4. Test the website installer on a clean Windows machine and install the AAB on test devices/Play internal track.
+4. Test the unsigned website installer on a clean Windows machine. If the signed Store artifact is present, test that exact offline installer on a clean Windows machine, including silent installation with the documented switches, Agent service startup, upgrade and uninstall. Install the AAB on test devices/Play internal track.
 5. Open **Actions → Publish SmartPrint to Microsoft Store and Google Play**.
 6. Enter the release tag, choose which Stores to publish, choose the Play track, and set `confirm_publication=true`.
 7. Approve the relevant GitHub Environment deployment.
