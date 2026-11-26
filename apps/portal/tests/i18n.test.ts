@@ -135,6 +135,29 @@ test("shop operations, platform policy and plan administration copy is localized
   );
 });
 
+test("upload, payment and operational recovery errors are localized with dynamic values intact", () => {
+  assert.equal(
+    translateUiText("hindi", "Choose 1–{count} whole copies.", { count: 4 }),
+    "1 से 4 तक पूरी कॉपी चुनें।",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Could not quote: {files}. Retry the batch quote.", { files: "report.pdf" }),
+    "Quote nahi bana: report.pdf. Batch quote dobara try karein.",
+  );
+  assert.equal(
+    translateUiText("hindi", "The shop is still reviewing your files. Payment will be ready when the review is complete."),
+    "शॉप अभी आपकी फ़ाइलों की जाँच कर रही है। रिव्यू पूरा होने पर भुगतान उपलब्ध होगा।",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Saved privately on this device. Connect to a shop whenever you are ready to print."),
+    "Is device par privately save ho gaya. Print ke liye ready hon toh kisi shop se connect karein.",
+  );
+  assert.equal(
+    translateUiText("hindi", "Could not load platform operational settings."),
+    "प्लेटफ़ॉर्म ऑपरेशनल सेटिंग लोड नहीं हो सकीं।",
+  );
+});
+
 test("number, currency and date formatting use the selected locale", () => {
   assert.equal(typeof formatUiNumber(1234.5, "hindi"), "string");
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
