@@ -3374,7 +3374,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Payload byte totals grouped by path and transfer result.": "Path aur transfer result ke hisaab se payload bytes ka total.",
     "Payload measurement, not wire billing": "Payload measurement, network billing nahi",
     "Not yet measured:": "Abhi measure nahi hua:",
-    "Shop-scoped virtual printer test access": "Shop-scoped virtual printer test access",
+    "Shop-scoped virtual printer test access": "Ek shop ke liye limited virtual printer test access",
     "Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.": "Ek shop ke liye discovered ek Windows virtual queue approve karein. Approval uske Agent, queue, driver aur port identity se linked hota hai, default 7 din mein expire hota hai aur printer type change nahi karta.",
     "Operations, quotas and data retention": "Operations, quotas aur data retention",
     "Monthly print quota and retention": "Monthly print quota aur data retention",
