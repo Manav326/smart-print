@@ -120,15 +120,19 @@ try {
     "/DSmartPrintAgentSourceDir=artifacts\store-agent",
     "/DSmartPrintDesktopSourceDir=artifacts\store-desktop",
     "/DSmartPrintPublisher=$env:SMARTPRINT_WINDOWS_PUBLISHER",
-    "/DSmartPrintSignToolName=SmartPrintSignTool",
-    "scripts/build-windows-installer.iss"
+    "/DSmartPrintSignToolName=SmartPrintSignTool"
   )
   # Inno Setup requires $q placeholders for quotes embedded in a
   # command-line SignTool definition; raw quotes are parsed as grouping.
   $signToolCommand = 'SmartPrintSignTool=$q' + $signtool + '$q sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /sha1 ' + $thumbprint + ' $f'
   $signToolArg = "--signtool=$signToolCommand"
   
-  $storeArgs = @($signToolArg) + $commonArgs + @("/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup")
+  # ISCC accepts compiler options before the script path. Keep every
+  # preprocessor definition and the SignTool declaration before the .iss file.
+  $storeArgs = @($signToolArg) + $commonArgs + @(
+    "/DSmartPrintOutputBaseFilename=SmartPrint-Windows-Store-Setup",
+    "scripts/build-windows-installer.iss"
+  )
   & $iscc @storeArgs
   if ($LASTEXITCODE -ne 0) { throw "Signed offline Microsoft Store installer compilation failed." }
   $storeInstaller = "artifacts/agent-installer/SmartPrint-Windows-Store-Setup.exe"
