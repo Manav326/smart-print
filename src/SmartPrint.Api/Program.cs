@@ -6698,12 +6698,11 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
         return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = true });
     }
 
-    if (!string.IsNullOrWhiteSpace(ticket.PrivateRelayStorageKey))
-        await storage.DeleteAsync(ticket.PrivateRelayStorageKey);
-    ticket.PrivateRelayStorageKey = null;
-    ticket.PrivateRelayWrappedKey = null;
-    ticket.PrivateRelayIv = null;
-    ticket.PrivateRelayUploadedUtc = null;
+    // Persist the terminal decision before deleting the external ciphertext.
+    // If storage is temporarily unavailable, PrivateRelayRetentionWorker sees the
+    // durable FAILED ticket and retries the purge without leaving the customer
+    // waiting on an upload that has already been rejected.
+    var rejectedRelayStorageKey = ticket.PrivateRelayStorageKey;
     ticket.PrivateRelayFailedUtc = DateTimeOffset.UtcNow;
     ticket.PrivateRelayStage = PrivateRelayProgressRules.Failed;
     ticket.PrivateRelayStageUpdatedUtc = ticket.PrivateRelayFailedUtc;
@@ -6712,6 +6711,29 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     ticket.ExpiresUtc = ticket.PrivateRelayFailedUtc.Value;
     await db.SaveChangesAsync(ct);
     await transaction.CommitAsync(ct);
+
+    if (!string.IsNullOrWhiteSpace(rejectedRelayStorageKey))
+    {
+        try
+        {
+            await storage.DeleteAsync(rejectedRelayStorageKey);
+            await db.LocalPrintUploadTickets
+                .Where(item => item.Id == ticket.Id &&
+                               item.TenantId == device.TenantId &&
+                               item.PrivateRelayFailedUtc != null &&
+                               item.PrivateRelayStorageKey == rejectedRelayStorageKey)
+                .ExecuteUpdateAsync(update => update
+                    .SetProperty(item => item.PrivateRelayStorageKey, (string?)null)
+                    .SetProperty(item => item.PrivateRelayWrappedKey, (string?)null)
+                    .SetProperty(item => item.PrivateRelayIv, (string?)null)
+                    .SetProperty(item => item.PrivateRelayUploadedUtc, (DateTimeOffset?)null), ct);
+        }
+        catch (IOException)
+        {
+            // PrivateRelayRetentionWorker retries this ciphertext purge.
+        }
+    }
+
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
 });
 
