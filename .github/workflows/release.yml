@@ -138,9 +138,9 @@ jobs:
         name: Build signed offline Microsoft Store installer when configured
         shell: pwsh
         env:
-          WINDOWS_CODESIGN_PFX_BASE64: \${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
-          WINDOWS_CODESIGN_PFX_PASSWORD: \${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
-          WEBVIEW2_STANDALONE_X64_URL: \${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
+          WINDOWS_CODESIGN_PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
+          WINDOWS_CODESIGN_PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
+          WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
         run: |
           $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
           $hasRuntimeUrl = -not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)
@@ -166,7 +166,7 @@ jobs:
           }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-code-signing.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CODESIGN_PFX_BASE64))
-          $signtool = Get-ChildItem "\${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
+          $signtool = Get-ChildItem "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter signtool.exe -Recurse -File |
             Sort-Object FullName -Descending | Select-Object -First 1 -ExpandProperty FullName
           if (-not $signtool) { throw "Windows SDK signtool.exe was not found." }
           $peFiles = @(
