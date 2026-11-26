@@ -1761,7 +1761,6 @@ shop.MapGet("/printers", async (ClaimsPrincipal principal, SmartPrintDbContext d
             printer.IsDefault,
             printer.AgentDeviceId,
             printer.CapabilitiesJson,
-            IsTestModeOverride = false,
             Status = printer.Status == "AgentRevoked"
                 ? "AgentRevoked"
                 : printer.AgentDeviceId != null &&
@@ -2248,7 +2247,7 @@ shop.MapPost("/qr-stations", async (
     {
         var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
             .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive &&
-                              (!environment.IsProduction() || !printer.IsTestModeOverride))
+                              true)
             .Select(printer => printer.OutputMode)
             .SingleOrDefaultAsync(ct);
         if (selectedPrinterOutputMode is null)
@@ -9339,7 +9338,6 @@ agentApi.MapPost("/printers/sync", async (
                 Model = discovered.DriverName,
                 ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
                 OutputMode = discovered.OutputMode,
-                IsTestModeOverride = false,
                 IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
                     device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName),
                 ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName,
@@ -9380,7 +9378,6 @@ agentApi.MapPost("/printers/sync", async (
             printer.Model = discovered.DriverName;
             printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
             printer.OutputMode = discovered.OutputMode;
-            printer.IsTestModeOverride = false;
             printer.IdentityFingerprint = discoveredFingerprint;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;
             printer.IsDefault = discovered.IsDefault;
@@ -13920,7 +13917,7 @@ publicApi.MapGet("/sessions/current", async (
     var printer = stationPrinterId is Guid currentPrinterId
         ? await db.PrinterDevices.AsNoTracking()
             .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive &&
-                           (!environment.IsProduction() || !item.IsTestModeOverride))
+                           true)
             .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
             .SingleOrDefaultAsync(ct)
         : null;
