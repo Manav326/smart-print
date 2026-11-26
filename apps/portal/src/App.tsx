@@ -162,7 +162,7 @@ export default function App() {
 
 function ScopeAccessDenied({ scope, onSignOut, dark, onToggleTheme }: { scope: string; onSignOut: () => Promise<void>; dark: boolean; onToggleTheme: () => void }) {
   const { locale } = useLocale();
-  const t = (value: string, values: Record<string,string|number> = {}) => translateUiText(locale, value, values);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [busy, setBusy] = useState(false);
   async function signOut() {
     setBusy(true);
@@ -4231,7 +4231,7 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
 
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
   const { locale } = useLocale();
-  const t = (value: string, values: Record<string, string | number> = {}) => translateUiText(locale, value, values);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
