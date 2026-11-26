@@ -278,7 +278,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     try {
       await publishPlatformPlanVersion(tokens.accessToken, selectedPlan.id, currentDraft.version);
       await reload(selectedPlan.id);
-      setSuccess(`Version ${currentDraft.version} published. New subscriptions can now use these terms.`);
+      setSuccess(t("Version {version} published. New subscriptions can now use these terms.").replace("{version}", String(currentDraft.version)));
     } catch (exception) {
       setError(exception instanceof Error ? exception.message : t("Could not publish this plan version."));
     } finally {
