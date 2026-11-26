@@ -241,8 +241,6 @@ export interface PrinterDevice {
   /** True only while a current platform-admin grant authorises this exact virtual queue identity. */
   virtualTestGrantActive?: boolean;
   identityFingerprint?: string | null;
-  /** Legacy response field; no longer grants any permission. */
-  isTestModeOverride?: boolean;
 }
 
 export interface QrStation {
