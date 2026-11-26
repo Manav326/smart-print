@@ -40,7 +40,9 @@ test("Private Printing relays only the encrypted print document and required quo
   assert.match(qsp2, /name: "AES-GCM"/);
   assert.match(qsp2, /return new ReadableStream<Uint8Array>/);
   assert.match(qsp2, /name: "RSA-OAEP"/);
-  const relayStart = upload.indexOf("if (privatePrinting) {", upload.indexOf("if (ticket.agentDeviceId === localAgent.agentDeviceId"));
+  const endpointLoopStart = upload.indexOf("if (localAgent && ticket.agentDeviceId === localAgent.agentDeviceId");
+  assert.ok(endpointLoopStart >= 0, "direct Agent upload must remain scoped to the paired Agent");
+  const relayStart = upload.indexOf("if (privatePrinting) {", endpointLoopStart);
   const relayEnd = upload.indexOf("// A LAN response can be lost", relayStart);
   assert.ok(relayStart >= 0 && relayEnd > relayStart);
   const privateRelay = upload.slice(relayStart, relayEnd);
