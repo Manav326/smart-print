@@ -156,7 +156,7 @@ function OrderCard({journey,printers,agents,onReviewBatch,onVerifyPayment,...act
   const canReview=journey.canReview&&!!journey.batchId;
   const singleFileReviewJob=journey.jobs.length===1&&!journey.batchId?journey.jobs[0]:null;
   const allOutputsReady=journey.jobs.length>0&&journey.jobs.every(job=>readyStatuses.has(job.status));
-  const allVirtualTestsReady=journey.jobs.length>0&&journey.jobs.every(job=>job.status==="TEST_OUTPUT_READY"&&job.outputType==="TEST_VIRTUAL");
+  const allVirtualTestsReady=journey.jobs.length>0&&journey.jobs.every(job=>job.status==="TEST_OUTPUT_READY"&&job.outputType==="TEST_VIRTUAL"&&job.outputMode==="UNSUPPORTED_VIRTUAL");
   const headline=journey.isClosed?"No files moving forward":journey.attentionJobs.length?"Needs a quick check":allVirtualTestsReady?"Virtual test completed · not for collection":journey.stage==="received"?"New order received":journey.stage==="review"?"Your review is next":journey.stage==="payment"?"Waiting for payment":journey.stage==="printing"?"Order is being prepared":allOutputsReady?"Ready for collection":"Print output saved";
   const stageIndex=journey.isClosed?1:journey.stageIndex;
   const [filesExpanded,setFilesExpanded]=useState(false);
