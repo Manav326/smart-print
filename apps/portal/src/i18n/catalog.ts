@@ -1791,6 +1791,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "queue": "कतार",
     "queues": "कतारें",
     "online devices": "ऑनलाइन डिवाइस",
+    "Photo": "फोटो",
+    "ID card": "ID कार्ड",
+    "Document": "दस्तावेज़",
+    "{panel} guidance": "{panel} के लिए मार्गदर्शन",
+    "A4 page {page} of {pages} with {photos} photos": "{photos} फोटो के साथ A4 पेज {page}/{pages}",
 
   },
   hinglish: {
@@ -3210,6 +3215,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "queue": "queue",
     "queues": "queues",
     "online devices": "online devices",
+    "Photo": "Photo",
+    "ID card": "ID card",
+    "Document": "Document",
+    "{panel} guidance": "{panel} ke liye guidance",
+    "A4 page {page} of {pages} with {photos} photos": "{photos} photos ke saath A4 page {page}/{pages}",
 
   },
 };
