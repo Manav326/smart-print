@@ -16,7 +16,8 @@ public static class PrinterSelectionRules
         bool agentOnline,
         bool agentRevoked,
         DateTimeOffset? agentLastSeenUtc,
-        DateTimeOffset now)
+        DateTimeOffset now,
+        bool virtualTestGrantActive = false)
     {
         var freshAfter = now.AddMinutes(-2);
         if (!agentOnline || agentRevoked ||
@@ -26,7 +27,10 @@ public static class PrinterSelectionRules
         if (string.Equals(outputMode, "PDF_EXPORT", StringComparison.OrdinalIgnoreCase))
             return true;
 
-        if (!string.Equals(outputMode, "PHYSICAL", StringComparison.OrdinalIgnoreCase))
+        var physical = string.Equals(outputMode, "PHYSICAL", StringComparison.OrdinalIgnoreCase);
+        var authorisedVirtual = string.Equals(outputMode, "UNSUPPORTED_VIRTUAL", StringComparison.OrdinalIgnoreCase) &&
+            virtualTestGrantActive;
+        if (!physical && !authorisedVirtual)
             return false;
 
         if (printerLastSeenUtc is null || printerLastSeenUtc < freshAfter)
