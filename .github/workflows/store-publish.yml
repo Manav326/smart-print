@@ -222,6 +222,8 @@ jobs:
     environment: ${{ inputs.android_track == 'production' && 'google-play-production' || 'google-play-testing' }}
     permissions:
       contents: read
+    env:
+      RELEASE_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
     steps:
       - name: Download the signed Android App Bundle from the published release
         env:
@@ -230,10 +232,24 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifacts
-          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir artifacts --pattern "SmartPrint-Android.aab" --pattern "SHA256SUMS.txt"
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --dir artifacts --pattern "SmartPrint-Android.aab" --pattern "SHA256SUMS.txt" --pattern "BUILD-INFO.txt"
           test -s artifacts/SmartPrint-Android.aab
           test -s artifacts/SHA256SUMS.txt
-          grep -E '[[:space:]]\*?SmartPrint-Android\.aab$' artifacts/SHA256SUMS.txt | (cd artifacts && sha256sum --check)
+          test -s artifacts/BUILD-INFO.txt
+          grep -E '[[:space:]]\*?(SmartPrint-Android\.aab|BUILD-INFO\.txt)
+
+      - name: Upload Android App Bundle to Google Play
+        uses: r0adkll/upload-google-play@v1.1.5
+        with:
+          serviceAccountJsonPlainText: ${{ secrets.GOOGLE_PLAY_SERVICE_ACCOUNT_JSON }}
+          packageName: com.quantaedge.smartprint
+          releaseFiles: artifacts/SmartPrint-Android.aab
+          tracks: ${{ inputs.android_track }}
+          releaseName: ${{ inputs.release_tag }}
+          status: ${{ inputs.android_track == 'production' && 'inProgress' || 'completed' }}
+          userFraction: ${{ inputs.android_track == 'production' && '0.1' || '' }}
+ artifacts/SHA256SUMS.txt | (cd artifacts && sha256sum --check)
+          grep -Fx "source_commit=$RELEASE_SOURCE_SHA" artifacts/BUILD-INFO.txt
 
       - name: Upload Android App Bundle to Google Play
         uses: r0adkll/upload-google-play@v1.1.5
