@@ -69,6 +69,19 @@ test("screen copy interpolation preserves dynamic order and queue details", () =
   assert.doesNotMatch(translated, /\{queue\}|\{job\}/);
 });
 
+test("standalone private Photo Studio copy is translated without changing saved document data", () => {
+  assert.equal(translateUiText("hindi", "Your private photo sheets, saved on this device."), "आपकी निजी फोटो शीट, इसी डिवाइस पर सेव रहती हैं।");
+  assert.equal(translateUiText("hinglish", "Saved photo documents"), "Saved photo documents");
+  assert.equal(
+    translateUiText("hindi", "Delete “{name}” and its saved original photo from this device? This cannot be undone.", { name: "Passport photo" }),
+    "“Passport photo” और उसकी सेव की गई ओरिजिनल फोटो इस डिवाइस से डिलीट करें? यह वापस नहीं किया जा सकता।",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Private preview · Page {page} of {pages}", { page: 2, pages: 4 }),
+    "Private preview · Page 2 / 4",
+  );
+});
+
 test("number, currency and date formatting use the selected locale", () => {
   assert.equal(typeof formatUiNumber(1234.5, "hindi"), "string");
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
