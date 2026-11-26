@@ -108,6 +108,14 @@ public sealed class AddShopScopedVirtualPrinterTestGrants : Migration
             SET "IsTestModeOverride" = FALSE
             WHERE "IsTestModeOverride" = TRUE;
             """);
+
+        migrationBuilder.DropColumn(
+            name: "TreatWorkingVirtualQueuesAsPhysicalForTesting",
+            table: "PlatformOperationalSettings");
+
+        migrationBuilder.DropColumn(
+            name: "IsTestModeOverride",
+            table: "PrinterDevices");
     }
 
     protected override void Down(MigrationBuilder migrationBuilder)
@@ -123,5 +131,17 @@ public sealed class AddShopScopedVirtualPrinterTestGrants : Migration
             """);
         migrationBuilder.DropTable(name: "VirtualPrinterTestGrants");
         migrationBuilder.DropColumn(name: "IdentityFingerprint", table: "PrinterDevices");
+        migrationBuilder.AddColumn<bool>(
+            name: "TreatWorkingVirtualQueuesAsPhysicalForTesting",
+            table: "PlatformOperationalSettings",
+            type: "boolean",
+            nullable: false,
+            defaultValue: false);
+        migrationBuilder.AddColumn<bool>(
+            name: "IsTestModeOverride",
+            table: "PrinterDevices",
+            type: "boolean",
+            nullable: false,
+            defaultValue: false);
     }
 }
