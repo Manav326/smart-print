@@ -292,9 +292,9 @@ export default function PhotoStudio({
   dark?: boolean;
   initialPhotoCount?: number;
   initialSettings?: Partial<PhotoStudioEditorSettings>;
+}) {
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
-}) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [image, setImage] = useState<HTMLImageElement | null>(null);
@@ -936,7 +936,7 @@ export default function PhotoStudio({
                 setIncludeFormDetails(enabled);
                 if(!enabled){setPhotoName("");setDateOfBirth("");}
               }}/>
-              <span><strong>{t("Print name and date of birth below each photo")}</strong></span>
+              <span><strong>Print name and date of birth below each photo</strong></span>
             </label>
             {includeFormDetails&&<>
               <label className={styles.fieldLabel}>Name for form (optional)
