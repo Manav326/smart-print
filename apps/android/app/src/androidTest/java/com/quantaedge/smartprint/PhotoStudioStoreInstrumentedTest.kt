@@ -38,7 +38,13 @@ class PhotoStudioStoreInstrumentedTest {
             .put("photosPerPage", 10)
             .put("pageCount", 2)
             .put("resolutionDpi", 300)
-            .put("editorSettings", JSONObject().put("zoom", 1.2).put("focusX", 40))
+            .put("photoOutputLayout", "PHOTO_PAPER")
+            .put("photoPaperFinish", "MATTE")
+            .put("editorSettings", JSONObject()
+                .put("zoom", 1.2)
+                .put("focusX", 40)
+                .put("photoOutputLayout", "PHOTO_PAPER")
+                .put("photoPaperFinish", "MATTE"))
 
         val prepared = store.savePreparedOutput(pdfBytes, sourceBytes, metadata)
         val id = prepared.name.removePrefix(PhotoStudioStore.FILE_PREFIX).removeSuffix(".spph")
@@ -54,6 +60,11 @@ class PhotoStudioStoreInstrumentedTest {
             encryptedMetadata.take(4).toByteArray().contentEquals(byteArrayOf(83, 80, 80, 72)))
         assertEquals(1, store.listPrepared().size)
         assertEquals(13, store.readMetadata(prepared).optInt("photoCount"))
+        assertEquals("PHOTO_PAPER", store.readMetadata(prepared).optString("photoOutputLayout"))
+        assertEquals("MATTE", store.readMetadata(prepared).optString("photoPaperFinish"))
+        val pickerUploadSettings = store.readUploadSettings(prepared)
+        assertEquals("PHOTO_PAPER", pickerUploadSettings.optString("photoOutputLayout"))
+        assertEquals("MATTE", pickerUploadSettings.optString("photoPaperFinish"))
         assertEquals("Passport photo", store.readPickerMetadata(prepared)?.optString("title"))
         assertEquals(2, store.readMetadata(prepared).optInt("pageCount"))
         assertEquals(300, store.readMetadata(prepared).optInt("resolutionDpi"))
@@ -82,7 +93,13 @@ class PhotoStudioStoreInstrumentedTest {
             .put("photosPerPage", 20)
             .put("pageCount", 2)
             .put("resolutionDpi", 300)
-            .put("editorSettings", JSONObject().put("zoom", 1.5).put("focusX", 55))
+            .put("photoOutputLayout", "A4_SHEET")
+            .put("photoPaperFinish", "GLOSSY")
+            .put("editorSettings", JSONObject()
+                .put("zoom", 1.5)
+                .put("focusX", 55)
+                .put("photoOutputLayout", "A4_SHEET")
+                .put("photoPaperFinish", "GLOSSY"))
         store.updatePreparedOutput(id, testPdf(), sourceBytes, editedMetadata)
 
         val afterEdit = store.readMetadata(prepared)
@@ -94,6 +111,8 @@ class PhotoStudioStoreInstrumentedTest {
         assertEquals(20, afterEdit.optInt("photosPerPage"))
         assertEquals(2, afterEdit.optInt("pageCount"))
         assertEquals(300, afterEdit.optInt("resolutionDpi"))
+        assertEquals("A4_SHEET", afterEdit.optString("photoOutputLayout"))
+        assertEquals("GLOSSY", afterEdit.optString("photoPaperFinish"))
         assertEquals(1.5, afterEdit.getJSONObject("editorSettings").getDouble("zoom"), 0.001)
 
         val reloaded = PhotoStudioStore(isolatedFiles, isolatedCache)
@@ -103,6 +122,39 @@ class PhotoStudioStoreInstrumentedTest {
         assertTrue("Deleting a private photo sheet also removes its encrypted source and metadata.",
             !File(store.root, "$id.source").exists() && !File(store.root, "$id.meta").exists())
         assertFalse(prepared.exists())
+        isolatedFiles.deleteRecursively()
+    }
+
+    @Test
+    fun legacyPhotoPaperSettingsAreRecoveredFromEditorSettingsForUpload() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val isolatedFiles = File(context.cacheDir, "photo-store-legacy-layout-" + UUID.randomUUID()).apply { mkdirs() }
+        val isolatedCache = File(isolatedFiles, "cache").apply { mkdirs() }
+        val store = PhotoStudioStore(isolatedFiles, isolatedCache)
+        // Before output metadata was promoted to top-level fields, it lived only
+        // inside editorSettings. The picker must still forward that exact contract.
+        val metadata = JSONObject()
+            .put("title", "Legacy 4x6 photo")
+            .put("sourceName", "photo.jpg")
+            .put("sourceMime", "image/jpeg")
+            .put("sizeCode", "4x6")
+            .put("photoCount", 1)
+            .put("photosPerPage", 1)
+            .put("pageCount", 1)
+            .put("resolutionDpi", 300)
+            .put("editorSettings", JSONObject()
+                .put("photoOutputLayout", "PHOTO_PAPER")
+                .put("photoPaperFinish", "GLOSSY"))
+
+        val prepared = store.savePreparedOutput(testPdf(), testJpeg(), metadata)
+        val uploadSettings = store.readUploadSettings(prepared)
+        assertEquals("4x6", uploadSettings.optString("sizeCode"))
+        assertEquals(1, uploadSettings.optInt("photoCount"))
+        assertEquals(1, uploadSettings.optInt("photosPerPage"))
+        assertEquals("PHOTO_PAPER", uploadSettings.optString("photoOutputLayout"))
+        assertEquals("GLOSSY", uploadSettings.optString("photoPaperFinish"))
+
+        store.deletePrepared(prepared)
         isolatedFiles.deleteRecursively()
     }
 
