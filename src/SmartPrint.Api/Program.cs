@@ -6238,8 +6238,8 @@ agentApi.MapGet("/private-relays/pending", async (
                         grant.PrinterDeviceId == printer.Id && grant.AgentDeviceId == printer.AgentDeviceId &&
                         grant.IdentityFingerprint == printer.IdentityFingerprint &&
                         grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now))) &&
-                  printer.LastSeenUtc != null && printer.LastSeenUtc >= now.AddMinutes(-2) &&
-                  (printer.Status == "Ready" || printer.Status == "Busy") &&
+                  // A private relay is being secured in the Agent's protected queue,
+                  // not sent to the printer. Printer readiness is rechecked at dispatch.
                   printer.QueueName != null && printer.QueueName != ""
             orderby ticket.PrivateRelayUploadedUtc
             select new AgentPrivateRelayItem(
@@ -6346,7 +6346,7 @@ agentApi.MapGet("/private-relays/{ticketId:guid}/content", async (
     if (relay is null || string.IsNullOrWhiteSpace(relay.PrivateRelayStorageKey) ||
         string.IsNullOrWhiteSpace(relay.PrivateRelayWrappedKey))
         return Results.NotFound();
-    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+    if (!await IsPrivatePrintingQueueStagingAvailableAsync(
             db, environment, device.TenantId, device.Id, relay.PrinterDeviceId, ct))
         return Results.Conflict(new
         {
@@ -6433,7 +6433,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
     if (ticket.CompletedUtc is not null)
         return await ExistingResultAsync(true);
 
-    if (!await IsPrivatePrintingOutputQueueReadyAsync(
+    if (!await IsPrivatePrintingQueueStagingAvailableAsync(
             db, environment, ticket.TenantId, device.Id, ticket.PrinterDeviceId, ct))
         return Results.Conflict(new
         {
@@ -14010,6 +14010,50 @@ static async Task<bool> GetPrivatePrintingVirtualOutputEnabledAsync(
         .Where(item => item.Id == PlatformOperationalSettings.SingletonIdValue)
         .Select(item => (bool?)item.AllowPrivatePrintingVirtualOutput)
         .SingleOrDefaultAsync(ct) ?? false;
+}
+
+static async Task<bool> IsPrivatePrintingQueueStagingAvailableAsync(
+    SmartPrintDbContext db,
+    IHostEnvironment environment,
+    Guid tenantId,
+    Guid agentDeviceId,
+    Guid printerDeviceId,
+    CancellationToken ct)
+{
+    // Staging requires a live, authorised Agent and an eligible assigned output
+    // queue, but deliberately does not require the physical printer to be Ready
+    // or Busy. The document is secured locally first; print dispatch rechecks
+    // hardware state and all output constraints before any pages are released.
+    var allowVirtualOutput = await GetPrivatePrintingVirtualOutputEnabledAsync(db, environment, ct);
+    var printer = await db.PrinterDevices.AsNoTracking()
+        .Where(item => item.Id == printerDeviceId &&
+                       item.TenantId == tenantId &&
+                       item.AgentDeviceId == agentDeviceId &&
+                       item.IsActive &&
+                       item.QueueName != null && item.QueueName != "")
+        .Select(item => new
+        {
+            item.OutputMode,
+            VirtualTestGrantActive = item.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+                !environment.IsProduction() && db.VirtualPrinterTestGrants.Any(grant =>
+                    grant.TenantId == item.TenantId && grant.PrinterDeviceId == item.Id &&
+                    grant.AgentDeviceId == item.AgentDeviceId && grant.IdentityFingerprint == item.IdentityFingerprint &&
+                    grant.RevokedUtc == null && grant.CreatedUtc <= DateTimeOffset.UtcNow && grant.ExpiresUtc > DateTimeOffset.UtcNow)
+        })
+        .SingleOrDefaultAsync(ct);
+    if (printer is null ||
+        !PrivatePrintingOutputPolicy.IsEligible(
+            allowVirtualOutput, environment.IsProduction(), printer.OutputMode, printer.VirtualTestGrantActive))
+        return false;
+
+    var now = DateTimeOffset.UtcNow;
+    return await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
+        agent.Id == agentDeviceId &&
+        agent.TenantId == tenantId &&
+        agent.RevokedUtc == null &&
+        agent.Status != "Revoked" &&
+        agent.LastSeenUtc != null &&
+        agent.LastSeenUtc >= now.AddMinutes(-2), ct);
 }
 
 static async Task<bool> IsPrivatePrintingOutputQueueReadyAsync(
