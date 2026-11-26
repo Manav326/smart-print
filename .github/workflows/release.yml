@@ -165,13 +165,14 @@ jobs:
           $hasCertificate = -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_BASE64) -and -not [string]::IsNullOrWhiteSpace($env:WINDOWS_CODESIGN_PFX_PASSWORD)
           $hasRuntimeUrl = -not [string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)
           $hasPublisher = -not [string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER)
-          if (-not $hasCertificate -and -not $hasRuntimeUrl) {
+          $missing = @()
+          if (-not $hasCertificate) { $missing += "Windows code-signing PFX secrets" }
+          if (-not $hasRuntimeUrl) { $missing += "WebView2 Evergreen Standalone x64 URL" }
+          if (-not $hasPublisher) { $missing += "Partner Center publisher name" }
+          if ($missing.Count -gt 0) {
             "available=false" >> $env:GITHUB_OUTPUT
-            Write-Host "Signed Windows packages skipped: configure the code-signing certificate, WebView2 standalone installer URL and Partner Center publisher name."
+            Write-Host "Signed Windows packages skipped; missing configuration: $($missing -join ', ')."
             exit 0
-          }
-          if (-not $hasCertificate -or -not $hasRuntimeUrl -or -not $hasPublisher) {
-            throw "Configure WINDOWS_CODESIGN_PFX_BASE64, WINDOWS_CODESIGN_PFX_PASSWORD, WEBVIEW2_STANDALONE_X64_URL and SMARTPRINT_WINDOWS_PUBLISHER together."
           }
           "available=true" >> $env:GITHUB_OUTPUT
           $storeAgent = "artifacts/store-agent"
