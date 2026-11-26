@@ -289,7 +289,7 @@ function DownloadAction({
           <span><span className="sp-download-live-dot"/> {t("Downloading")}</span>
           <strong>{percent === null ? t("In progress") : `${percent}%`}</strong>
         </div>
-        <div className="sp-download-progress-track" role="progressbar" aria-label={`${fileName} download progress`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
+        <div className="sp-download-progress-track" role="progressbar" aria-label={t("{fileName} download progress").replace("{fileName}", fileName)} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent ?? undefined}>
           <span className={percent === null ? "sp-download-progress-fill sp-download-progress-indeterminate" : "sp-download-progress-fill"} style={percent === null ? undefined : { width: `${percent}%` }}/>
         </div>
         <div className="sp-download-progress-details">
