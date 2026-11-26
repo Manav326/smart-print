@@ -478,7 +478,7 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
   assert.ok(flow.includes("checked={own.advancedEnabled}"));
   assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("<span>ID sheet</span>"));
+  assert.ok(flow.includes("<span>{t(\"ID sheet\")}</span>"));
   assert.ok(flow.includes("<span>Print mode</span>"));
   assert.ok(flow.includes('>B&W</button>'));
   assert.ok(flow.includes('>Colour</button>'));
@@ -654,8 +654,8 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(backend, /PaymentOptions = paymentOptions/);
   assert.equal((app.match(/Ask the shop to enable UPI or cash at the counter/g) ?? []).length, 2);
-  assert.equal((app.match(/title="No payment method available"/g) ?? []).length, 2);
-  assert.equal((app.match(/title="Cash at counter unavailable"/g) ?? []).length, 2);
+  assert.equal((app.match(/title=\\{t\\("No payment method available"\\)\\}/g) ?? []).length, 2);
+  assert.equal((app.match(/title=\\{t\\("Cash at counter unavailable"\\)\\}/g) ?? []).length, 2);
 });
 
 test("contextual help supports outside-click and Escape dismissal", () => {
@@ -900,7 +900,7 @@ test("customer batch quote separates the total, included files, excluded files a
   const app = read("../src/App.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(app, /aria-label="Batch quote summary"/);
+  assert.match(app, /aria-label=\\{t\\("Batch quote summary"\\)\\}/);
   assert.match(app, /batchQuoteSummary/);
   assert.match(app, /customer-batch-quote-chip included/);
   assert.match(app, /customer-batch-quote-chip excluded/);
@@ -930,7 +930,7 @@ test("shop batch review communicates included and excluded choices, valid quotes
   const app = read("../src/App.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(app, /aria-label="Batch review summary"/);
+  assert.match(app, /aria-label=\\{t\\("Batch review summary"\\)\\}/);
   assert.match(app, /Accepted value · valid quotes only/);
   assert.match(app, /Included files stay in one checkout/);
   assert.match(app, /See order status/);
@@ -998,7 +998,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(css, /@media\(max-width:650px\)/);
   assert.match(css, /@media\(max-width:420px\)/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
-  assert.match(app, /aria-label="Selected files and print settings"/);
+  assert.match(app, /aria-label=\\{t\\("Selected files and print settings"\\)\\}/);
   assert.match(app, /role="progressbar"/);
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
   assert.match(app, /Local transfer unavailable\./);
@@ -1050,7 +1050,7 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(printerAvailability, /hasRecentHeartbeat\(printer\.lastSeenUtc, now\)/);
   assert.match(printerAvailability, /if \(!printer\.isActive\) return "Not selected for new jobs"/);
   assert.match(app, /Adding a new printer/);
-  assert.match(app, /Printers &amp; scanners, choose Add device/);
+  assert.match(app, /Windows Settings → Printers & scanners, choose Add device/);
   assert.match(app, /pair that PC's SmartPrint Print Agent to this shop/);
   assert.match(app, /lists the queue automatically/);
   assert.match(app, /actionLabel="Check Print Agent"/);
