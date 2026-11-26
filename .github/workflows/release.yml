@@ -208,6 +208,12 @@ jobs:
           Copy-Item "artifacts/desktop/*" $storeDesktop -Recurse -Force
           $runtime = Join-Path $storeDesktop "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
           Invoke-WebRequest -Uri $env:WEBVIEW2_STANDALONE_X64_URL -OutFile $runtime -MaximumRedirection 10
+          # The Evergreen bootstrapper is only a small network downloader. A
+          # standalone x64 runtime is substantially larger; reject bootstrapper
+          # URLs before packaging so the Store installer is genuinely offline.
+          if ((Get-Item -LiteralPath $runtime).Length -lt 50MB) {
+            throw "The WebView2 download is too small to be the standalone x64 runtime. Do not use the Evergreen Bootstrapper URL."
+          }
           $runtimeSignature = Get-AuthenticodeSignature -LiteralPath $runtime
           if ($runtimeSignature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $runtimeSignature.SignerCertificate.Subject -notmatch "Microsoft") {
             throw "WebView2 Evergreen Standalone Installer did not pass Microsoft Authenticode verification."
