@@ -39,7 +39,7 @@ export default function PlatformAdminAuthScreen({
       await storeTokens(tokens, "admin");
       onAuthenticated(tokens);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Unable to sign in to platform administration."));
+      setError(exception instanceof Error ? t(exception.message) : t("Unable to sign in to platform administration."));
     } finally {
       setBusy(false);
     }
