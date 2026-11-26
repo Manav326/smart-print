@@ -6679,7 +6679,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     // after the canonical PrintJob had been committed.
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     var lockedTickets = await db.LocalPrintUploadTickets.FromSqlInterpolated(
-        $"SELECT * FROM \\"LocalPrintUploadTickets\\" WHERE \\"Id\\" = {ticketId} AND \\"TenantId\\" = {device.TenantId} AND \\"AgentDeviceId\\" = {device.Id} AND \\"PrivatePrinting\\" = TRUE FOR UPDATE")
+        $"SELECT * FROM \"LocalPrintUploadTickets\" WHERE \"Id\" = {ticketId} AND \"TenantId\" = {device.TenantId} AND \"AgentDeviceId\" = {device.Id} AND \"PrivatePrinting\" = TRUE FOR UPDATE")
         .ToListAsync(ct);
     var ticket = lockedTickets.SingleOrDefault();
     if (ticket is null)
