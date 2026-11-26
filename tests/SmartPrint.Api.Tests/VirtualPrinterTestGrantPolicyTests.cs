@@ -85,17 +85,17 @@ public sealed class VirtualPrinterTestGrantPolicyTests
 
         // Shop A has an active grant.
         Assert.True(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopA, shopA, agentA, agentA, fingerprintA, fingerprintA,
+            shopA, shopA, shopA, agentA, agentA, fingerprintA, fingerprintA,
             Now.AddHours(-1), Now.AddDays(1), null, Now));
 
         // Shop B cannot borrow Shop A's grant, even if an identifier is replayed.
         Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopB, shopB, agentB, agentA, fingerprintB, fingerprintA,
+            shopB, shopB, shopA, agentB, agentA, fingerprintB, fingerprintA,
             Now.AddHours(-1), Now.AddDays(1), null, Now));
 
         // Shop C was approved but the grant has since been revoked.
         Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
-            shopC, shopC, agentC, agentC, fingerprintC, fingerprintC,
+            shopC, shopC, shopC, agentC, agentC, fingerprintC, fingerprintC,
             Now.AddHours(-1), Now.AddDays(1), Now.AddMinutes(-1), Now));
     }
 
