@@ -48,27 +48,61 @@ permissions:
 jobs:
   workflow-validation:
     if: ${{ github.event_name != 'workflow_dispatch' }}
-    runs-on: ubuntu-latest
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Parse Store publishing workflow YAML
+      - name: Parse release workflow YAML and all inline PowerShell blocks
         shell: bash
         run: |
+          set -euo pipefail
           python -m pip install --disable-pip-version-check --quiet PyYAML==6.0.2
           python - <<'PY'
           import pathlib
+          import tempfile
+          import textwrap
           import yaml
 
-          path = pathlib.Path(".github/workflows/store-publish.yml")
-          data = yaml.safe_load(path.read_text(encoding="utf-8"))
-          if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
-              raise SystemExit("Store publishing workflow must contain a jobs mapping.")
+          root = pathlib.Path(".")
+          workflow_paths = [
+              root / ".github/workflows/store-publish.yml",
+              root / ".github/workflows/release.yml",
+          ]
           expected = {"validate", "microsoft-store", "google-play", "workflow-validation"}
-          missing = expected.difference(data["jobs"])
-          if missing:
-              raise SystemExit(f"Missing Store publishing jobs: {sorted(missing)}")
-          print("Store publishing workflow YAML parsed and required jobs are present.")
+          extracted = 0
+          for path in workflow_paths:
+              data = yaml.safe_load(path.read_text(encoding="utf-8"))
+              if not isinstance(data, dict) or not isinstance(data.get("jobs"), dict):
+                  raise SystemExit(f"{path} must contain a jobs mapping.")
+              if path.name == "store-publish.yml":
+                  missing = expected.difference(data["jobs"])
+                  if missing:
+                      raise SystemExit(f"Missing Store publishing jobs: {sorted(missing)}")
+              for job_name, job in data["jobs"].items():
+                  for index, step in enumerate(job.get("steps", [])):
+                      shell = str(step.get("shell", "")).lower()
+                      source = step.get("run")
+                      if shell in ("pwsh", "powershell") and isinstance(source, str):
+                          target = pathlib.Path(tempfile.gettempdir()) / f"smartprint-workflow-{path.stem}-{job_name}-{index}.ps1"
+                          target.write_text(textwrap.dedent(source), encoding="utf-8")
+                          extracted += 1
+          print(f"Parsed workflow YAML and extracted {extracted} inline PowerShell scripts for syntax validation.")
           PY
+          pwsh -NoProfile -Command '
+          $files = Get-ChildItem $env:RUNNER_TEMP -Filter "smartprint-workflow-*.ps1" -File
+          if ($files.Count -eq 0) { throw "No inline PowerShell blocks were extracted." }
+          foreach ($file in $files) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile($file.FullName, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              foreach ($parseError in $parseErrors) {
+                Write-Error "$($file.Name): $($parseError.Message) at line $($parseError.Extent.StartLineNumber)"
+              }
+              throw "Inline PowerShell syntax validation failed for $($file.Name)."
+            }
+          }
+          Write-Host "All inline PowerShell blocks in release.yml and store-publish.yml parsed successfully."
+          '
 
   validate:
     if: ${{ github.event_name == 'workflow_dispatch' }}
