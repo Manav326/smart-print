@@ -212,6 +212,7 @@ jobs:
       ANDROID_SIGNING_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEYSTORE_PASSWORD }}
       ANDROID_SIGNING_KEY_ALIAS: ${{ secrets.ANDROID_SIGNING_KEY_ALIAS }}
       ANDROID_SIGNING_KEY_PASSWORD: ${{ secrets.ANDROID_SIGNING_KEY_PASSWORD }}
+      ANDROID_VERSION_CODE_BASE: ${{ vars.ANDROID_VERSION_CODE_BASE || '100000' }}
     outputs:
       available: ${{ steps.check-signing.outputs.available }}
     steps:
@@ -291,9 +292,19 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ ! "$ANDROID_VERSION_CODE_BASE" =~ ^[0-9]+$ ]]; then
+            echo "::error::ANDROID_VERSION_CODE_BASE must be a non-negative integer."
+            exit 1
+          fi
+          version_code=$((ANDROID_VERSION_CODE_BASE + GITHUB_RUN_NUMBER))
+          if (( version_code < 1 || version_code > 2100000000 )); then
+            echo "::error::Computed Android versionCode $version_code is outside Google's supported range."
+            exit 1
+          fi
+          echo "Building Android versionCode=$version_code (base=$ANDROID_VERSION_CODE_BASE, release run=$GITHUB_RUN_NUMBER)."
           gradle --no-daemon --console=plain -p apps/android \
             -PsmartPrintServiceUrl="$SMARTPRINT_PUBLIC_BASE_URL" \
-            -PsmartPrintVersionCode="$GITHUB_RUN_NUMBER" \
+            -PsmartPrintVersionCode="$version_code" \
             -PsmartPrintVersionName="$RELEASE_TAG" \
             :app:testDebugUnitTest :app:assembleRelease :app:bundleRelease
           mkdir -p artifacts/android
