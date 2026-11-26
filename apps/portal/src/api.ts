@@ -3206,6 +3206,8 @@ export interface PlatformVirtualPrinterTestQueue {
   status: string;
   lastSeenUtc: string | null;
   isActive: boolean;
+  agentOnline: boolean;
+  agentLastSeenUtc: string | null;
   grants: PlatformVirtualPrinterTestGrant[];
 }
 export function getPlatformVirtualPrinterTestQueues(token: string) {
