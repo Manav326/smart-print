@@ -1011,6 +1011,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "downloaded": "डाउनलोड हुआ",
     "Total size unavailable": "कुल आकार उपलब्ध नहीं",
     "Cancel download": "डाउनलोड रद्द करें",
+    "{label} progress": "{label} की डाउनलोड प्रगति",
+    "{fileName} download progress": "{fileName} डाउनलोड प्रगति",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1645,6 +1647,8 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "downloaded": "downloaded",
     "Total size unavailable": "Total size available nahi",
     "Cancel download": "Download cancel karein",
+    "{label} progress": "{label} ki download progress",
+    "{fileName} download progress": "{fileName} download progress",
   },
 };
 
