@@ -1005,6 +1005,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "READY TO CONNECT YOUR SHOP?": "अपनी शॉप कनेक्ट करने के लिए तैयार हैं?",
     "For print shops": "प्रिंट शॉप के लिए",
     "PRINT SHOP RESOURCES": "प्रिंट शॉप संसाधन",
+    "Retry download availability": "डाउनलोड उपलब्धता फिर जाँचें",
+    "Downloading": "डाउनलोड हो रहा है",
+    "In progress": "प्रगति पर",
+    "downloaded": "डाउनलोड हुआ",
+    "Total size unavailable": "कुल आकार उपलब्ध नहीं",
+    "Cancel download": "डाउनलोड रद्द करें",
   },
   hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
@@ -1633,6 +1639,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "READY TO CONNECT YOUR SHOP?": "READY TO CONNECT YOUR SHOP?",
     "For print shops": "For print shops",
     "PRINT SHOP RESOURCES": "PRINT SHOP RESOURCES",
+    "Retry download availability": "Download availability dobara check karein",
+    "Downloading": "Downloading",
+    "In progress": "In progress",
+    "downloaded": "downloaded",
+    "Total size unavailable": "Total size available nahi",
+    "Cancel download": "Download cancel karein",
   },
 };
 
