@@ -63,7 +63,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       setQueues(await getPlatformVirtualPrinterTestQueues(tokens.accessToken));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not load virtual printer queues."));
+      setError(exception instanceof Error ? exception.message : "Could not load virtual printer queues.");
     } finally {
       setLoading(false);
     }
@@ -85,7 +85,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
       setSuccess(t("Virtual queue approved for this shop for seven days. The queue identity remains virtual."));
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not approve this virtual printer."));
+      setError(exception instanceof Error ? exception.message : "Could not approve this virtual printer.");
     } finally {
       setBusyId("");
     }
@@ -109,7 +109,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
       setSuccess(t("Virtual printer grant revoked. New dispatches will be denied."));
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not revoke this virtual printer grant."));
+      setError(exception instanceof Error ? exception.message : "Could not revoke this virtual printer grant.");
     } finally {
       setBusyId("");
     }
@@ -172,7 +172,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       setDraft(toDraft(current));
       setHistory(events);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not load platform operational settings."));
+      setError(exception instanceof Error ? exception.message : "Could not load platform operational settings.");
     } finally {
       setLoading(false);
     }
@@ -203,7 +203,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       setSuccess(t("Platform settings saved. The API and connected Windows Agents will apply the updated values."));
       setHistory(await getPlatformOperationalSettingsHistory(tokens.accessToken));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : t("Could not save platform settings."));
+      setError(exception instanceof Error ? exception.message : "Could not save platform settings.");
     } finally {
       setSaving(false);
     }
