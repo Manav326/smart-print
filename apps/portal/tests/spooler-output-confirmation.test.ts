@@ -201,3 +201,12 @@ test("virtual test output is never presented as ready for customer collection", 
   assert.match(orderJourney, /Virtual test completed · not for collection/);
   assert.match(orderJourney, /job\.outputType!=="TEST_VIRTUAL"/);
 });
+
+
+test("customer status explicitly distinguishes virtual test completion from printed collection orders", () => {
+  const app = read("../src/App.tsx");
+  assert.match(app, /TEST_OUTPUT_READY:"Test complete"/);
+  assert.match(app, /Virtual printer test completed · no physical print was made/);
+  assert.match(app, /This is not physical fulfilment and is not ready for collection/);
+  assert.match(app, /TEST_OUTPUT_READY\?"Test complete"/);
+});
