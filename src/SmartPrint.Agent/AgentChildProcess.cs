@@ -111,9 +111,10 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
             // Fail closed if the child asks more than once or no parent
             // authorization callback was supplied.
             var allowed = false;
-            if (!authorizationRequested && beforeSpoolerSubmission is not null)
+            var firstAuthorizationRequest = !authorizationRequested;
+            authorizationRequested = true;
+            if (firstAuthorizationRequest && beforeSpoolerSubmission is not null)
             {
-                authorizationRequested = true;
                 try
                 {
                     allowed = await beforeSpoolerSubmission(authorizationCancellationToken);
@@ -129,8 +130,11 @@ public sealed class AgentChildProcessRunner : IAgentChildProcessRunner
                 await process.StandardInput.WriteLineAsync(allowed ? "ALLOW" : "DENY");
                 await process.StandardInput.FlushAsync();
             }
-            catch (IOException) when (process.HasExited)
+            catch (IOException)
             {
+                // If the handshake pipe is gone, terminate the child rather than
+                // leaving it blocked at the pre-StartDoc gate.
+                TryKill(process);
                 break;
             }
         }
