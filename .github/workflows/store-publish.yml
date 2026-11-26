@@ -43,6 +43,18 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
+      - name: Require dispatch from the protected main branch
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Store publication must be dispatched from main."
+            exit 1
+          fi
+      - name: Check out and verify the exact release tag
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.release_tag }}
+          fetch-depth: 0
       - name: Require explicit publication confirmation and a stable tag
         shell: bash
         env:
@@ -56,6 +68,12 @@ jobs:
             echo "::error::Use a stable semantic version tag such as v1.2.0."
             exit 1
           }
+          git fetch --no-tags origin main
+          tag_commit="$(git rev-parse "${RELEASE_TAG}^{commit}")"
+          if [[ "$tag_commit" != "$(git rev-parse HEAD)" ]] || ! git merge-base --is-ancestor "$tag_commit" origin/main; then
+            echo "::error::The selected release tag must resolve to a commit reachable from main."
+            exit 1
+          fi
           [[ "$CONFIRM_PUBLICATION" == "true" ]] || {
             echo "::error::Set confirm_publication=true only after reviewing the release artifacts."
             exit 1
@@ -90,7 +108,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: main
+          ref: ${{ inputs.release_tag }}
       - name: Download the signed Windows Store artifact from the published release
         shell: pwsh
         env:
@@ -107,7 +125,7 @@ jobs:
           if ($actual -ne $parts[0].ToLowerInvariant()) { throw "Store installer checksum verification failed." }
           $signature = Get-AuthenticodeSignature -LiteralPath "artifacts/SmartPrint-Windows-Store-Setup.exe"
           if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid) { throw "Store installer Authenticode signature is not valid." }
-          if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER) -or -not $signature.SignerCertificate.Subject.Contains($env:SMARTPRINT_WINDOWS_PUBLISHER)) { throw "Store installer signer does not match the configured Partner Center publisher identity." }
+          if ([string]::IsNullOrWhiteSpace($env:SMARTPRINT_WINDOWS_PUBLISHER) -or $signature.SignerCertificate.Subject -notmatch [regex]::Escape($env:SMARTPRINT_WINDOWS_PUBLISHER)) { throw "Store installer signer does not contain the configured Partner Center publisher identity." }
 
       - name: Require complete Microsoft Store and R2 configuration
         shell: pwsh
