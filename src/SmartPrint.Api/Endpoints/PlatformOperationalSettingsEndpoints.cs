@@ -20,10 +20,7 @@ public static class PlatformOperationalSettingsEndpoints
                 .SingleOrDefaultAsync(item => item.Id == PlatformOperationalSettings.SingletonIdValue, ct);
             if (settings is null)
                 return Results.Problem(statusCode: 503, title: "Platform operational settings are not initialized.");
-            var response = ToResponse(settings);
-            if (environment.IsProduction())
-                response = response with { TreatWorkingVirtualQueuesAsPhysicalForTesting = false };
-            return Results.Ok(response);
+            return Results.Ok(ToResponse(settings));
         });
 
         platform.MapGet("/settings/operations/history", async (SmartPrintDbContext db, CancellationToken ct) =>
@@ -44,8 +41,6 @@ public static class PlatformOperationalSettingsEndpoints
             CancellationToken ct) =>
         {
             var errors = Validate(request);
-            if (environment.IsProduction() && request.TreatWorkingVirtualQueuesAsPhysicalForTesting)
-                errors["treatWorkingVirtualQueuesAsPhysicalForTesting"] = ["Virtual printer test mode is available only in non-production environments."];
             if (errors.Count != 0) return Results.ValidationProblem(errors);
             var actorValue = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ??
                 principal.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -74,7 +69,6 @@ public static class PlatformOperationalSettingsEndpoints
             locked.AgentRetentionSweepHours = request.AgentRetentionSweepHours;
             locked.AllowPaidJobClaimsWhenSuspended = request.AllowPaidJobClaimsWhenSuspended;
             locked.AllowPrivatePrintingVirtualOutput = request.AllowPrivatePrintingVirtualOutput;
-            locked.TreatWorkingVirtualQueuesAsPhysicalForTesting = request.TreatWorkingVirtualQueuesAsPhysicalForTesting;
             locked.UpdatedByUserId = actorId;
             locked.UpdatedUtc = DateTimeOffset.UtcNow;
 
@@ -136,7 +130,6 @@ public static class PlatformOperationalSettingsEndpoints
         settings.AgentRetentionSweepHours,
         settings.AllowPaidJobClaimsWhenSuspended,
         settings.AllowPrivatePrintingVirtualOutput,
-        settings.TreatWorkingVirtualQueuesAsPhysicalForTesting,
         settings.UpdatedByUserId,
         settings.UpdatedUtc);
 }
@@ -154,7 +147,6 @@ public sealed record PlatformOperationalSettingsRequest(
     int AgentRetentionSweepHours,
     bool AllowPaidJobClaimsWhenSuspended,
     bool AllowPrivatePrintingVirtualOutput,
-    bool TreatWorkingVirtualQueuesAsPhysicalForTesting,
     string Reason);
 
 public sealed record PlatformOperationalSettingsResponse(
