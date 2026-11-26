@@ -254,7 +254,8 @@ export function resolveUiLocale(value: unknown): UiLocale | null {
 }
 
 export function getUiLocaleLanguage(value: unknown): string {
-  return value === "hindi" || value === "hi" ? "hi" : value === "hinglish" || value === "hi-Latn" ? "hi-Latn" : "en";
+  const locale = normalizeUiLocale(value);
+  return locale === "hindi" ? "hi" : locale === "hinglish" ? "hi-Latn" : "en";
 }
 
 export function normalizeUiLocale(value: unknown): UiLocale {
