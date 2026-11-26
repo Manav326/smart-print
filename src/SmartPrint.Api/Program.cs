@@ -2246,8 +2246,7 @@ shop.MapPost("/qr-stations", async (
     if (request.PrinterDeviceId is Guid printerId)
     {
         var selectedPrinterOutputMode = await db.PrinterDevices.AsNoTracking()
-            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive &&
-                              true)
+            .Where(printer => printer.Id == printerId && printer.TenantId == tenantId && printer.IsActive)
             .Select(printer => printer.OutputMode)
             .SingleOrDefaultAsync(ct);
         if (selectedPrinterOutputMode is null)
@@ -13916,8 +13915,7 @@ publicApi.MapGet("/sessions/current", async (
     var localAgent = await GetLocalAgentInfoAsync(db, session.TenantId, stationPrinterId, now, ct);
     var printer = stationPrinterId is Guid currentPrinterId
         ? await db.PrinterDevices.AsNoTracking()
-            .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive &&
-                           true)
+            .Where(item => item.Id == currentPrinterId && item.TenantId == session.TenantId && item.IsActive)
             .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
             .SingleOrDefaultAsync(ct)
         : null;
