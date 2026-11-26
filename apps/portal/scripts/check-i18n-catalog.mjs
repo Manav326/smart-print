@@ -110,6 +110,15 @@ for (const [key, hindiValue] of screenHindi) {
   }
 }
 
+const hindiTranslatedCount = [...screenHindi].filter(([key, value]) => key !== value).length;
+const hinglishTranslatedCount = [...screenHinglish].filter(([key, value]) => key !== value).length;
+if (hindiTranslatedCount / screenHindi.size < 0.9) {
+  throw new Error("Hindi screen copy must remain meaningfully translated, not mostly English fallback");
+}
+if (hinglishTranslatedCount / screenHinglish.size < 0.65) {
+  throw new Error("Hinglish screen copy must remain meaningfully translated, not mostly English fallback");
+}
+
 const localizedScreens = [
   "App.tsx",
   "AuthScreen.tsx",
