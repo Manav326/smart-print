@@ -6589,6 +6589,7 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/complete", async (
         CreatedUtc = now,
         UpdatedUtc = now
     };
+    PrivateRelayPhotoOutputRules.ApplyTicketOptions(job, locked);
     var document = new PrintDocument
     {
         TenantId = locked.TenantId,
