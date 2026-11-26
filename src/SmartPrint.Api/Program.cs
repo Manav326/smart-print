@@ -8405,22 +8405,33 @@ agentApi.MapPost("/jobs/{jobId:guid}/authorize-spooler-submission", async (
             output.SpoolerJobName, request.SpoolerJobName, output.PrintDispatchLeaseExpiresUtc, now))
         return Results.Conflict(new { code = "stale_spooler_submission_attempt", message = "This worker no longer owns the current dispatch attempt. No Windows spooler submission was authorised." });
 
-    if (output.OutputMode == PrinterTypePolicy.UnsupportedVirtual)
+    var grantActive = false;
+    if (output.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
+        !environment.IsProduction() && !string.IsNullOrWhiteSpace(output.IdentityFingerprint))
     {
-        if (environment.IsProduction() || string.IsNullOrWhiteSpace(output.IdentityFingerprint))
-            return Results.Forbid();
-        var grantActive = await db.VirtualPrinterTestGrants.AsNoTracking().AnyAsync(grant =>
+        // Re-read the exact shop + printer + Agent + queue fingerprint grant at
+        // the child-process handshake, after document preparation and just
+        // before StartDoc. Revocation or expiry during preparation therefore
+        // fails closed without creating a Windows spooler job.
+        grantActive = await db.VirtualPrinterTestGrants.AsNoTracking().AnyAsync(grant =>
             grant.TenantId == output.TenantId &&
             grant.PrinterDeviceId == output.Id &&
             grant.AgentDeviceId == device.Id &&
             grant.IdentityFingerprint == output.IdentityFingerprint &&
             grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct);
-        if (!grantActive || output.OutputType != PrivatePrintingOutputPolicy.TestVirtual)
-            return Results.Conflict(new { code = "virtual_printer_test_grant_expired_or_revoked", message = "The shop-scoped virtual printer test grant or test-output classification is no longer valid. No Windows spooler submission was attempted." });
     }
-    else if (output.OutputMode != PrinterTypePolicy.Physical || output.OutputType != PrinterTypePolicy.Physical)
+
+    if (!VirtualPrinterTestGrantPolicy.CanAuthorizeSpoolerSubmission(
+            output.OutputMode, output.OutputType, grantActive, environment.IsProduction()))
     {
-        return Results.Conflict(new { code = "unsupported_spooler_output_mode" });
+        var virtualOutput = output.OutputMode == PrinterTypePolicy.UnsupportedVirtual;
+        return Results.Conflict(new
+        {
+            code = virtualOutput ? "virtual_printer_test_grant_expired_or_revoked" : "unsupported_spooler_output_mode",
+            message = virtualOutput
+                ? "The shop-scoped virtual printer test grant or test-output classification is no longer valid. No Windows spooler submission was attempted."
+                : "Only physical printers and explicitly authorised non-production virtual test queues may use the Windows spooler."
+        });
     }
 
     if (output.PrivatePrinting)
