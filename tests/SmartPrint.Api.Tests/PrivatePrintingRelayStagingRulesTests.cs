@@ -44,7 +44,7 @@ public sealed class PrivatePrintingRelayStagingRulesTests
     [InlineData(true, false, PrivatePrintingOutputPolicy.PdfExport, false, false)]
     [InlineData(false, true, PrivatePrintingOutputPolicy.PdfExport, false, true)]
     [InlineData(false, true, PrinterTypePolicy.UnsupportedVirtual, false, false)]
-    [InlineData(false, false, PrivatePrintingOutputPolicy.TestVirtual, true, true)]
+    [InlineData(false, false, PrinterTypePolicy.UnsupportedVirtual, true, true)]
     public void PhysicalAndVirtualOutputRestrictionsStillApply(
         bool isProduction,
         bool allowVirtualOutput,
