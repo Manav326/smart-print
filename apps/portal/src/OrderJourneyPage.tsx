@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { LanguageSwitcher, useLocale, translateUiText, formatUiCurrency } from "./i18n";
+import { useLocale, translateUiText, formatUiCurrency } from "./i18n";
 import { AlertTriangle, Check, ChevronDown, Clock3, CreditCard, Eye, FileText, History, Image as ImageIcon, Inbox, PackageCheck, Printer, RefreshCw, RotateCcw, ShieldCheck, Wallet, Wifi, X } from "lucide-react";
 import type { AgentDevice, PrinterDevice, ShopPayment, ShopPrintJob } from "./api";
 import { formatIstDateTime } from "./date-time";
@@ -295,7 +295,7 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
   return <div className={styles.journeyPage}>
     <header className={styles.pageHero}>
       <div><div className={styles.eyebrow}><span className={styles.livePulse}/> {t("LIVE ORDER CONTROL")}</div><p>{t("Workload, payments and print status at a glance.")}</p></div>
-      <div className={styles.heroActions}><LanguageSwitcher compact/><span className={styles.liveLabel}><span/> {t("Live shop view")}</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?t("Refreshing"):t("Refresh")}</button></div>
+      <div className={styles.heroActions}><span className={styles.liveLabel}><span/> {t("Live shop view")}</span><button type="button" className={styles.refreshButton} onClick={onRefresh} disabled={refreshing}><RefreshCw size={15} className={refreshing?styles.spinning:""}/>{refreshing?t("Refreshing"):t("Refresh")}</button></div>
     </header>
 
     <section className={styles.stageFilters} aria-label={t("Filter orders by stage")}>
