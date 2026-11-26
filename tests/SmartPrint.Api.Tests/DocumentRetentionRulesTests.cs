@@ -17,6 +17,21 @@ public sealed class DocumentRetentionRulesTests
             false, null, Cutoff, Cutoff));
     }
 
+    [Fact]
+    public void PurgesVerifiedVirtualTestOutputAfterRetentionWithoutPhysicalConfirmation()
+    {
+        Assert.True(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", "TEST_OUTPUT_READY", null, Cutoff.AddTicks(-1), Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+        Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", "TEST_OUTPUT_READY", null, Cutoff.AddTicks(1), Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+        // A physical confirmation timestamp alone must not complete a test-output record.
+        Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", "TEST_OUTPUT_READY", Cutoff.AddDays(-40), null, Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+    }
+
     [Theory]
     [InlineData("LOCAL_AGENT", "COMPLETED", true, false)]
     [InlineData("CLOUD", "OUTPUT_UNCONFIRMED", true, false)]
