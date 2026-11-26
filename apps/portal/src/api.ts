@@ -3182,9 +3182,11 @@ export interface PlatformVirtualPrinterTestGrant {
   id: string;
   reason: string;
   approvedByUserId: string;
+  approvedByName: string;
   createdUtc: string;
   expiresUtc: string;
   revokedByUserId: string | null;
+  revokedByName: string | null;
   revokedUtc: string | null;
   revocationReason: string | null;
   isActive: boolean;
