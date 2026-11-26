@@ -254,7 +254,12 @@ jobs:
             finally {
               $stream.Dispose()
             }
-            if ($first -eq 0x4D -and $second -eq 0x5A) { $peFiles += $candidate }
+            if (
+              $first -eq 0x4D -and $second -eq 0x5A -and
+              -not [string]::Equals($candidate.FullName, $runtime, [StringComparison]::OrdinalIgnoreCase)
+            ) {
+              $peFiles += $candidate
+            }
           }
           if ($peFiles.Count -eq 0) { throw "No SmartPrint PE binaries were found for signing." }
           foreach ($file in $peFiles) {
