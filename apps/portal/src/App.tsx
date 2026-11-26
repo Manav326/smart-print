@@ -1824,7 +1824,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
               {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.</p>}
               <strong>{payment.payeeNameSnapshot||"Shop payment"}</strong>
               <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
-              <small>Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.</small>
+              <small>{t("Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.")}</small>
             </div>
           : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
       <div className="form-hint">The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.</div>
@@ -4224,6 +4224,7 @@ function InfoTooltip({label,children}:{label:string;children:ReactNode}) {
 
 function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:boolean;onToggleTheme:()=>void}) {
   const { locale } = useLocale();
+  const t = (value: string, values: Record<string, string | number> = {}) => translateUiText(locale, value, values);
   const [result,setResult]=useState<Awaited<ReturnType<typeof createCustomerSession>>|null>(null);
   const [error,setError]=useState("");
   const [loading,setLoading]=useState(true);
@@ -4337,16 +4338,16 @@ function CustomerEntry({publicCode,dark,onToggleTheme}:{publicCode:string;dark:b
   return <div className={nativeAppMode ? "customer-entry smartprint-native" : "customer-entry"}><div className="customer-entry-glow"/>
     <header className="customer-entry-brand"><BrandLockup className="customer-entry-brand-lockup" /><ThemeToggleButton dark={dark} onToggle={onToggleTheme}/></header>
     <main className={result ? "customer-entry-card customer-entry-card--upload" : "customer-entry-card"}>
-      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?translateUi(locale,"common.loading"):"Connecting to your print shop"}</h1>{!nativeAppMode&&<p>Creating a secure, time-limited session for this QR station.</p>}</>:
-      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">STATION UNAVAILABLE</div><h1>{nativeAppMode?"Shop unavailable":"This QR station can't be reached"}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
-      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">SECURE SESSION CREATED</div><h1>{nativeAppMode?result.shop.displayName:translateUi(locale,"customer.welcome",{shopName:result.shop.displayName})}</h1><p>{nativeAppMode?"Shop connected.":"Your phone is connected to this shop's print station."}</p>
-        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||"Shop print counter"}</strong><span>{nativeAppMode?(result.printer?.status||"Printer not selected"):result.printer?result.printer.manufacturer+" · "+result.printer.model:"The shop will select a printer for your job."}</span></div><Status label={result.printer?.status||"Session ready"} tone="blue"/></div>
-        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?"Secure session · Expires "+formatIstTime(result.expiresUtc):"This session expires at "+formatIstTime(result.expiresUtc)+". Your document access stays limited to this shop session."}</span></div>
+      {loading?<><div className="customer-entry-spinner"><span className="button-spinner"/></div><h1>{nativeAppMode?translateUi(locale,"common.loading"):t("Connecting to your print shop")}</h1>{!nativeAppMode&&<p>{t("Creating a secure, time-limited session for this QR station.")}</p>}</>:
+      error?<><div className="entry-error-icon"><X size={23}/></div><div className="entry-eyebrow">{t("STATION UNAVAILABLE")}</div><h1>{nativeAppMode?t("Shop unavailable"):t("This QR station can't be reached")}</h1>{!nativeAppMode&&<p>{error}</p>}<button className="primary-button" onClick={()=>window.location.reload()}>Try again</button></>:
+      result?<><div className="entry-success-icon"><Check size={23}/></div><div className="entry-eyebrow">{t("SECURE SESSION CREATED")}</div><h1>{nativeAppMode?result.shop.displayName:translateUi(locale,"customer.welcome",{shopName:result.shop.displayName})}</h1><p>{nativeAppMode?t("Shop connected."):t("Your phone is connected to this shop's print station.")}</p>
+        <div className="entry-printer-card"><div className="entry-printer-icon"><Printer size={20}/></div><div><strong>{result.printer?.displayName||t("Shop print counter")}</strong><span>{nativeAppMode?(result.printer?.status||t("Printer not selected")):result.printer?result.printer.manufacturer+" · "+result.printer.model : t("The shop will select a printer for your job.")}</span></div><Status label={result.printer?.status||t("Session ready")} tone="blue"/></div>
+        <div className="entry-session-note"><ShieldCheck size={16}/><span>{nativeAppMode?t("Secure session · Expires {expires}",{expires:formatIstTime(result.expiresUtc)}):t("This session expires at {expires}. Your document access stays limited to this shop session.",{expires:formatIstTime(result.expiresUtc)})}</span></div>
         <CustomerLocalConnection localAgent={result.localAgent} onReady={handleLocalReady} onUnavailable={handleLocalUnavailable} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled}/>
         <CustomerPrintFlow dark={dark} publicCode={publicCode} sessionToken={result.sessionToken} paymentOptions={result.paymentOptions} localAgent={result.localAgent} localReady={localReady} localFallbackSuggested={localFallbackSuggested} cloudAssistedPrintingEnabled={result.cloudAssistedPrintingEnabled} privatePrintingVirtualOutputEnabled={result.privatePrintingVirtualOutputEnabled} photoPricing={result.photoPricing} hasAssignedPrinter={Boolean(result.printer)} printerCapabilitiesJson={result.printer?.capabilitiesJson} key={result.sessionToken} onStartNewSession={()=>void startNewSession()}/>
       </>:null}
     </main>
-    <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · Secure customer printing</footer>
+    <footer className="customer-entry-footer">© 2026 SmartPrint by QuantaEdge · {t("Secure customer printing")}</footer>
   </div>;
 }
 
@@ -6871,7 +6872,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <span><strong>{t("PDF footer selected by the shop.")}</strong> <InfoTooltip label={t("PDF footer details")}><span>Footer only appears on PDFs with a verified blank bottom margin.</span><span>Digitally signed or interactive PDFs remain unchanged.</span><span>Original uploads and physical prints are never altered.</span><span>Image-to-PDF exports currently remain unbranded.</span><span>Branding off preserves a single-copy full-document PDF byte-for-byte.</span><span>{t("Reformatted or multi-copy exports may be flattened.")}</span><span>{t("Ask for an unbranded single-copy export when PDF structure matters.")}</span></InfoTooltip></span>
       </div>}
       {!!jobStatus.timeline?.filter(event=>event.previousStatus!==event.newStatus).length&&<div className="customer-state-timeline">{jobStatus.timeline.filter(event=>event.previousStatus!==event.newStatus).map((event,index)=><div key={event.createdUtc+"-"+index}><i/><span><strong>{customerStatusLabel(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"You":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>}
-      {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>Your order history is saved. You can start another print session when ready.</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
+      {canStartNewSession&&<div className="customer-session-complete"><div><strong>{translateUi(locale,"customer.orderReceived")}</strong><span>{t("Your order history is saved. You can start another print session when ready.")}</span></div><button className="customer-flow-button" onClick={onStartNewSession}><RefreshCw size={16}/> {translateUi(locale,"customer.startNewSession")}</button></div>}
 
       {legacyIndividualPayment&&(jobStatus.status==="AWAITING_PAYMENT"||jobStatus.status==="PAYMENT_REJECTED")&&<div className="customer-pay-panel">
         <div className="customer-pay-heading"><span>{t("PAY THE SHOP")}</span><strong>{money(jobStatus.quotedAmountMinor,jobStatus.currency)}</strong></div>
