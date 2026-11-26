@@ -4294,7 +4294,7 @@ shop.MapPost("/print-jobs/{jobId:guid}/confirm-output", async (Guid jobId, Claim
         {
             code = job.OutputType == "TEST_VIRTUAL" ? "test_virtual_output_not_physical" : "pdf_export_not_physical_output",
             message = job.OutputType == "TEST_VIRTUAL"
-                ? "The authorised virtual printer test completed through the Windows spooler. This is test output, not physical fulfilment, and cannot be marked as physically collected."
+                ? "This is a non-production test output, not physical fulfilment, and cannot be marked as physically collected."
                 : "PDF exports are confirmed when the local PDF file is saved and verified. Physical paper-output confirmation does not apply."
         });
     if (job.Status == "COMPLETED" && job.OutputConfirmedUtc != null)
