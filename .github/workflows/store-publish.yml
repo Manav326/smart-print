@@ -50,7 +50,7 @@ jobs:
     if: ${{ github.event_name != 'workflow_dispatch' }}
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: Parse release workflow YAML and all inline PowerShell blocks
         shell: bash
         run: |
@@ -118,7 +118,7 @@ jobs:
             exit 1
           fi
       - name: Check out the exact release tag
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ inputs.release_tag }}
           fetch-depth: 0
@@ -177,7 +177,7 @@ jobs:
       MICROSOFT_STORE_CLIENT_SECRET: ${{ secrets.MICROSOFT_STORE_CLIENT_SECRET }}
       RELEASE_SOURCE_SHA: ${{ needs.validate.outputs.source_sha }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ needs.validate.outputs.source_sha }}
       - name: Install verified GitHub CLI 2.106.0
