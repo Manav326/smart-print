@@ -108,6 +108,33 @@ test("Photo Studio actions, order recovery and public download warnings are loca
   );
 });
 
+test("shop operations, platform policy and plan administration copy is localized", () => {
+  assert.equal(
+    translateUiText("hindi", "Shop-scoped virtual printer test access"),
+    "शॉप के लिए सीमित वर्चुअल प्रिंटर टेस्ट एक्सेस",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Shop-scoped virtual printer test access"),
+    "Shop-scoped virtual printer test access",
+  );
+  assert.equal(
+    translateUiText("hindi", "What this subscription includes"),
+    "इस सब्सक्रिप्शन में क्या शामिल है",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Choose a plan from the catalogue to inspect its versions and configure draft terms."),
+    "Plan ke versions dekhne aur draft terms configure karne ke liye catalogue se plan choose karein.",
+  );
+  assert.equal(
+    translateUiText("hindi", "Monthly price ({currency})", { currency: "INR" }),
+    "मासिक कीमत (INR)",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked."),
+    "Sirf latest suspension se pehle create aur payment-verified jobs hi claim ho sakti hain. Naye orders aur suspension ke baad ke payments blocked rahenge.",
+  );
+});
+
 test("number, currency and date formatting use the selected locale", () => {
   assert.equal(typeof formatUiNumber(1234.5, "hindi"), "string");
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
