@@ -370,7 +370,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         <p style={{fontSize:13,lineHeight:1.55,color:"var(--muted,#64748b)",margin:"0 0 16px"}}>{t("Delete “{name}” and its saved original photo from this device? This cannot be undone.", { name: deleteTarget.title })}</p>
         <div style={{display:"flex",justifyContent:"flex-end",gap:8}}>
           <button type="button" onClick={()=>setDeleteTarget(null)} style={actionStyle}>{t("Keep document")}</button>
-          <button type="button" onClick={confirmDeleteDocument} style={{...actionStyle,background:"#b42318",color:"#fff",borderColor:"transparent"}}>Delete</button>
+          <button type="button" onClick={confirmDeleteDocument} style={{...actionStyle,background:"#b42318",color:"#fff",borderColor:"transparent"}}>{t("Delete")}</button>
         </div>
       </section>
     </div>}
