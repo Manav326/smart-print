@@ -260,7 +260,7 @@ test("Photo Studio restores focus to the customer or shop control after it close
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
- assert.match(app,/CustomerInlineNotice kind="info" title="Photo printing unavailable"/);
+ assert.match(app,/CustomerInlineNotice kind="info" title=\{t\("Photo printing unavailable"\)\}/);
  assert.match(app,/Ask the shop to enable photo printing and set its rates/);
 });
 
