@@ -447,7 +447,7 @@ test("Photo Studio contextual help is readable, dismissible and theme-aware inst
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
  assert.match(studio,/aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
  assert.match(studio,/aria-expanded=\{openHelpTool===activeTool\}/);
- assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
+ assert.match(studio,/role="region" aria-label=\{t\("\{panel\} guidance",\{panel:panelTitle\}\)\}/);
  assert.match(studio,/openHelpToolRef\.current !== null/);
  assert.match(studio,/dismissOnOutsidePointer/);
  for(const help of ["Drag a photo to reframe it","Crop zoom changes the print","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and DOB captions are optional"])
