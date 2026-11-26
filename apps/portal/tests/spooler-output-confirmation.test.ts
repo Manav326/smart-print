@@ -208,5 +208,5 @@ test("customer status explicitly distinguishes virtual test completion from prin
   assert.match(app, /TEST_OUTPUT_READY:"Test complete"/);
   assert.match(app, /Virtual printer test completed · no physical print was made/);
   assert.match(app, /This is not physical fulfilment and is not ready for collection/);
-  assert.match(app, /TEST_OUTPUT_READY\?"Test complete"/);
+  assert.match(app, /case "TEST_OUTPUT_READY": return "Test complete"/);
 });
