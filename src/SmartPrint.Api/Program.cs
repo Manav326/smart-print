@@ -4487,7 +4487,8 @@ shop.MapPost("/print-batches/{batchId:guid}/resume-unprinted", async (
                 job.Status, job.OutputType, job.SpoolerStatus, job.FailureCode,
                 job.SpoolerJobId, job.SpoolerPagesPrinted, job.SpoolerTotalPages,
                 job.SpoolerSubmittedUtc, job.SpoolerObservedUtc,
-                job.OutputConfirmedUtc, job.PrintDispatchLeaseExpiresUtc, now))
+                job.OutputConfirmedUtc, job.PrintDispatchLeaseExpiresUtc, now,
+                allowTestVirtualOutput: printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual))
         {
             await transaction.RollbackAsync(ct);
             return Results.Conflict(new
