@@ -296,6 +296,24 @@ export function translateUi(localeValue: unknown, key: keyof typeof english | st
 
 export const UI_MESSAGE_KEYS = Object.keys(english) as Array<keyof typeof english>;
 
+export function hasUiTranslation(key: string, localeValue: unknown): boolean {
+  const locale = normalizeUiLocale(localeValue);
+  return Object.prototype.hasOwnProperty.call(uiCatalogs[locale], key);
+}
+
+export function translateUiPlural(
+  localeValue: unknown,
+  keyPrefix: string,
+  count: number,
+  values: MessageValues = {},
+): string {
+  const locale = normalizeUiLocale(localeValue);
+  const category = new Intl.PluralRules(getUiLocaleLanguage(locale)).select(count);
+  const key = keyPrefix + "." + category;
+  const selectedKey = hasUiTranslation(key, locale) ? key : keyPrefix + ".other";
+  return translateUi(locale, selectedKey, { ...values, count });
+}
+
 export function formatUiNumber(value: number, localeValue: unknown, options?: Intl.NumberFormatOptions): string {
   return new Intl.NumberFormat(getUiLocaleLanguage(localeValue), options).format(value);
 }
