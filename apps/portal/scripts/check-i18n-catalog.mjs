@@ -10,21 +10,44 @@ function readCatalog(name, declaration, terminator) {
   if (start < 0) throw new Error("Missing catalog declaration: " + name);
   const end = source.indexOf(terminator, start);
   if (end < 0) throw new Error("Unterminated catalog declaration: " + name);
-  const body = source.slice(start, end);
-  const entries = [...body.matchAll(/^\\s*"([^"]+)"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"/gm)];
-  const keys = entries.map((entry) => entry[1]);
+  const lines = source.slice(start, end).split("\n");
+  const entries = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (!trimmed.startsWith('"')) continue;
+    const keyEnd = trimmed.indexOf('"', 1);
+    if (keyEnd < 0 || trimmed.slice(keyEnd + 1).trimStart()[0] !== ":") continue;
+    const valueStart = trimmed.indexOf('"', keyEnd + 1);
+    const valueEnd = trimmed.lastIndexOf('"');
+    if (valueStart < 0 || valueEnd <= valueStart) continue;
+    entries.push([trimmed.slice(1, keyEnd), trimmed.slice(valueStart + 1, valueEnd)]);
+  }
+  const keys = entries.map(([key]) => key);
   const duplicates = keys.filter((key, index) => keys.indexOf(key) !== index);
   if (duplicates.length) throw new Error(name + " has duplicate keys: " + [...new Set(duplicates)].join(", "));
-  return new Map(entries.map((entry) => [entry[1], entry[2]]));
+  return new Map(entries);
+}
+
+function placeholders(value) {
+  const found = [];
+  let cursor = 0;
+  while (cursor < value.length) {
+    const open = value.indexOf("{", cursor);
+    if (open < 0) break;
+    const close = value.indexOf("}", open + 1);
+    if (close < 0) break;
+    found.push(value.slice(open + 1, close));
+    cursor = close + 1;
+  }
+  return found.sort().join("|");
 }
 
 const catalogs = {
   english: readCatalog("English", "const english = {", "} as const;"),
-  hindi: readCatalog("Hindi", "const hindi:", ";\\n\\nconst hinglish"),
-  hinglish: readCatalog("Hinglish", "const hinglish:", ";\\n\\nexport const UI_LOCALE_OPTIONS"),
+  hindi: readCatalog("Hindi", "const hindi:", ";\n\nconst hinglish"),
+  hinglish: readCatalog("Hinglish", "const hinglish:", ";\n\nexport const UI_LOCALE_OPTIONS"),
 };
 const baseKeys = [...catalogs.english.keys()];
-const placeholders = (value) => [...value.matchAll(/\\{([a-zA-Z][a-zA-Z0-9_]*)\\}/g)].map((match) => match[1]).sort().join("|");
 for (const [locale, catalog] of Object.entries(catalogs)) {
   const missing = baseKeys.filter((key) => !catalog.has(key));
   const extra = [...catalog.keys()].filter((key) => !catalogs.english.has(key));
