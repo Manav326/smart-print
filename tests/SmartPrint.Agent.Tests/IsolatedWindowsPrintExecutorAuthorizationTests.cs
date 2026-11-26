@@ -71,9 +71,11 @@ public sealed class IsolatedWindowsPrintExecutorAuthorizationTests
             "virtual-test.pdf", "application/pdf",
             Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant(),
             bytes.LongLength, 1, 1, "Mono", "A4", false, "INR", 100,
-            "unused", "ACKNOWLEDGED", now, now.AddMinutes(3),
-            SpoolerJobName: "VIRTUAL-TEST-SP-481",
-            OutputMode: "UNSUPPORTED_VIRTUAL");
+            "unused", "ACKNOWLEDGED", now, now.AddMinutes(3))
+        {
+            SpoolerJobName = "VIRTUAL-TEST-SP-481",
+            OutputMode = "UNSUPPORTED_VIRTUAL"
+        };
     }
 
     private sealed class AuthorisationAwareChildRunner(bool allow) : IAgentChildProcessRunner
