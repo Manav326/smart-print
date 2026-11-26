@@ -71,7 +71,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
   function refreshLibrary(){
     setLibraryLoading(true);
     const bridge=nativeBridge();
-    if(!bridge){setLibraryLoading(false);setError("Open Photo Studio from the SmartPrint Android app to use its private document library.");return;}
+    if(!bridge){setLibraryLoading(false);setError(t("Open Photo Studio from the SmartPrint Android app to use its private document library."));return;}
     bridge.postMessage("listPhotoStudioDocuments");
   }
 
@@ -88,7 +88,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           setError("");
         }catch{
           setLibraryLoading(false);
-          setError("The saved Photo Studio library could not be read.");
+          setError(t("The saved Photo Studio library could not be read."));
         }
       }else if(message.startsWith("PHOTO_LIBRARY_FAILED|")){
         setLibraryLoading(false);
@@ -126,7 +126,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           const name=typeof metadata.sourceName==="string"?metadata.sourceName:"photo.jpg";
           const supportedMime=resolvePhotoSourceMimeType({type:mime,name});
           if(!supportedMime){
-            setError("This saved original is not a JPG or PNG photo and cannot be reopened in Photo Studio.");
+            setError(t("This saved original is not a JPG or PNG photo and cannot be reopened in Photo Studio."));
             return;
           }
           const bytes=base64ToBytes(payload.sourceBase64);
@@ -138,7 +138,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
           setError("");
           setMenuDocumentId(null);
         }catch{
-          setError("The original photo could not be reopened for editing.");
+          setError(t("The original photo could not be reopened for editing."));
         }
       }else if(message.startsWith("PHOTO_SOURCE_FAILED|")){
         setError(message.slice("PHOTO_SOURCE_FAILED|".length)||"The original photo could not be reopened.");
@@ -146,14 +146,14 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
         setRenameTarget(null);
         setRenameValue("");
         setMenuDocumentId(null);
-        setStatus("Document name updated.");
+        setStatus(t("Document name updated."));
         refreshLibrary();
       }else if(message.startsWith("PHOTO_RENAME_FAILED|")){
         setError(message.slice("PHOTO_RENAME_FAILED|".length)||"The document could not be renamed.");
       }else if(message.startsWith("PHOTO_DELETED|")){
         setMenuDocumentId(null);
         setPreview(current=>current?.id===message.slice("PHOTO_DELETED|".length)?null:current);
-        setStatus("Private photo document deleted from this device.");
+        setStatus(t("Private photo document deleted from this device."));
         refreshLibrary();
       }else if(message.startsWith("PHOTO_DELETE_FAILED|")){
         setError(message.slice("PHOTO_DELETE_FAILED|".length)||"The private photo document could not be deleted.");
@@ -178,8 +178,8 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     const selected=event.currentTarget.files?.[0]??null;
     if(!selected)return;
     const supportedMime=resolvePhotoSourceMimeType(selected);
-    if(!supportedMime){setError("Choose one JPG or PNG photo.");event.currentTarget.value="";return;}
-    if(selected.size<=0){setError("Choose a non-empty photo.");event.currentTarget.value="";return;}
+    if(!supportedMime){setError(t("Choose one JPG or PNG photo."));event.currentTarget.value="";return;}
+    if(selected.size<=0){setError(t("Choose a non-empty photo."));event.currentTarget.value="";return;}
     const normalized=selected.type===supportedMime?selected:new File([selected],selected.name,{type:supportedMime,lastModified:selected.lastModified});
     setSource(normalized);setEditingDocumentId(null);setInitialSettings(undefined);setStatus("");setError("");
   }
@@ -188,12 +188,12 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     const sheet=sheets[0];
     if(!source||!sheet||saving)return;
     const bridge=nativeBridge();
-    if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to save a private sheet.");return;}
+    if(!bridge){setError(t("Open Photo Studio from the SmartPrint Android app to save a private sheet."));return;}
     if(source.size<=0||sheet.file.size<=0){
-      setError("The original photo or prepared sheet is empty. Choose the photo again and retry.");
+      setError(t("The original photo or prepared sheet is empty. Choose the photo again and retry."));
       return;
     }
-    setSaving(true);setError("");setStatus("Saving securely on this device…");
+    setSaving(true);setError("");setStatus(t("Saving securely on this device…"));
     try{
       const [sourceBuffer,pdfBuffer]=await Promise.all([source.arrayBuffer(),sheet.file.arrayBuffer()]);
       const payload={
@@ -224,7 +224,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
 
   function openPreview(document:PrivatePhotoStudioDocument,pageIndex=0){
     const bridge=nativeBridge();
-    if(!bridge){setError("Open Photo Studio from the SmartPrint Android app to preview saved sheets.");return;}
+    if(!bridge){setError(t("Open Photo Studio from the SmartPrint Android app to preview saved sheets."));return;}
     setMenuDocumentId(null);
     setPreview({id:document.id,title:document.title,pageIndex,pageCount:Math.max(1,document.pageCount||1),image:null});
     bridge.postMessage("setPhotoStudioOpen|on");
@@ -260,7 +260,7 @@ function PrivatePhotoStudioEntry({dark}:{dark:boolean}) {
     event.preventDefault();
     if(!renameTarget)return;
     const title=renameValue.trim().slice(0,80);
-    if(!title){setError("Enter a document name.");return;}
+    if(!title){setError(t("Enter a document name."));return;}
     nativeBridge()?.postMessage("renamePhotoStudioDocument|"+renameTarget.id+"|"+title);
   }
 
