@@ -60,7 +60,7 @@ import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
-import { LanguageSwitcher, useLocale, translateUi, translateUiText, formatUiCurrency, formatUiNumber, formatUiDate } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUi, translateUiText, formatUiCurrency, formatUiNumber, formatUiDate, type MessageValues } from "./i18n";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "station" | null;
@@ -1606,7 +1606,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     setError("");
   };
 
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const activePageTitle = t(active === "Settings" ? "Shop profile" : active);
 
   if (loading && !profile) {
@@ -1799,7 +1799,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
   onOpenPayments:()=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const {job,payment}=receipt;
   const amount=formatMoney(payment.amountMinor,payment.currency);
   const upiIntent=payment.method==="UPI"&&payment.status!=="VERIFIED"
@@ -1842,7 +1842,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
   onClose:()=>void; onContinue:(draft:ShopPhotoOrderDraft)=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [file,setFile]=useState<File|null>(null);
   const [recipientType,setRecipientType]=useState<"EXISTING_CUSTOMER"|"WALK_IN">("EXISTING_CUSTOMER");
   const [customers,setCustomers]=useState<ShopCustomer[]>([]);
@@ -1932,7 +1932,7 @@ function ShopPhotoOrderModal({token,paymentSettings,photoPrices,onClose,onContin
 
 function CustomersPage({ token }: { token: string }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
   const date = (value: string | number | Date) => formatUiDate(value, locale, { dateStyle: "medium", timeStyle: "short", timeZone: IST_TIME_ZONE });
   const [searchDraft, setSearchDraft] = useState("");
@@ -2117,7 +2117,7 @@ function CustomersPage({ token }: { token: string }) {
 
 function ReportsPage({ token }: { token: string }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
   const number = (value: number) => formatUiNumber(value, locale);
   const date = (value: string | number | Date) => formatUiDate(value, locale, { dateStyle: "medium", timeStyle: "short", timeZone: IST_TIME_ZONE });
@@ -2207,6 +2207,8 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   agentDevices: AgentDevice[]; paymentSettings: ShopPaymentSettings | null;
   onNavigate: (section: Section) => void;
 }) {
+  const { locale } = useLocale();
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const activePrinters = printers.filter(printer =>
     printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
       (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
@@ -2316,7 +2318,7 @@ function formatCapabilityTimestamp(value?:string):string {
 
 function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const snapshot=parsePrinterCapabilitySnapshot(printer.capabilitiesJson);
   const pages=Array.isArray(snapshot?.pagesPerSheet)
     ?snapshot.pagesPerSheet.filter(value=>Number.isInteger(value)&&value>=1&&value<=500):[];
@@ -2422,7 +2424,7 @@ function PrintersPage({
   onOpenAgent: () => void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
   const selectedPrinters = printers.filter(printer =>
@@ -2648,6 +2650,8 @@ function PrintersPage({
   );
 }
 function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
+  const { locale } = useLocale();
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [posterSrc,setPosterSrc]=useState<string|null>(null);
   const previewQrHostRef=useRef<HTMLDivElement|null>(null);
 
@@ -2687,7 +2691,7 @@ function StationsPage({ stations, profile, busyResourceId, onAdd, onToggle, onGe
   stations:QrStation[]; profile:ShopProfile|null; busyResourceId:string|null; onAdd:()=>void; onToggle:(station:QrStation)=>void; onGenerate:(station:QrStation)=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [printingStationId,setPrintingStationId]=useState<string|null>(null);
   const [printingArtwork,setPrintingArtwork]=useState<{stationId:string;artwork:QrStationArtworkSource}|null>(null);
   const [formatByStation,setFormatByStation]=useState<Record<string,QrStationImageFormat>>({});
@@ -2888,9 +2892,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   onReconnectAfterRevocation:()=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
-  const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const { release, state: releaseState } = usePublicRelease();
   const windowsInstallerUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
@@ -2972,7 +2974,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
 
 function ShopConnectionPanel({connected,localApiReady}:{connected:boolean;localApiReady:boolean}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [snapshot,setSnapshot]=useState<DesktopLocalNetworkSnapshot|null>(null);
   const [agentStatus,setAgentStatus]=useState<DesktopAgentStatus|null>(null);
   const [loading,setLoading]=useState(true);
@@ -3124,7 +3126,7 @@ function PricingPage({ pricing, onSave, busy }: {
   busy: boolean;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [mono,setMono]=useState((pricing.monoPerSideMinor/100).toFixed(2));
   const [colour,setColour]=useState((pricing.colourPerSideMinor/100).toFixed(2));
   const [monoDuplex,setMonoDuplex]=useState((pricing.monoDuplexPerSheetMinor/100).toFixed(2));
@@ -3192,7 +3194,7 @@ function PaymentsPage({settings,payments,refunds,onSave,onVerify,onReject,busy,b
   busyJobId:string|null;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [upiEnabled,setUpiEnabled]=useState(settings.upiEnabled);
   const [upiId,setUpiId]=useState(settings.upiId||"");
   const [payeeName,setPayeeName]=useState(settings.payeeName||"");
@@ -3279,9 +3281,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
   busyJobId: string | null;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
-  const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [autoRefresh,setAutoRefresh]=useState(true);
   const [refreshSeconds,setRefreshSeconds]=useState(10);
   const [searchInput,setSearchInput]=useState(searchQuery);
@@ -3519,9 +3519,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
   onApply:(acceptedJobIds:string[],pdfBrandingEnabled:boolean)=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
-  const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const hasIdDocument=jobs.some(job=>job.printKind==="ID_DOCUMENT");
   const [pdfBrandingEnabled,setPdfBrandingEnabled]=useState(()=>!hasIdDocument&&jobs.some(job=>job.pdfBrandingEnabled===true));
   const acceptedIds=jobs.filter(job=>decisions[job.id]??true).map(job=>job.id);
@@ -3604,7 +3602,7 @@ function BatchReviewModal({jobs,busy,decisions,retrying,onDecision,onClose,onPre
 
 function JobHistoryModal({job,events,onClose}:{job:ShopPrintJob;events:ShopJobEvent[];onClose:()=>void}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   return <Modal title={job.jobNumber} subtitle={job.privatePrinting?"Private print · audit history":`Audit history · ${job.document.originalFileName}`} onClose={onClose}>
     <div className="shop-history-list">{events.length===0?<p>{t("No recorded events yet.")}</p>:events.map(event=><div key={event.id}><i/><span><strong>{prettyStatus(event.newStatus)}</strong><small>{event.actorType==="ShopUser"?"Shop team":event.actorType==="Customer"?"Customer":"System"} · {formatIstDateTime(event.createdUtc)}</small></span></div>)}</div>
     <div className="modal-actions"><button className="secondary-button" onClick={onClose}>{t("Close history")}</button></div>
@@ -3615,7 +3613,7 @@ function DocumentPreviewModal({name,url,mediaType,job,readOnly=false,isSavedOutp
   name:string;url:string;mediaType:string;job:ShopPrintJob;readOnly?:boolean;isSavedOutput?:boolean;focusEditOnMount?:boolean;onClose:()=>void;onApprove:()=>void;onReject:()=>void;onRefund:()=>void;onEditPhoto?:()=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const editPhotoButtonRef=useRef<HTMLButtonElement|null>(null);
   const isImage=mediaType==="image/jpeg"||mediaType==="image/png";
   useEffect(()=>{
@@ -3653,7 +3651,7 @@ function RefundModal({job,token,busy,onClose,onSubmit}:{
   onSubmit:(values:{refundMethod:"UPI"|"CASH";refundReference:string|null;reason:string;rejectedPageNumbers:number[];idempotencyKey:string})=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [rejectedPages,setRejectedPages]=useState<Set<number>>(()=>{
     if(job.status==="REJECTED")return new Set<number>(Array.from({length:job.pageCount},(_,index)=>index+1));
     try{return new Set<number>(JSON.parse(job.rejectedPageNumbersJson||"[]") as number[]);}catch{return new Set<number>();}
@@ -3832,7 +3830,7 @@ function formatBytes(bytes:number) {
 
 function SettingsPage({ profile, onSave, busy }: { profile:ShopProfile; onSave:(v:{displayName:string;logoUrl:string|null;accentColor:string})=>void; busy:boolean }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [displayName,setDisplayName]=useState(profile.displayName);
   const [logoUrl,setLogoUrl]=useState(profile.logoUrl || "");
   const [accentColor,setAccentColor]=useState(profile.accentColor || "#7662E8");
@@ -3858,7 +3856,7 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
   onSave: (values: { ownerName: string; email: string; currentPassword?: string }) => Promise<void>;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [ownerName, setOwnerName] = useState(profile.ownerName);
   const [email, setEmail] = useState(profile.ownerEmail);
   const [currentPassword, setCurrentPassword] = useState("");
@@ -3915,7 +3913,7 @@ function ShopOwnerAccountModal({ profile, busy, onClose, onSave }: {
 
 function HelpSupportModal({ onClose, onNavigate }: { onClose: () => void; onNavigate: (section: Section) => void }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const topics: { section: Section; title: string; description: string; icon: typeof FileText }[] = [
     { section: "Print Queue", title: "Print jobs and approvals", description: "Review incoming jobs, decisions, print status and refunds.", icon: FileText },
     { section: "Printers", title: "Printers and connections", description: "Check printer setup, availability and device details.", icon: Printer },
@@ -3944,7 +3942,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   busy:boolean; printers:PrinterDevice[]; onClose:()=>void; onSubmit:(v:{displayName:string;printerDeviceId?:string})=>void;
 }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const [displayName,setDisplayName]=useState("Front counter");
   const [printerDeviceId,setPrinterDeviceId]=useState("");
   return <Modal title={t("Create a QR station")} subtitle={t("Give customers a clear entry point for this counter or printer.")} onClose={onClose}>
@@ -3959,7 +3957,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
 
 function Modal({title,subtitle,children,onClose}:{title:string;subtitle:string;children:ReactNode;onClose:()=>void}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   return <div className="modal-scrim" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><section className="modal-card" role="dialog" aria-modal="true" aria-label={title}><div className="modal-heading"><div><h2>{title}</h2><p>{subtitle}</p></div><button className="icon-button" onClick={onClose} aria-label={t("Close")}><X size={18}/></button></div>{children}</section></div>;
 }
 
@@ -3979,7 +3977,7 @@ function Device({name,detail,state,tone}:{name:string;detail:string;state:string
 function Status({label,tone}:{label:string;tone:string}) { return <span className={"status-badge "+tone}><i/>{label}</span>; }
 function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const isPhoto=printKind==="PHOTO";
   const isIdDocument=printKind==="ID_DOCUMENT";
   const label=isPhoto?"Photo":isIdDocument?"ID card":"Document";
@@ -3993,7 +3991,7 @@ function normalizedCustomerPrintKind(value:string|null|undefined):"DOCUMENT"|"PH
 function initials(value:string) { return value.trim().split(/\s+/).slice(0,2).map(part=>part[0]?.toUpperCase()||"").join("") || "SP"; }
 function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscriptionSummary; token: string; onUpdated: (summary: ShopSubscriptionSummary) => void }) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const { subscription, plan, entitlements, usage } = summary;
   const status = subscription.status.toLowerCase();
   const statusTone = status === "active" ? "tone-success" : status === "trial" ? "tone-warning" : status === "expired" ? "tone-danger" : "tone-neutral";
@@ -4430,7 +4428,7 @@ async function requestSmartPrintNativeLocalNetworkAccess():Promise<"granted"|"de
 
 function CustomerLocalConnection({localAgent,onReady,onUnavailable,cloudAssistedPrintingEnabled}:{localAgent:CustomerLocalAgent|null;onReady:(ready:boolean)=>void;onUnavailable:()=>void;cloudAssistedPrintingEnabled:boolean}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   const [permissionState,setPermissionState]=useState<PermissionState|"unknown">("unknown");
   const [checkStatus,setCheckStatus]=useState<LocalAgentCheckStatus>("idle");
@@ -4882,7 +4880,7 @@ function postSmartPrintNativeMessage(message:string):boolean {
 
 function CustomerNativePdfPreview({token,preview,onPage}:{token:string;preview:NativeCustomerPdfPreview|null;onPage:(sheet:number)=>void}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const current=preview?.token===token?preview:null;
   return <div className="customer-native-pdf-preview">
     {current?.image
@@ -4989,7 +4987,7 @@ function smartPrintNativeHeadline(status:string):string {
 
 function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAgent,localReady,localFallbackSuggested,cloudAssistedPrintingEnabled,privatePrintingVirtualOutputEnabled,photoPricing,hasAssignedPrinter,printerCapabilitiesJson,onStartNewSession}:{dark:boolean;publicCode:string;sessionToken:string;paymentOptions:{upiEnabled:boolean;upiId?:string|null;payeeName?:string|null;cashEnabled:boolean;instantPaymentEnabled:boolean};localAgent:CustomerLocalAgent|null;localReady:boolean;localFallbackSuggested:boolean;cloudAssistedPrintingEnabled:boolean;privatePrintingVirtualOutputEnabled:boolean;photoPricing:CustomerPhotoPricing|null;hasAssignedPrinter:boolean;printerCapabilitiesJson?:string|null;onStartNewSession:()=>void}) {
   const { locale } = useLocale();
-  const t = (value: string) => translateUiText(locale, value);
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const money = (minor: number, currency: string) => formatUiCurrency(minor / 100, locale, currency);
   const nativeAppMode = navigator.userAgent.includes("SmartPrintAndroid/1");
   // Private Printing is available only with a live paired Agent/key and a ready
