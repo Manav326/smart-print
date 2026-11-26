@@ -23,8 +23,27 @@ public static class VirtualPrinterTestGrantPolicy
             agentDeviceId.ToString("N"),
             (queueName ?? string.Empty).Trim().ToUpperInvariant(),
             (driverName ?? string.Empty).Trim().ToUpperInvariant(),
-            (portName ?? string.Empty).Trim().ToUpperInvariant());
+            NormalizePortName(portName));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+    }
+
+    private static string NormalizePortName(string? portName)
+    {
+        var value = portName?.Trim() ?? string.Empty;
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) &&
+            uri.Scheme is "http" or "https" or "ipp" or "ipps")
+        {
+            // Scheme and host are case-insensitive, but IPP URL paths and
+            // query values may be case-sensitive. Preserve those components
+            // so a different endpoint cannot inherit an existing grant.
+            var authority = uri.IdnHost.ToLowerInvariant();
+            if (!uri.IsDefaultPort)
+                authority += ":" + uri.Port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            return uri.Scheme.ToLowerInvariant() + "://" + authority + uri.PathAndQuery;
+        }
+
+        // Windows queue port identifiers are case-insensitive.
+        return value.ToUpperInvariant();
     }
 
     public static bool IsGrantActive(
