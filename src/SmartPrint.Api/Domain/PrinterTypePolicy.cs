@@ -6,10 +6,9 @@ public static class PrinterTypePolicy
     public const string PdfExport = "PDF_EXPORT";
     public const string UnsupportedVirtual = "UNSUPPORTED_VIRTUAL";
 
-    // This override is a non-production test facility, never a production
-    // printer classification rule even if a stale database value is enabled.
-    public static bool IsTestModeEnabled(bool configured, bool isProduction) =>
-        configured && !isProduction;
+    // Legacy global configuration is deliberately inert. Virtual output is
+    // authorised by VirtualPrinterTestGrant, never by changing its printer type.
+    public static bool IsTestModeEnabled(bool configured, bool isProduction) => false;
 
     public static bool IsWorkingWindowsQueue(string? status) =>
         string.Equals(status, "Ready", StringComparison.OrdinalIgnoreCase) ||
@@ -24,12 +23,6 @@ public static class PrinterTypePolicy
         if (string.Equals(discoveredOutputMode, PdfExport, StringComparison.OrdinalIgnoreCase))
             return PdfExport;
 
-        if (string.Equals(discoveredOutputMode, UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) &&
-            treatWorkingVirtualQueuesAsPhysicalForTesting &&
-            IsWorkingWindowsQueue(queueStatus) &&
-            IsConnectedPrinterPort(connectionPort))
-            return Physical;
-
         return string.Equals(discoveredOutputMode, Physical, StringComparison.OrdinalIgnoreCase)
             ? Physical
             : UnsupportedVirtual;
@@ -41,11 +34,7 @@ public static class PrinterTypePolicy
         string? queueStatus,
         bool treatWorkingVirtualQueuesAsPhysicalForTesting,
         string? connectionPort = null) =>
-        treatWorkingVirtualQueuesAsPhysicalForTesting &&
-        string.Equals(discoveredOutputMode, UnsupportedVirtual, StringComparison.OrdinalIgnoreCase) &&
-        string.Equals(effectiveOutputMode, Physical, StringComparison.OrdinalIgnoreCase) &&
-        IsWorkingWindowsQueue(queueStatus) &&
-        IsConnectedPrinterPort(connectionPort);
+        false;
 
     public static bool IsConnectedPrinterPort(string? connectionPort)
     {
