@@ -1796,6 +1796,16 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Document": "दस्तावेज़",
     "{panel} guidance": "{panel} के लिए मार्गदर्शन",
     "A4 page {page} of {pages} with {photos} photos": "{photos} फोटो के साथ A4 पेज {page}/{pages}",
+    "Retry review. Rejected files stay excluded until restored.": "रिव्यू दोबारा करें। अस्वीकार फ़ाइलें बहाल होने तक बाहर रहेंगी।",
+    "Select the files that should remain in the customer's batch checkout. Excluded files will not be charged.": "वे फ़ाइलें चुनें जिन्हें ग्राहक के बैच चेकआउट में रखना है। बाहर की गई फ़ाइलों का शुल्क नहीं लगेगा।",
+    "The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.": "Windows द्वारा spooler ID लौटाने से पहले Agent रीस्टार्ट हुआ। आगे बढ़ने से पहले चुनी गई Windows कतार में इसी जॉब नाम को जाँचें और सभी प्रिंटेड पेज स्वयं देखें।",
+    "Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.": "Windows में यह जॉब अभी भी मौजूद है। Agent द्वारा कतार से इसकी एंट्री हटने की पुष्टि तक अंतिम पुष्टि बंद रहेगी।",
+    "Waiting for a fresh Agent observation from after submission before confirming output.": "आउटपुट की पुष्टि से पहले सबमिशन के बाद Agent की नई जाँच का इंतज़ार है।",
+    "Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.": "Windows अभी भी इस जॉब को कतार में या प्रिंट होते हुए दिखा रहा है। आउटपुट की पुष्टि से पहले अंतिम स्थिति का इंतज़ार करें।",
+    "Confirm output only after Windows reports that the job printed or its queue entry was verified absent.": "आउटपुट की पुष्टि तभी करें जब Windows बताए कि जॉब प्रिंट हुई या कतार से हटने की पुष्टि हो गई।",
+    "Online": "ऑनलाइन",
+    "Ready": "तैयार",
+    "Busy": "व्यस्त",
 
   },
   hinglish: {
@@ -3220,6 +3230,16 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Document": "Document",
     "{panel} guidance": "{panel} ke liye guidance",
     "A4 page {page} of {pages} with {photos} photos": "{photos} photos ke saath A4 page {page}/{pages}",
+    "Retry review. Rejected files stay excluded until restored.": "Review dobara karein. Rejected files restore hone tak excluded rahengi.",
+    "Select the files that should remain in the customer's batch checkout. Excluded files will not be charged.": "Woh files chunein jo customer ke batch checkout mein rehni chahiye. Excluded files ka charge nahi lagega.",
+    "The Agent restarted before Windows returned a spooler ID. Check the selected Windows queue for this exact job name and physically inspect all paper output before continuing.": "Windows se spooler ID aane se pehle Agent restart hua. Aage badhne se pehle selected Windows queue mein isi job name ko check karein aur sabhi printed pages physically inspect karein.",
+    "Windows still holds this job. Confirmation remains blocked until the Agent verifies that the retained entry has cleared.": "Windows mein yeh job abhi bhi hai. Agent ke queue entry clear hone ki pushti tak final confirmation blocked rahega.",
+    "Waiting for a fresh Agent observation from after submission before confirming output.": "Output confirm karne se pehle submission ke baad Agent ke fresh observation ka wait hai.",
+    "Windows still reports this job in its queue or printing. Wait for a terminal state before confirming output.": "Windows abhi bhi is job ko queue mein ya printing dikhata hai. Output confirm karne se pehle terminal state ka wait karein.",
+    "Confirm output only after Windows reports that the job printed or its queue entry was verified absent.": "Output tabhi confirm karein jab Windows bataye ki job print hui ya queue se remove hone ki pushti ho gayi.",
+    "Online": "Online",
+    "Ready": "Ready",
+    "Busy": "Busy",
 
   },
 };
