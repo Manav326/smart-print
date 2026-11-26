@@ -214,6 +214,9 @@ public sealed class PrinterDevice
     public string Model { get; set; } = string.Empty;
     public string ConnectionType { get; set; } = "WindowsQueue";
     public string OutputMode { get; set; } = "PHYSICAL";
+    // SHA-256 of the paired Agent + Windows queue, driver and port identity.
+    // Any identity change invalidates an existing virtual-printer test grant.
+    public string? IdentityFingerprint { get; set; }
     public bool IsTestModeOverride { get; set; }
     public string? ConnectionAddress { get; set;}
     public string? QueueName { get; set; }
@@ -223,6 +226,22 @@ public sealed class PrinterDevice
     public DateTimeOffset? LastSeenUtc { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+public sealed class VirtualPrinterTestGrant
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrinterDeviceId { get; set; }
+    public Guid AgentDeviceId { get; set; }
+    public string IdentityFingerprint { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public Guid ApprovedByUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset ExpiresUtc { get; set; }
+    public Guid? RevokedByUserId { get; set; }
+    public DateTimeOffset? RevokedUtc { get; set; }
+    public string? RevocationReason { get; set; }
 }
 
 public sealed class QrStation
