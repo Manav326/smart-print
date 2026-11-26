@@ -321,9 +321,9 @@ export default function OrderJourneyPage({jobs,payments,printers,agents,refreshi
         <button type="button" className={styles.clearFilters} disabled={stageFilter==="all"&&!query} onClick={()=>{setStageFilter("all");setQuery("");}}>{t("Clear filters")}</button>
       </div>
       {journeys.length===0?<div className={styles.emptyState}><h3>{t("Your first customer order will appear here")}</h3><p>{t("Share a QR station with your customers. Their orders will appear here as one easy-to-follow journey.")}</p></div>
-      :filteredJourneys.length===0?<div className={styles.emptyState}><h3>{t("No matching orders")}</h3><p>{t("Try another batch, order, file or folder name, or clear the current filters.")}</p><button type="button" className={styles.actionButton} onClick={()=>{setStageFilter("all");setQuery("");}}>Clear filters</button></div>
+      :filteredJourneys.length===0?<div className={styles.emptyState}><h3>{t("No matching orders")}</h3><p>{t("Try another batch, order, file or folder name, or clear the current filters.")}</p><button type="button" className={styles.actionButton} onClick={()=>{setStageFilter("all");setQuery("");}}>{t("Clear filters")}</button></div>
       :<div className={styles.orderList}>{filteredJourneys.map(j=><OrderCard key={j.key} journey={j} printers={printers} agents={agents} locale={locale} onReviewBatch={onReviewBatch} onVerifyPayment={onVerifyPayment} {...actions}/>)}</div>}
     </section>
-    <footer className={styles.journeyFooter}><span>{t("Output accuracy matters.")}</span> A printer accepting a job does not prove paper was produced. Physical orders become complete only after the shop confirms the actual pages.</footer>
+    <footer className={styles.journeyFooter}><span>{t("Output accuracy matters.")}</span> {t("A printer accepting a job does not prove paper was produced. Physical orders become complete only after the shop confirms the actual pages.")}</footer>
   </div>;
 }
