@@ -66,7 +66,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
       .catch(exception => {
         if (active) setError(exception instanceof Error
           ? exception.message
-          : "Could not load measured document transfer data.");
+          : t("Could not load measured document transfer data."));
       })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
