@@ -543,6 +543,24 @@ jobs:
           from urllib.parse import urlsplit
           value = os.environ["SMARTPRINT_PUBLIC_BASE_URL"].strip()
           parsed = urlsplit(value)
+          try:
+              port = parsed.port
+          except ValueError as error:
+              raise SystemExit("SMARTPRINT_PUBLIC_BASE_URL has an invalid port.") from error
+          if (
+              parsed.scheme != "https"
+              or not parsed.hostname
+              or (port is not None and port != 443)
+              or parsed.username
+              or parsed.password
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit(
+                  "SMARTPRINT_PUBLIC_BASE_URL must be a canonical HTTPS origin "
+                  "without credentials, path, query or fragment."
+              )
           print(f"{parsed.scheme}://{parsed.netloc}")
           PY
           )"
@@ -694,8 +712,10 @@ jobs:
           # Probe the actual public custom domain, including byte ranges and CORS.
           python - <<'PY'
           import os
+          from pathlib import Path
           from urllib.request import Request, urlopen
 
+          artifact_dir = Path("artifacts")
           base = os.environ["R2_PUBLIC_ORIGIN"].rstrip("/")
           portal_origin = os.environ["SMARTPRINT_PORTAL_ORIGIN"]
           tag = os.environ["RELEASE_TAG"]
@@ -716,12 +736,22 @@ jobs:
                       raise SystemExit(f"R2 public range probe for {filename} returned HTTP {response.status}, expected 206.")
                   if response.headers.get("Access-Control-Allow-Origin") != portal_origin:
                       raise SystemExit(f"R2 CORS did not allow the SmartPrint portal for {filename}.")
-                  if not response.headers.get("Content-Range", "").startswith("bytes 0-0/"):
+                  content_range = response.headers.get("Content-Range", "")
+                  if not content_range.startswith("bytes 0-0/"):
                       raise SystemExit(f"R2 public range response was invalid for {filename}.")
+                  try:
+                      public_length = int(content_range.rsplit("/", 1)[1])
+                  except (IndexError, ValueError) as error:
+                      raise SystemExit(f"R2 public Content-Range total length was invalid for {filename}.") from error
+                  local_path = artifact_dir / filename
+                  if public_length != local_path.stat().st_size:
+                      raise SystemExit(f"R2 public content length does not match the release artifact for {filename}.")
                   if "immutable" not in response.headers.get("Cache-Control", ""):
                       raise SystemExit(f"R2 public cache policy is missing for {filename}.")
-                  if len(response.read()) != 1:
-                      raise SystemExit(f"R2 public range body was invalid for {filename}.")
+                  with local_path.open("rb") as local_stream:
+                      expected_first_byte = local_stream.read(1)
+                  if response.read() != expected_first_byte:
+                      raise SystemExit(f"R2 public range response did not return the expected artifact bytes for {filename}.")
               print(f"Verified public R2 custom-domain range/CORS delivery: {filename}")
           PY
 
