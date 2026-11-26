@@ -71,6 +71,35 @@ public sealed class VirtualPrinterTestGrantPolicyTests
     }
 
     [Fact]
+    public void ThreeShopIsolationScenarioAllowsOnlyApprovedShopAndHonoursRevocation()
+    {
+        var shopA = Guid.NewGuid();
+        var shopB = Guid.NewGuid();
+        var shopC = Guid.NewGuid();
+        var agentA = Guid.NewGuid();
+        var agentB = Guid.NewGuid();
+        var agentC = Guid.NewGuid();
+        var fingerprintA = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agentA, "IPP A", "Driver A", "ipp://a/print");
+        var fingerprintB = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agentB, "IPP B", "Driver B", "ipp://b/print");
+        var fingerprintC = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(agentC, "IPP C", "Driver C", "ipp://c/print");
+
+        // Shop A has an active grant.
+        Assert.True(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            shopA, shopA, agentA, agentA, fingerprintA, fingerprintA,
+            Now.AddHours(-1), Now.AddDays(1), null, Now));
+
+        // Shop B cannot borrow Shop A's grant, even if an identifier is replayed.
+        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            shopB, shopB, agentB, agentA, fingerprintB, fingerprintA,
+            Now.AddHours(-1), Now.AddDays(1), null, Now));
+
+        // Shop C was approved but the grant has since been revoked.
+        Assert.False(VirtualPrinterTestGrantPolicy.IsGrantActive(
+            shopC, shopC, agentC, agentC, fingerprintC, fingerprintC,
+            Now.AddHours(-1), Now.AddDays(1), Now.AddMinutes(-1), Now));
+    }
+
+    [Fact]
     public void GrantLifetimeMustBeBetweenOneHourAndThirtyDays()
     {
         Assert.True(VirtualPrinterTestGrantPolicy.IsValidGrantLifetime(Now, Now.AddDays(7)));
