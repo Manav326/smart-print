@@ -2,8 +2,8 @@ namespace SmartPrint.Api.Domain;
 
 /// <summary>
 /// A printer may consume a shop plan slot only when its owning Agent is online.
-/// Physical queues also need a recent Ready/Busy Windows report. PDF Export is
-/// rendered by the Agent into its protected export folder and does not depend
+/// Physical and grant-authorised virtual queues also need a recent Ready/Busy
+/// Windows report. PDF Export is rendered by the Agent into its protected export folder and does not depend
 /// on the Microsoft Print to PDF Windows queue's own status or scan timestamp.
 /// Visibility and selection are deliberately separate.
 /// </summary>
