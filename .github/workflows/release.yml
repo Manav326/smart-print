@@ -219,6 +219,7 @@ jobs:
       ANDROID_VERSION_CODE_BASE: ${{ vars.ANDROID_VERSION_CODE_BASE || '100000' }}
     outputs:
       available: ${{ steps.check-signing.outputs.available }}
+      signer_sha256: ${{ steps.build-android.outputs.signer_sha256 }}
     steps:
       - id: check-signing
         name: Check Android release signing credentials
@@ -291,7 +292,8 @@ jobs:
           printf '%s' "$ANDROID_SIGNING_KEYSTORE_BASE64" | base64 --decode > "$key_file"
           test -s "$key_file"
           echo "ANDROID_SIGNING_KEYSTORE_FILE=$key_file" >> "$GITHUB_ENV"
-      - name: Build signed Android APK and App Bundle
+      - id: build-android
+        name: Build signed Android APK and App Bundle
         if: steps.check-signing.outputs.available == 'true'
         shell: bash
         run: |
@@ -321,6 +323,28 @@ jobs:
           cp apps/android/app/build/outputs/bundle/release/app-release.aab artifacts/android/SmartPrint-Android.aab
           jarsigner -verify -verbose -certs artifacts/android/SmartPrint-Android.aab >/tmp/smartprint-aab-signature.log
           grep -q "jar verified" /tmp/smartprint-aab-signature.log
+
+          # Derive the SHA-256 identity from the configured upload keystore,
+          # then prove the APK and AAB use that exact same signing certificate.
+          keystore_fingerprint="$(keytool -exportcert \
+            -keystore "$ANDROID_SIGNING_KEYSTORE_FILE" \
+            -storepass "$ANDROID_SIGNING_KEYSTORE_PASSWORD" \
+            -alias "$ANDROID_SIGNING_KEY_ALIAS" 2>/tmp/smartprint-keytool-export.log \
+            | openssl dgst -sha256 | awk '{print toupper($NF)}')"
+          if [[ ! "$keystore_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Could not derive a valid SHA-256 fingerprint from the configured Android upload certificate."
+            cat /tmp/smartprint-keytool-export.log
+            exit 1
+          fi
+          aab_fingerprint="$(keytool -printcert -jarfile artifacts/android/SmartPrint-Android.aab \
+            | awk -F': ' 'toupper($1) == "SHA256" { gsub(":", "", $2); print toupper($2); exit }')"
+          if [[ "$aab_fingerprint" != "$keystore_fingerprint" ]]; then
+            echo "::error::Android AAB upload certificate does not match the configured Android keystore."
+            echo "Expected: $keystore_fingerprint"
+            echo "Actual:   $aab_fingerprint"
+            exit 1
+          fi
+
           apksigner_path="$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort | tail -n 1)"
           test -n "$apksigner_path"
           verification_output="$("$apksigner_path" verify --verbose --print-certs artifacts/android/SmartPrint-Android.apk 2>&1)"
@@ -331,7 +355,14 @@ jobs:
             echo "::error::Android APK signature verification did not report exactly one signing certificate fingerprint."
             exit 1
           fi
-          echo "Verified Android release certificate SHA-256: $certificate_fingerprint"
+          if [[ "${certificate_fingerprint^^}" != "$keystore_fingerprint" ]]; then
+            echo "::error::Android APK upload certificate does not match the configured Android keystore."
+            echo "Expected: $keystore_fingerprint"
+            echo "Actual:   $certificate_fingerprint"
+            exit 1
+          fi
+          echo "signer_sha256=$keystore_fingerprint" >> "$GITHUB_OUTPUT"
+          echo "Verified Android APK and AAB both use upload certificate SHA-256: $keystore_fingerprint"
       - name: Upload Android APK and AAB
         if: steps.check-signing.outputs.available == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
@@ -356,6 +387,7 @@ jobs:
       - android-release
     env:
       ANDROID_RELEASE_AVAILABLE: ${{ needs.android-release.outputs.available }}
+      ANDROID_SIGNER_SHA256: ${{ needs.android-release.outputs.signer_sha256 }}
       WINDOWS_STORE_PACKAGE_AVAILABLE: ${{ needs.windows-setup.outputs.store_available }}
       RELEASE_SOURCE_SHA: ${{ needs.validate-release-config.outputs.source_sha }}
     steps:
@@ -389,6 +421,7 @@ jobs:
           source_commit=$RELEASE_SOURCE_SHA
           workflow_run_id=$GITHUB_RUN_ID
           workflow_run_number=$GITHUB_RUN_NUMBER
+          android_upload_cert_sha256=${ANDROID_SIGNER_SHA256:-not-built}
           EOF
           files=(SmartPrint-Windows-Setup.exe BUILD-INFO.txt)
           if [[ "$WINDOWS_STORE_PACKAGE_AVAILABLE" == "true" ]]; then
