@@ -3977,11 +3977,13 @@ function Device({name,detail,state,tone}:{name:string;detail:string;state:string
 }
 function Status({label,tone}:{label:string;tone:string}) { return <span className={"status-badge "+tone}><i/>{label}</span>; }
 function PrintKindTag({printKind,count}:{printKind?:string|null;count?:number}) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const isPhoto=printKind==="PHOTO";
   const isIdDocument=printKind==="ID_DOCUMENT";
   const label=isPhoto?"Photo":isIdDocument?"ID card":"Document";
   const countLabel=typeof count==="number"&&count>1?` · ${count}`:"";
-  return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={t(isPhoto?"Photo printing job":isIdDocument?"Private ID card print job":"Document printing job")}>{label}{countLabel}</span>;
+  return <span className={`print-kind-tag print-kind-tag--${isPhoto?"photo":"document"}`} title={t(isPhoto?"Photo printing job":isIdDocument?"Private ID card print job":"Document printing job")}>{t(label)}{countLabel}</span>;
 }
 function normalizedCustomerPrintKind(value:string|null|undefined):"DOCUMENT"|"PHOTO"|"ID_DOCUMENT" {
   return value==="PHOTO"||value==="ID_DOCUMENT"?value:"DOCUMENT";
