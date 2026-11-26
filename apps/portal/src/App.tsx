@@ -6928,7 +6928,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             ?allocation?.amountMinor??0
             :batchStatuses[item.job.id]?.quotedAmountMinor??quotesByJobId[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor??0;
           const refunded=batchCheckoutUsesPayment?(allocation?.refundedAmountMinor??0):0;
-          const lineStatus=batchCheckoutUsesPayment?allocation?.status:"Included in this checkout";
+          const lineStatus=batchCheckoutUsesPayment?allocation?.status :t("Included in this checkout");
           return <div key={item.job.id}>
             <span>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??item.job.printKind)}/><small>{lineStatus?String(lineStatus).replaceAll("_"," ") :t("Allocation loading")}{refunded>0? ` · ${money(refunded,item.job.currency)} refunded` : ""}</small></span>
             <strong>{money(amount,item.job.currency)}</strong>
