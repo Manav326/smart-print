@@ -60,7 +60,7 @@ import OrderJourneyPage from "./OrderJourneyPage";
 import ShopAdPlacement from "./ShopAdPlacement";
 import { IST_TIME_ZONE, formatIstDate, formatIstDateTime, formatIstTime, istDateKey } from "./date-time";
 import { getSubscriptionReminderState } from "./subscription-checkout-state";
-import { useLocale, translateUi, translateUiText, formatUiCurrency, formatUiNumber, formatUiDate } from "./i18n";
+import { LanguageSwitcher, useLocale, translateUi, translateUiText, formatUiCurrency, formatUiNumber, formatUiDate } from "./i18n";
 
 type Section = "Order Journey" | "Overview" | "Print Queue" | "Printers" | "QR Stations" | "Print Agent" | "Pricing" | "Subscription" | "Payments" | "Customers" | "Reports" | "Settings";
 type Modal = "station" | null;
@@ -1667,6 +1667,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
               <span>{cloudStatus === "connected" ? t("Cloud connected") : cloudStatus === "checking" ? t("Checking cloud") : t("Cloud unavailable")}</span>
             </div>
             <ThemeToggleButton dark={dark} onToggle={onToggleTheme} className="theme-toggle-compact"/>
+            <LanguageSwitcher compact/>
             <div className="service-status-row" aria-label={t("Live shop system status")}>
               <span className={"service-status "+apiConnectionState} title={t("API connection")}><i/>{t("API {status}",{status:t(apiConnectionState==="connected"?"Connected":apiConnectionState==="degraded"?"Degraded":apiConnectionState==="offline"?"Offline":"Checking")})}</span>
               <span className={"service-status "+(onlineAgentCount > 0 ? "connected" : activeAgentCount > 0 ? "offline" : "checking")} title={t("Windows Agent heartbeat")}><i/>{t("Agent {status}",{status:onlineAgentCount>0?onlineAgentCount+" "+t("online"):activeAgentCount>0?t("Offline"):t("Not paired")})}</span>
