@@ -71,17 +71,18 @@ if (screenRegistryStart < 0) throw new Error("Missing screen-level translation d
 function readScreenCatalog(locale) {
   const localeStart = source.indexOf("  " + locale + ": {", screenRegistryStart);
   if (localeStart < 0) throw new Error("Missing screen-level dictionary for " + locale);
-  const bodyStart = source.indexOf("\\n", localeStart) + 1;
-  const end = source.indexOf("\\n  },", bodyStart);
+  const bodyStart = source.indexOf("\n", localeStart) + 1;
+  const end = source.indexOf("\n  },", bodyStart);
   if (bodyStart <= 0 || end < 0) throw new Error("Unterminated screen-level dictionary for " + locale);
   const entries = [];
-  for (const line of source.slice(bodyStart, end).split("\\n")) {
+  for (const line of source.slice(bodyStart, end).split("\n")) {
     const trimmed = line.trim();
     if (!trimmed) continue;
-    const match = trimmed.match(/^("(?:\\\\.|[^"]) *")\\s*:\\s*("(?:\\\\.|[^"])*")\\s*,?$/);
-    const exact = trimmed.match(/^("(?:\\\\.|[^"])*")\\s*:\\s*("(?:\\\\.|[^"])*")\\s*,?$/);
-    if (!exact) throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
-    entries.push([JSON.parse(exact[1]), JSON.parse(exact[2])]);
+    const separator = trimmed.indexOf(":");
+    if (separator < 0) throw new Error("Invalid screen-level key/value entry in " + locale + ": " + trimmed);
+    const key = JSON.parse(trimmed.slice(0, separator).trim());
+    const value = JSON.parse(trimmed.slice(separator + 1).trim().replace(/,$/, ""));
+    entries.push([key, value]);
   }
   const keys = entries.map(([key]) => key);
   const duplicates = keys.filter((key, index) => keys.indexOf(key) !== index);
