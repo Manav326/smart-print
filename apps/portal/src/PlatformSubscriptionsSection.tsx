@@ -240,7 +240,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
 
       {historyTenant && (
         <section className="panel platform-tenants-panel platform-subscription-history">
-          <div className="platform-tenants-heading"><div><h2>{t("Assignment history")}</h2><p>{t("Append-only platform audit events for {shop}.").replace("{shop}", page?.items.find(item => item.id === historyTenant)?.businessName ?? t("this shop"))}</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label="Close history"><X size={15}/></button></div>
+          <div className="platform-tenants-heading"><div><h2>{t("Assignment history")}</h2><p>{t("Append-only platform audit events for {shop}.").replace("{shop}", page?.items.find(item => item.id === historyTenant)?.businessName ?? t("this shop"))}</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label={t("Close history")}><X size={15}/></button></div>
           {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading history…</div> :
             history.length === 0 ? <div className="platform-empty">{t("No platform assignment events have been recorded for this shop yet.")}</div> :
             <div className="platform-table-scroll"><table className="platform-tenant-table platform-history-table">
@@ -264,7 +264,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
           <section className="panel platform-assignment-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-assignment-title">
             <div className="platform-assignment-heading">
               <div><div className="platform-plan-kicker"><CalendarClock size={14}/> {t("SUBSCRIPTION ACCESS")}</div><h2 id="subscription-assignment-title">{t("Grant plan access")}</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
-              <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label="Close assignment"><X size={16}/></button>
+              <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label={t("Close assignment")}><X size={16}/></button>
             </div>
             <label className="platform-assignment-field">Published plan
               <select value={selectedOption} onChange={event => {
