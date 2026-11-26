@@ -709,7 +709,7 @@ export default function PhotoStudio({
   async function createPrintSheets(){
     if(!image||busyRef.current)return;
     const parsedCopies=Number(copiesInput);
-    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError("Choose 1–"+maxCopies+" whole copies.");return;}
+    if(!Number.isInteger(parsedCopies)||parsedCopies<1||parsedCopies>maxCopies){setError(t("Choose 1–{count} whole copies.").replace("{count}", String(maxCopies)));return;}
     const pages = Math.ceil(parsedCopies / outputPhotosPerPage);
     busyRef.current=true;setBusy(true);setError("");
     setPreparationProgress("Preparing page 1 of "+pages+"…");
