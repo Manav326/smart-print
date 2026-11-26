@@ -392,9 +392,9 @@ test("Photo Studio uses only the uploaded source and offers no edited-photo expo
  const studioCss=read("../src/PhotoStudio.module.css");
  assert.match(studioCss,/\.previewProtection::before/);
  assert.match(studio,/mode === "private-library" \? t\("Save private sheet"\)/);
- assert.match(studio,/mode === "shop-create" \? "Create photo order"/);
- assert.match(studio,/mode === "shop" \? "Save sheet to this job"/);
- assert.match(studio,/: "Prepare A4 sheet"/);
+ assert.match(studio,/mode === "shop-create" \? t\("Create photo order"\)/);
+ assert.match(studio,/mode === "shop" \? t\("Save sheet to this job"\)/);
+ assert.match(studio,/: t\("Prepare A4 sheet"\)/);
  assert.match(studio,/Prepared photo output replaces this upload; original stays untouched/);
  assert.match(studio,/Replace the unpaid job photo PDF; approval and dispatch still apply/);
  assert.match(studio,/type="date"/);
@@ -672,7 +672,7 @@ test("customer uploader keeps its batch example, inline Android PDF preview and 
  const api=read("../src/api.ts");
  const program=read("../../../src/SmartPrint.Api/Program.cs");
  const css=read("../src/styles.css");
- assert.match(app,/placeholder=\\{t\\("e.g. Manjeet - College Notes"\\)\\}/);
+ assert.match(app,/placeholder=\{t\("e.g. Manjeet - College Notes"\)\}/);
  assert.doesNotMatch(app,/Rahul\s*[–-]\s*College Notes/);
  assert.match(app,/<CustomerNativePdfPreview[\s\S]*onPage=/);
  assert.match(app,/event\.previousStatus!==event\.newStatus/);
