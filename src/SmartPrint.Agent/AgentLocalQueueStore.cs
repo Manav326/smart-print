@@ -534,6 +534,143 @@ public sealed class AgentLocalQueueStore
         CancellationToken cancellationToken) =>
         EnqueueStreamingCoreAsync(job, agentScopeId, documentStream, "LOCAL_UPLOAD_STAGED", cancellationToken);
 
+    /// <summary>
+    /// Persists an already-encrypted customer QSP2 upload directly as a DPAPI-key-wrapped
+    /// QLQ2 queue object. Every record and the final whole-document digest are authenticated
+    /// before the document is analysed or made visible in the queue manifest.
+    /// </summary>
+    public async Task<AgentLocalQueueEntry> EnqueueLocalUploadQsp2StreamingAsync(
+        Guid jobId,
+        Guid agentScopeId,
+        long expectedSizeBytes,
+        string expectedSha256,
+        Stream encryptedDocumentStream,
+        ReadOnlyMemory<byte> dataKey,
+        Func<Stream, CancellationToken, Task<AgentClaimedJob?>> validateAndCreateJob,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(encryptedDocumentStream);
+        ArgumentNullException.ThrowIfNull(validateAndCreateJob);
+        if (jobId == Guid.Empty ||
+            agentScopeId == Guid.Empty ||
+            !encryptedDocumentStream.CanRead ||
+            dataKey.Length != Qsp2DocumentFormat.DataKeySizeBytes ||
+            expectedSizeBytes is <= 0 or > UploadLimits.MaxFileBytes ||
+            expectedSha256.Length != 64 ||
+            !expectedSha256.All(Uri.IsHexDigit))
+        {
+            throw new InvalidDataException("The encrypted local upload request is invalid.");
+        }
+
+        var existing = Find(jobId);
+        if (existing is not null)
+        {
+            if (!string.Equals(existing.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase) ||
+                existing.SizeBytes != expectedSizeBytes)
+                throw new InvalidDataException("A different document is already stored for this print job.");
+            if (!File.Exists(existing.DocumentPath))
+                throw new FileNotFoundException("The local queue manifest exists but its protected document is missing.", existing.DocumentPath);
+            return existing;
+        }
+
+        await InitializeAsync(cancellationToken);
+        var documentPath = Path.Combine(queueRoot, jobId.ToString("N") + ".qdoc");
+        var temporaryDocumentPath = documentPath + ".tmp";
+        var keyForProtection = dataKey.ToArray();
+        byte[]? protectedKey = null;
+
+        try
+        {
+            protectedKey = ProtectedData.Protect(
+                keyForProtection,
+                Qsp2QueueKeyEntropy,
+                DataProtectionScope.LocalMachine);
+            if (protectedKey.Length is <= 0 or > MaximumProtectedQueueKeyBytes)
+                throw new InvalidDataException("The Windows-protected QSP2 queue key has an invalid size.");
+
+            Qsp2DocumentMetadata metadata;
+            await using (var output = new FileStream(
+                temporaryDocumentPath,
+                FileMode.CreateNew,
+                FileAccess.Write,
+                FileShare.None,
+                64 * 1024,
+                FileOptions.Asynchronous | FileOptions.SequentialScan))
+            {
+                var queueHeader = new byte[Qsp2QueueHeaderSize];
+                "QLQ2"u8.CopyTo(queueHeader);
+                queueHeader[4] = Qsp2QueueVersion;
+                BinaryPrimitives.WriteUInt32BigEndian(
+                    queueHeader.AsSpan(5, sizeof(uint)),
+                    checked((uint)protectedKey.Length));
+                await output.WriteAsync(queueHeader, cancellationToken);
+                await output.WriteAsync(protectedKey, cancellationToken);
+
+                using (var tee = new TeeReadStream(encryptedDocumentStream, output))
+                {
+                    metadata = await Qsp2DocumentFormat.DecryptAsync(
+                        tee,
+                        Stream.Null,
+                        dataKey,
+                        agentScopeId,
+                        jobId,
+                        expectedSizeBytes,
+                        cancellationToken);
+                }
+
+                if (metadata.PlaintextLength != expectedSizeBytes ||
+                    !string.Equals(metadata.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase))
+                    throw new InvalidDataException("The encrypted upload does not match the authorised print document.");
+
+                await output.FlushAsync(cancellationToken);
+                output.Flush(flushToDisk: true);
+                CryptographicOperations.ZeroMemory(queueHeader);
+            }
+
+            AgentClaimedJob? validatedJob;
+            using (var document = OpenQsp2DocumentReadStreamFromPath(
+                temporaryDocumentPath, agentScopeId, jobId, expectedSha256))
+            {
+                validatedJob = await validateAndCreateJob(document, cancellationToken);
+            }
+
+            if (validatedJob is null)
+                throw new InvalidDataException("The encrypted upload did not pass document validation.");
+            if (validatedJob.Id != jobId ||
+                validatedJob.SizeBytes != expectedSizeBytes ||
+                !string.Equals(validatedJob.Sha256, expectedSha256, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(validatedJob.Status, "LOCAL_UPLOAD_STAGED", StringComparison.Ordinal) ||
+                !string.Equals(validatedJob.StorageMode, "LOCAL_AGENT", StringComparison.Ordinal))
+                throw new InvalidDataException("The validated local upload metadata does not match its authorised ticket.");
+
+            File.Move(temporaryDocumentPath, documentPath);
+            var entry = CreateQueueEntry(validatedJob, documentPath, "LOCAL_UPLOAD_STAGED", agentScopeId);
+            try
+            {
+                await SaveManifestAsync(entry, cancellationToken);
+                return entry;
+            }
+            catch
+            {
+                if (File.Exists(documentPath))
+                    File.Delete(documentPath);
+                throw;
+            }
+        }
+        catch
+        {
+            if (File.Exists(temporaryDocumentPath))
+                File.Delete(temporaryDocumentPath);
+            throw;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyForProtection);
+            if (protectedKey is not null)
+                CryptographicOperations.ZeroMemory(protectedKey);
+        }
+    }
+
     private async Task<AgentLocalQueueEntry> EnqueueStreamingCoreAsync(
         AgentClaimedJob job,
         Guid agentScopeId,
@@ -760,6 +897,73 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    private static Stream OpenQsp2DocumentReadStreamFromPath(
+        string path,
+        Guid agentScopeId,
+        Guid jobId,
+        string expectedSha256)
+    {
+        var file = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.Read,
+            64 * 1024,
+            FileOptions.RandomAccess);
+        QueueOffsetReadStream? body = null;
+        byte[]? protectedKey = null;
+        byte[]? dataKey = null;
+        try
+        {
+            Span<byte> queueHeader = stackalloc byte[Qsp2QueueHeaderSize];
+            ReadExactly(file, queueHeader);
+            if (!queueHeader[..4].SequenceEqual("QLQ2"u8) || queueHeader[4] != Qsp2QueueVersion)
+                throw new InvalidDataException("The protected local queue document header is invalid.");
+
+            var protectedKeyLength = checked((int)BinaryPrimitives.ReadUInt32BigEndian(
+                queueHeader.Slice(5, sizeof(uint))));
+            if (protectedKeyLength is <= 0 or > MaximumProtectedQueueKeyBytes ||
+                file.Length < Qsp2QueueHeaderSize + protectedKeyLength +
+                    Qsp2DocumentFormat.HeaderSizeBytes + Qsp2DocumentFormat.HeaderMacSizeBytes)
+                throw new InvalidDataException("The protected local queue key envelope is invalid.");
+
+            protectedKey = new byte[protectedKeyLength];
+            ReadExactly(file, protectedKey);
+            dataKey = ProtectedData.Unprotect(
+                protectedKey,
+                Qsp2QueueKeyEntropy,
+                DataProtectionScope.LocalMachine);
+            if (dataKey.Length != Qsp2DocumentFormat.DataKeySizeBytes)
+                throw new InvalidDataException("The protected local queue data key has an invalid size.");
+
+            body = new QueueOffsetReadStream(file, Qsp2QueueHeaderSize + protectedKeyLength, leaveOpen: false);
+            file = null!;
+            var document = Qsp2DocumentFormat.OpenRead(
+                body,
+                dataKey,
+                agentScopeId,
+                jobId,
+                UploadLimits.MaxFileBytes,
+                expectedSha256,
+                leaveOpen: false);
+            body = null;
+            return document;
+        }
+        catch
+        {
+            body?.Dispose();
+            file?.Dispose();
+            throw;
+        }
+        finally
+        {
+            if (protectedKey is not null)
+                CryptographicOperations.ZeroMemory(protectedKey);
+            if (dataKey is not null)
+                CryptographicOperations.ZeroMemory(dataKey);
+        }
+    }
+
     private byte[] ReadLegacyDocument(AgentLocalQueueEntry entry)
     {
         var protectedBytes = File.ReadAllBytes(GetValidatedDocumentPath(entry.DocumentPath));
@@ -802,6 +1006,62 @@ public sealed class AgentLocalQueueStore
                 throw new EndOfStreamException("The protected local queue document is incomplete.");
             offset += read;
         }
+    }
+
+    private sealed class TeeReadStream : Stream
+    {
+        private readonly Stream source;
+        private readonly Stream copy;
+
+        public TeeReadStream(Stream source, Stream copy)
+        {
+            this.source = source ?? throw new ArgumentNullException(nameof(source));
+            this.copy = copy ?? throw new ArgumentNullException(nameof(copy));
+            if (!source.CanRead || !copy.CanWrite)
+                throw new ArgumentException("The QSP2 tee requires a readable source and writable destination.");
+        }
+
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+        public override int Read(byte[] buffer, int offset, int count)
+        {
+            var read = source.Read(buffer, offset, count);
+            if (read > 0) copy.Write(buffer, offset, read);
+            return read;
+        }
+
+        public override int Read(Span<byte> buffer)
+        {
+            var read = source.Read(buffer);
+            if (read > 0) copy.Write(buffer[..read]);
+            return read;
+        }
+
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            var read = await source.ReadAsync(buffer, cancellationToken);
+            if (read > 0)
+                await copy.WriteAsync(buffer[..read], cancellationToken);
+            return read;
+        }
+
+        public override Task<int> ReadAsync(
+            byte[] buffer,
+            int offset,
+            int count,
+            CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+
+        public override void Flush() => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class QueueOffsetReadStream : Stream
