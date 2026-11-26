@@ -293,9 +293,9 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
     <section className="platform-plans">
       <div className="platform-plans-intro">
         <div>
-          <div className="platform-plan-kicker"><Layers3 size={14}/> COMMERCIAL CATALOGUE</div>
+          <div className="platform-plan-kicker"><Layers3 size={14}/> {t("COMMERCIAL CATALOGUE")}</div>
           <h2>{t("Plans and entitlements")}</h2>
-          <p>Configure plan pricing and product capabilities. Changes are versioned so published terms remain stable.</p>
+          <p>{t("Configure plan pricing and product capabilities. Changes are versioned so published terms remain stable.")}</p>
         </div>
         <div className="platform-plans-actions">
           <button className="secondary-button" onClick={() => void reload()} disabled={loading || Boolean(busy)}>
@@ -312,11 +312,11 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
 
       <div className="platform-plan-layout">
         <aside className="panel platform-plan-list-panel">
-          <div className="platform-plan-list-heading"><strong>Plan catalogue</strong><span>{plans.length}</span></div>
+          <div className="platform-plan-list-heading"><strong>{t("Plan catalogue")}</strong><span>{plans.length}</span></div>
           {loading ? (
             <div className="platform-plan-empty"><LoaderCircle size={17} className="platform-spin"/> Loading plans…</div>
           ) : plans.length === 0 ? (
-            <div className="platform-plan-empty">No plans have been created.</div>
+            <div className="platform-plan-empty">{t("No plans have been created.")}</div>
           ) : (
             <div className="platform-plan-list">
               {plans.map(plan => {
@@ -333,21 +333,21 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                       <strong>{plan.name}</strong>
                       <small>{plan.code} · {version ? `v${version.version} · ${version.status}` : "No versions"}</small>
                     </span>
-                    <span className={plan.isActive ? "platform-plan-state active" : "platform-plan-state inactive"}>{plan.isActive ? "Active" : "Inactive"}</span>
+                    <span className={plan.isActive ? "platform-plan-state active" : "platform-plan-state inactive"}>{plan.isActive ? t("Active") : t("Inactive")}</span>
                   </button>
                 );
               })}
             </div>
           )}
-          <div className="platform-plan-list-foot"><ShieldCheck size={14}/> System trial plan is protected.</div>
+          <div className="platform-plan-list-foot"><ShieldCheck size={14}/> {t("System trial plan is protected.")}</div>
         </aside>
 
         <div className="platform-plan-editor">
           {creating ? (
             <section className="panel platform-plan-panel">
               <div className="platform-plan-panel-heading">
-                <div><span className="platform-plan-panel-kicker">NEW COMMERCIAL PLAN</span><h3>Create a plan</h3><p>The initial version is saved as a draft and requires explicit publication.</p></div>
-                <span className="platform-plan-draft-pill">Draft</span>
+                <div><span className="platform-plan-panel-kicker">{t("NEW COMMERCIAL PLAN")}</span><h3>{t("Create a plan")}</h3><p>{t("The initial version is saved as a draft and requires explicit publication.")}</p></div>
+                <span className="platform-plan-draft-pill">{t("Draft")}</span>
               </div>
               <div className="platform-plan-meta-grid">
                 <Field label="Plan code" hint="Stable uppercase identifier">
@@ -362,7 +362,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
               </div>
               <PlanVersionEditor form={form} onChange={changeForm}/>
               <div className="platform-plan-editor-actions">
-                <span className="platform-plan-note">Enter amounts in the selected currency. Blank means unavailable, while zero is explicitly free.</span>
+                <span className="platform-plan-note">{t("Enter amounts in the selected currency. Blank means unavailable, while zero is explicitly free.")}</span>
                 <button className="primary-button" onClick={() => void savePlan()} disabled={Boolean(busy)}>
                   {busy === "save" ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Create plan draft
                 </button>
@@ -377,7 +377,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                     <h3>{selectedPlan.name}</h3>
                     <p>{selectedPlan.code} · created {formatIstDate(selectedPlan.createdUtc)}</p>
                   </div>
-                  {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> Protected</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? "Active" : "Inactive"}</span>}
+                  {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> Protected</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? t("Active") : t("Inactive")}</span>}
                 </div>
                 <div className="platform-plan-meta-grid">
                   <Field label="Plan name"><input value={name} onChange={event => setName(event.target.value)} disabled={isSystemPlan} maxLength={100}/></Field>
@@ -399,11 +399,11 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
 
               <section className="panel platform-plan-panel">
                 <div className="platform-plan-panel-heading">
-                  <div><span className="platform-plan-panel-kicker">VERSIONED TERMS</span><h3>{hasDraft ? `Edit draft · v${currentDraft?.version}` : `Prepare next version · v${(latestVersion(selectedPlan)?.version ?? 0) + 1}`}</h3><p>Saving creates or updates a draft. Published terms cannot be edited in place.</p></div>
+                  <div><span className="platform-plan-panel-kicker">{t("VERSIONED TERMS")}</span><h3>{hasDraft ? t("Edit draft · v{version}").replace("{version}", String(currentDraft?.version ?? "")) : t("Prepare next version · v{version}").replace("{version}", String((latestVersion(selectedPlan)?.version ?? 0) + 1))}</h3><p>Saving creates or updates a draft. Published terms cannot be edited in place.</p></div>
                   <span className={hasDraft ? "platform-plan-draft-pill" : "platform-plan-protected"}>{hasDraft ? "Unpublished draft" : "New draft"}</span>
                 </div>
                 {isSystemPlan ? (
-                  <div className="platform-plan-system-note"><LockKeyhole size={16}/><div><strong>Trial safeguards</strong><span>This system plan preserves existing 14-day trials. Its terms are intentionally not editable from the commercial catalogue.</span></div></div>
+                  <div className="platform-plan-system-note"><LockKeyhole size={16}/><div><strong>{t("Trial safeguards")}</strong><span>{t("This system plan preserves existing 14-day trials. Its terms are intentionally not editable from the commercial catalogue.")}</span></div></div>
                 ) : (
                   <>
                     <PlanVersionEditor form={form} onChange={changeForm}/>
@@ -435,8 +435,8 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
 
       {selectedPlan && !creating && (
         <section className="panel platform-plan-history">
-          <div className="platform-plan-history-heading"><div><h3>Version history</h3><p>Each published version remains available for existing subscription references.</p></div><span>{selectedPlan.versions.length} versions</span></div>
-          {selectedPlan.versions.length === 0 ? <div className="platform-plan-empty">No versions yet.</div> : (
+          <div className="platform-plan-history-heading"><div><h3>{t("Version history")}</h3><p>{t("Each published version remains available for existing subscription references.")}</p></div><span>{selectedPlan.versions.length} versions</span></div>
+          {selectedPlan.versions.length === 0 ? <div className="platform-plan-empty">{t("No versions yet.")}</div> : (
             <div className="platform-plan-version-list">
               {[...selectedPlan.versions].sort((a,b)=>b.version-a.version).map(version => (
                 <div className="platform-plan-version-row" key={version.id}>
@@ -484,13 +484,13 @@ function PlanVersionEditor({ form, onChange }: {
   const priceStep = 10 ** -currencyMinorUnitDigits(form.currency);
   return (
     <div className="platform-plan-version-editor">
-      <div className="platform-plan-subheading"><div><h4>Pricing</h4><p>Enter amounts in {currencyLabel}; SmartPrint stores the currency's minor units.</p></div><Field label="Currency"><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
+      <div className="platform-plan-subheading"><div><h4>{t("Pricing")}</h4><p>{t("Enter amounts in {currency}").replace("{currency}", currencyLabel)}; SmartPrint stores the currency's minor units.</p></div><Field label={t("Currency")}><input value={form.currency} onChange={event => onChange("currency", event.target.value.toUpperCase())} maxLength={3} placeholder="INR"/></Field></div>
       <div className="platform-plan-meta-grid">
         <Field label={t("Monthly price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.monthlyPriceMinor} onChange={event => onChange("monthlyPriceMinor", event.target.value)} placeholder="e.g. 149"/></Field>
         <Field label={t("Annual price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder="e.g. 1499"/></Field>
       </div>
 
-      <div className="platform-plan-subheading"><div><h4>Usage limits</h4><p>Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
+      <div className="platform-plan-subheading"><div><h4>{t("Usage limits")}</h4><p>{t("Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.")}</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
       <div className="platform-plan-meta-grid platform-plan-limits-grid">
         <Field label={t("Printers")}><input type="number" min="1" step="1" value={form.maxPrinters} onChange={event => onChange("maxPrinters", event.target.value)} placeholder={t("No configured cap")}/></Field>
         <Field label={t("Agent computers")}><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder="No configured cap"/></Field>
@@ -499,7 +499,7 @@ function PlanVersionEditor({ form, onChange }: {
         <Field label={t("Maximum document size · bytes")}><input type="number" min="1" step="1" value={form.maxDocumentBytes} onChange={event => onChange("maxDocumentBytes", event.target.value)} placeholder="No configured cap"/></Field>
       </div>
 
-      <div className="platform-plan-subheading"><div><h4>Product capabilities</h4><p>Saved centrally and intended to be evaluated by the server.</p></div></div>
+      <div className="platform-plan-subheading"><div><h4>{t("Product capabilities")}</h4><p>{t("Saved centrally and intended to be evaluated by the server.")}</p></div></div>
       <div className="platform-plan-feature-grid">
         <FeatureToggle icon={<Cloud size={16}/>} label="Cloud-assisted printing" description="Allow secure cloud transfer for print jobs" checked={form.cloudAssistedPrintingEnabled} onChange={value => onChange("cloudAssistedPrintingEnabled", value)}/>
         <FeatureToggle icon={<Sparkles size={16}/>} label="White-label experience" description="Remove or replace Smart Print platform branding" checked={form.whiteLabelEnabled} onChange={value => onChange("whiteLabelEnabled", value)}/>
