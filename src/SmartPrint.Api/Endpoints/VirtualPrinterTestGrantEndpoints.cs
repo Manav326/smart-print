@@ -41,6 +41,14 @@ public static class VirtualPrinterTestGrantEndpoints
                 .Where(item => printerIds.Contains(item.PrinterDeviceId))
                 .OrderByDescending(item => item.CreatedUtc)
                 .ToListAsync(ct);
+            var actorIds = grants.SelectMany(grant => new Guid?[]
+                { grant.ApprovedByUserId, grant.RevokedByUserId })
+                .Where(id => id.HasValue).Select(id => id!.Value).Distinct().ToArray();
+            var actorNames = await db.Users.AsNoTracking()
+                .Where(user => actorIds.Contains(user.Id))
+                .Select(user => new { user.Id, user.DisplayName, user.UserName })
+                .ToDictionaryAsync(user => user.Id,
+                    user => !string.IsNullOrWhiteSpace(user.DisplayName) ? user.DisplayName : user.UserName ?? "Platform administrator", ct);
 
             return Results.Ok(queues.Select(queue => new
             {
@@ -65,9 +73,12 @@ public static class VirtualPrinterTestGrantEndpoints
                         grant.Id,
                         grant.Reason,
                         grant.ApprovedByUserId,
+                        ApprovedByName = actorNames.GetValueOrDefault(grant.ApprovedByUserId, "Platform administrator"),
                         grant.CreatedUtc,
                         grant.ExpiresUtc,
                         grant.RevokedByUserId,
+                        RevokedByName = grant.RevokedByUserId is Guid revokedBy
+                            ? actorNames.GetValueOrDefault(revokedBy, "Platform administrator") : null,
                         grant.RevokedUtc,
                         grant.RevocationReason,
                         IsActive = VirtualPrinterTestGrantPolicy.IsGrantActive(
