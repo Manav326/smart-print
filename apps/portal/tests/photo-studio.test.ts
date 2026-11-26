@@ -445,7 +445,7 @@ test("Photo Studio preview supports direct crop dragging with pointer capture an
 test("Photo Studio contextual help is readable, dismissible and theme-aware instead of permanent panel copy",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
- assert.match(studio,/aria-label=\{"Help: "\+panelTitle\}/);
+ assert.match(studio,/aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
  assert.match(studio,/aria-expanded=\{openHelpTool===activeTool\}/);
  assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
  assert.match(studio,/openHelpToolRef\.current !== null/);
