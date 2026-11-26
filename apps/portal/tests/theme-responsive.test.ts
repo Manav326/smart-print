@@ -480,8 +480,8 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
   assert.ok(flow.includes("<span>{t(\"ID sheet\")}</span>"));
   assert.ok(flow.includes("<span>{t(\"Print mode\")}</span>"));
-  assert.ok(flow.includes('>B&W</button>'));
-  assert.ok(flow.includes('>Colour</button>'));
+  assert.ok(flow.includes('>{t("B&W")}</button>'));
+  assert.ok(flow.includes('>{t("Colour")}</button>'));
   assert.ok(flow.includes("A4\",orientation:\"PORTRAIT\""));
   assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
   assert.ok(flow.includes('Copies · all files'));
@@ -907,7 +907,7 @@ test("customer batch quote separates the total, included files, excluded files a
   assert.match(app, /customer-batch-quote-chip document/);
   assert.match(app, /customer-batch-quote-chip id-card/);
   assert.match(app, /customer-batch-quote-chip photo/);
-  assert.match(app, /aria-label="File-by-file prices"/);
+  assert.match(app, /aria-label=\{t\("File-by-file prices"\)\}/);
   assert.match(app, /customer-batch-quote-line-amount/);
   assert.match(app, /quoteRows\.map\(entry=>/);
   assert.match(app, /batchQuoteNeedsRefresh/);
