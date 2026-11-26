@@ -89,7 +89,6 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                     "\"DataTransferRawRetentionDays\" BETWEEN 30 AND 3650");
             });
             entity.Property(x => x.AllowPrivatePrintingVirtualOutput).HasDefaultValue(false);
-            entity.Property(x => x.TreatWorkingVirtualQueuesAsPhysicalForTesting).HasDefaultValue(false);
             entity.Property(x => x.DataTransferRawRetentionDays).HasDefaultValue(90);
             entity.HasKey(x => x.Id);
             entity.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UpdatedByUserId).OnDelete(DeleteBehavior.SetNull);
@@ -368,7 +367,6 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.ConnectionType).HasMaxLength(24).IsRequired();
             entity.Property(x => x.OutputMode).HasMaxLength(20).IsRequired();
             entity.Property(x => x.IdentityFingerprint).HasMaxLength(64);
-            entity.Property(x => x.IsTestModeOverride).HasDefaultValue(false);
             entity.Property(x => x.ConnectionAddress).HasMaxLength(255);
             entity.Property(x => x.QueueName).HasMaxLength(160);
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
