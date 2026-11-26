@@ -6888,7 +6888,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         
       </div>}
       {legacyIndividualPayment&&payment&&payment.status!=="REJECTED"&&<div className="customer-pay-panel">
-        <div className="customer-pay-heading"><span>{payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER"}</span><strong>{money(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
+        <div className="customer-pay-heading"><span>{t(payment.method==="UPI"?"UPI PAYMENT":"CASH AT COUNTER")}</span><strong>{money(Math.max(0,payment.amountMinor-(payment.refundedAmountMinor??0)),payment.currency)}</strong></div>
         {payment.method==="UPI"&&payment.status==="AWAITING_CUSTOMER_PAYMENT"&&<>
           <CustomerUpiQr
             uri={buildCustomerUpiIntent({
@@ -6906,19 +6906,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <div className="customer-payment-reference">
             <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
             <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
-            <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit payment reference"}</button>
+            <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/> :nativeAppMode?t("Submit UTR"):t("Submit payment reference")}</button>
             <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>{t("Downloading the QR does not bypass bank or UPI checks.")}</CustomerInlineNotice>
           </div>
         </>}
-        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?"Pay at counter · Await confirmation.":"Pay at the shop counter. The shop will confirm receipt before authorising the job."}</p>}
-        {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?"Reference received · Verification pending.":"Your payment reference was received. The shop still needs to verify the transaction."}</p>}
-        {payment.status==="VERIFIED"&&<p>{nativeAppMode?"Payment verified · Printing pending.":"Payment verified by the shop. The print job is authorised, but not yet physically printed."}</p>}
-        {payment.status==="PARTIALLY_REFUNDED"&&<p>{nativeAppMode?"Partial refund · Accepted pages only.":"A partial return has been recorded. The remaining paid amount is for the pages the shop accepted."}</p>}
+        {payment.method==="CASH"&&payment.status==="CASH_AWAITING_PAYMENT"&&<p>{nativeAppMode?t("Pay at counter · Await confirmation."):t("Pay at the shop counter. The shop will confirm receipt before authorising the job.")}</p>}
+        {payment.status==="CUSTOMER_REPORTED"&&<p>{nativeAppMode?t("Reference received · Verification pending."):t("Your payment reference was received. The shop still needs to verify the transaction.")}</p>}
+        {payment.status==="VERIFIED"&&<p>{nativeAppMode?t("Payment verified · Printing pending."):t("Payment verified by the shop. The print job is authorised, but not yet physically printed.")}</p>}
+        {payment.status==="PARTIALLY_REFUNDED"&&<p>{nativeAppMode?t("Partial refund · Accepted pages only."):t("A partial return has been recorded. The remaining paid amount is for the pages the shop accepted.")}</p>}
       </div>}
     </div>}
     {batchCheckoutVisible&&<section className="customer-pay-panel customer-batch-checkout-panel">
       <div className="customer-pay-heading">
-        <span>{batchCheckoutHeading} · {batchCheckoutFileCount} FILE(S)</span>
+        <span>{batchCheckoutHeading} · {batchCheckoutFileCount} {t("FILE(S)")}</span>
         <strong>{money(batchCheckoutAmount,batchCheckoutCurrency)}</strong>
       </div>
       <div className="customer-batch-checkout-lines">
@@ -6930,15 +6930,15 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           const refunded=batchCheckoutUsesPayment?(allocation?.refundedAmountMinor??0):0;
           const lineStatus=batchCheckoutUsesPayment?allocation?.status:"Included in this checkout";
           return <div key={item.job.id}>
-            <span>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??item.job.printKind)}/><small>{lineStatus?String(lineStatus).replaceAll("_"," "):"Allocation loading"}{refunded>0? ` · ${money(refunded,item.job.currency)} refunded` : ""}</small></span>
+            <span>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}<PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??item.job.printKind)}/><small>{lineStatus?String(lineStatus).replaceAll("_"," ") :t("Allocation loading")}{refunded>0? ` · ${money(refunded,item.job.currency)} refunded` : ""}</small></span>
             <strong>{money(amount,item.job.currency)}</strong>
           </div>;
         })}
       </div>
       {batchCheckoutUsesPayment&&!batchPaymentAllocationComplete&&<CustomerInlineNotice kind="info" title={t("Checking payment breakdown")}>{t("Review the full file list before paying or submitting a reference.")}</CustomerInlineNotice>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title={t("Refund summary")}>Refunded: {money(batchPaymentRefundedTotal,batchCheckoutCurrency)} · Remaining: {money(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)}.</CustomerInlineNotice>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPaymentRefundedTotal>0&&<CustomerInlineNotice kind="info" title={t("Refund summary")}>{t("Refunded: {refunded} · Remaining: {remaining}.",{refunded:money(batchPaymentRefundedTotal,batchCheckoutCurrency),remaining:money(Math.max(0,batchPayment!.amountMinor-batchPaymentRefundedTotal),batchCheckoutCurrency)})}</CustomerInlineNotice>}
       {!batchCheckoutUsesPayment&&<>
-        {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">The previous batch payment was rejected. {batchPayment.rejectionReason||"Check with the shop before trying again."}</p>}
+        {batchPayment?.status==="REJECTED"&&<p className="customer-flow-error">{t("The previous batch payment was rejected. {reason}",{reason:batchPayment.rejectionReason||t("Check with the shop before trying again.")})}</p>}
         {!paymentOptions.cashEnabled&&paymentOptions.upiEnabled&&<CustomerInlineNotice kind="info" title={t("Cash at counter unavailable")}>{t("Choose UPI or ask the shop whether cash can be enabled.")}</CustomerInlineNotice>}
         {!paymentOptions.cashEnabled&&!paymentOptions.upiEnabled&&<CustomerInlineNotice kind="warning" title={t("No payment method available")}>{t("Ask the shop to enable UPI or cash at the counter.")}</CustomerInlineNotice>}
         {paymentOptions.upiEnabled&&<button type="button" aria-pressed={paymentMethod==="UPI"} className={paymentMethod==="UPI"?"customer-choice selected":"customer-choice"} onClick={()=>setPaymentMethod("UPI")}>{t("UPI payment")}</button>}
@@ -6965,11 +6965,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         <div className="customer-payment-reference">
           <label className="customer-reference-field">UPI transaction ID (UTR)<input value={paymentReference} maxLength={100} onChange={event=>setPaymentReference(event.target.value)} placeholder={t("Enter transaction ID after paying")}/></label>
             <small className="customer-payment-reference-hint">{t("Find it in your UPI app under payment details or transaction history.")}</small>
-          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/>:nativeAppMode?"Submit UTR":"Submit batch payment reference"}</button>
-          <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.</CustomerInlineNotice>
+          <button className="customer-flow-button" disabled={busy||paymentReference.trim().length<4} onClick={()=>void submitPaymentReference()}>{busy?<span className="button-spinner"/> :nativeAppMode?t("Submit UTR"):t("Submit batch payment reference")}</button>
+          <CustomerInlineNotice kind="warning" title={t("Bank security checks still apply")}>{t("The shop verifies payment. A downloaded QR does not bypass bank or UPI checks.")}</CustomerInlineNotice>
         </div>
       </>}
-      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.</p>}
+      {batchCheckoutUsesPayment&&batchPaymentAllocationComplete&&batchPayment?.method==="CASH"&&batchPayment.status==="CASH_AWAITING_PAYMENT"&&<p>{t("Pay the displayed batch total at the shop counter. The shop will confirm receipt before authorising the accepted files.")}</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="CUSTOMER_REPORTED"&&<p>{t("Your batch payment reference was received. The shop must verify the full amount before any accepted file is authorised.")}</p>}
       {batchCheckoutUsesPayment&&batchPayment?.status==="VERIFIED"&&<div className="payment-verified-note"><Check size={14}/> {t("Batch payment verified. Accepted files are authorised for the shop's print queue.")}</div>}
     </section>}
