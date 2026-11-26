@@ -443,7 +443,7 @@ public sealed class LocalAgentApiHostedService(
                     bytes = memory.ToArray();
                 }
 
-                DocumentAnalysis analysis;
+                DocumentAnalysis analysis = null!;
                 try
                 {
                     analysis = DocumentAnalyzer.Analyse(bytes, ".pdf");
@@ -1057,7 +1057,7 @@ public sealed class LocalAgentApiHostedService(
                     if (isQsp2)
                     {
                         byte[]? dataKey = null;
-                        string? stagingPath = null;
+                        IResult? qsp2ValidationFailure = null;
                         try
                         {
                             var wrappedKey = context.Request.Headers["X-Print-Encrypted-Key"].FirstOrDefault();
@@ -1076,54 +1076,47 @@ public sealed class LocalAgentApiHostedService(
 
                             await ReportPrivateStageAsync("DECRYPTING_AND_AUTHENTICATING");
                             dataKey = documentEncryptionKeyStore.DecryptWrappedAesKey(wrappedKey);
-                            stagingPath = await localQueueStore.CreatePrivateUploadStagingPathAsync(ct);
-                            await using (var decryptedOutput = new FileStream(
-                                stagingPath, FileMode.CreateNew, FileAccess.Write, FileShare.None,
-                                64 * 1024, FileOptions.Asynchronous | FileOptions.WriteThrough))
-                            {
-                                var qsp2UploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
-                                var metadata = await Qsp2DocumentFormat.DecryptAsync(
-                                    context.Request.Body,
-                                    decryptedOutput,
-                                    dataKey,
-                                    credentials.AgentDeviceId,
-                                    claim.PrintJobId,
-                                    UploadLimits.MaxFileBytes,
-                                    ct);
-                                if (metadata.PlaintextLength != claim.SizeBytes ||
-                                    !string.Equals(metadata.Sha256, claim.Sha256, StringComparison.OrdinalIgnoreCase))
-                                    throw new InvalidDataException("The QSP2 document SHA-256 does not match the authorised upload.");
-                                await decryptedOutput.FlushAsync(ct);
-                                receivedPayloadBytes = claim.SizeBytes;
-                                uploadDurationMilliseconds = Math.Max(0, qsp2UploadStopwatch.ElapsedMilliseconds);
-                            }
+                            var qsp2UploadStopwatch = System.Diagnostics.Stopwatch.StartNew();
+                            await localQueueStore.EnqueueLocalUploadQsp2StreamingAsync(
+                                claim.PrintJobId,
+                                credentials.AgentDeviceId,
+                                claim.SizeBytes,
+                                claim.Sha256,
+                                context.Request.Body,
+                                dataKey,
+                                async (verifiedDocument, validationToken) =>
+                                {
+                                    await ReportPrivateStageAsync("VALIDATING_DOCUMENT");
+                                    try
+                                    {
+                                        analysis = DocumentAnalyzer.Analyse(verifiedDocument, claim.FileExtension);
+                                    }
+                                    catch (DocumentValidationException exception)
+                                    {
+                                        await ReportPrivateValidationFailureAsync(
+                                            "document_not_supported",
+                                            exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
+                                        qsp2ValidationFailure = Results.UnprocessableEntity(
+                                            new { code = "document_not_supported", message = exception.Message });
+                                        return null;
+                                    }
 
-                            await using var plaintextStream = new FileStream(
-                                stagingPath, FileMode.Open, FileAccess.Read, FileShare.Read,
-                                64 * 1024, FileOptions.RandomAccess);
-                            try
-                            {
-                                await ReportPrivateStageAsync("VALIDATING_DOCUMENT");
-                                analysis = DocumentAnalyzer.Analyse(plaintextStream, claim.FileExtension);
-                            }
-                            catch (DocumentValidationException exception)
-                            {
-                                await ReportPrivateValidationFailureAsync("document_not_supported",
-                                    exception.Message.Length > 350 ? exception.Message[..350] : exception.Message);
-                                return Results.UnprocessableEntity(new { code = "document_not_supported", message = exception.Message });
-                            }
+                                    if (!MatchesClaimedContent(analysis))
+                                    {
+                                        const string message = "The document content does not match the detected upload format. Select the original file again.";
+                                        await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
+                                        qsp2ValidationFailure = Results.UnprocessableEntity(
+                                            new { code = "document_content_type_mismatch", message });
+                                        return null;
+                                    }
 
-                            if (!MatchesClaimedContent(analysis))
-                            {
-                                const string message = "The document content does not match the detected upload format. Select the original file again.";
-                                await ReportPrivateValidationFailureAsync("document_content_type_mismatch", message);
-                                return Results.UnprocessableEntity(new { code = "document_content_type_mismatch", message });
-                            }
+                                    await ReportPrivateStageAsync("SECURING_LOCAL_QUEUE");
+                                    return CreateStagedJob(analysis);
+                                },
+                                ct);
 
-                            plaintextStream.Position = 0;
-                            await ReportPrivateStageAsync("SECURING_LOCAL_QUEUE");
-                            await localQueueStore.EnqueueLocalUploadStreamingAsync(
-                                CreateStagedJob(analysis), credentials.AgentDeviceId, plaintextStream, ct);
+                            receivedPayloadBytes = claim.SizeBytes;
+                            uploadDurationMilliseconds = Math.Max(0, qsp2UploadStopwatch.ElapsedMilliseconds);
                         }
                         catch (CryptographicException)
                         {
@@ -1133,14 +1126,14 @@ public sealed class LocalAgentApiHostedService(
                         }
                         catch (InvalidDataException exception)
                         {
+                            if (qsp2ValidationFailure is not null)
+                                return qsp2ValidationFailure;
                             await ReportPrivateValidationFailureAsync("private_document_integrity_failed",
                                 "The file did not pass its authenticated integrity check.");
                             return Results.UnprocessableEntity(new { code = "local_upload_integrity_mismatch", message = exception.Message });
                         }
                         finally
                         {
-                            if (stagingPath is not null)
-                                await localQueueStore.ErasePrivateUploadStagingFileAsync(stagingPath);
                             if (dataKey is not null) CryptographicOperations.ZeroMemory(dataKey);
                         }
                     }
