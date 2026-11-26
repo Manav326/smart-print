@@ -959,3 +959,6 @@ export function formatUiCurrency(value: number, localeValue: unknown, currency =
     "No selected printer is ready right now. This file stays in its order; reconnect a Windows computer or select another ready queue in Printers. You do not need to upload the file again.": "Abhi koi selected printer ready nahi hai. File order mein safe hai; Windows computer reconnect karein ya Printers mein doosri ready queue choose karein. File dobara upload nahi karni.",
     "Assign one before dispatch": "Dispatch se pehle printer assign karein",
     "Windows queue ready · shop computer online": "Windows queue ready · shop computer online",
+
+  }
+};
