@@ -37,6 +37,12 @@ public static class VirtualPrinterTestGrantEndpoints
                 }).ToListAsync(ct);
 
             var printerIds = queues.Select(item => item.Id).ToArray();
+            var agentIds = queues.Where(item => item.AgentDeviceId.HasValue)
+                .Select(item => item.AgentDeviceId!.Value).Distinct().ToArray();
+            var agentSnapshots = await db.AgentDevices.AsNoTracking()
+                .Where(agent => agentIds.Contains(agent.Id))
+                .Select(agent => new { agent.Id, agent.Status, agent.RevokedUtc, agent.LastSeenUtc })
+                .ToDictionaryAsync(agent => agent.Id, ct);
             var grants = await db.VirtualPrinterTestGrants.AsNoTracking()
                 .Where(item => printerIds.Contains(item.PrinterDeviceId))
                 .OrderByDescending(item => item.CreatedUtc)
@@ -69,6 +75,13 @@ public static class VirtualPrinterTestGrantEndpoints
                 queue.Status,
                 queue.LastSeenUtc,
                 queue.IsActive,
+                AgentOnline = queue.AgentDeviceId is Guid pairedAgentId &&
+                    agentSnapshots.TryGetValue(pairedAgentId, out var agentSnapshot) &&
+                    agentSnapshot.RevokedUtc is null && agentSnapshot.Status == "Online" &&
+                    agentSnapshot.LastSeenUtc != null && agentSnapshot.LastSeenUtc >= now - VirtualPrinterTestGrantPolicy.MaximumInventoryAge,
+                AgentLastSeenUtc = queue.AgentDeviceId is Guid lastSeenAgentId &&
+                    agentSnapshots.TryGetValue(lastSeenAgentId, out var lastSeenAgent)
+                        ? lastSeenAgent.LastSeenUtc : null,
                 Grants = grants.Where(grant =>
                     grant.TenantId == queue.TenantId && grant.PrinterDeviceId == queue.Id)
                     .Select(grant => new
