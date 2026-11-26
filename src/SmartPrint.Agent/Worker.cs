@@ -147,35 +147,37 @@ public sealed class Worker(
                         !string.Equals(stagedEntry.Sha256, ticket.Sha256, StringComparison.OrdinalIgnoreCase))
                         throw new InvalidDataException("The protected local copy does not match the pending private relay.");
 
+                    DocumentAnalysis stagedAnalysis;
                     using (var stagedDocument = localQueueStore.OpenDocumentReadStream(
                         ticket.PrintJobId, credentials.AgentDeviceId))
                     {
-                        var stagedAnalysis = DocumentAnalyzer.Analyse(stagedDocument, ticket.FileExtension, ticket.PrintKind == "PHOTO");
-                        if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
-                            !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
-                            throw new InvalidDataException("The protected local copy no longer matches the original file type.");
+                        stagedAnalysis = DocumentAnalyzer.Analyse(
+                            stagedDocument, ticket.FileExtension, ticket.PrintKind == "PHOTO");
+                    }
+                    if (!string.Equals(stagedAnalysis.Extension, ticket.FileExtension, StringComparison.OrdinalIgnoreCase) ||
+                        !string.Equals(stagedAnalysis.MediaType, ticket.MediaType, StringComparison.OrdinalIgnoreCase))
+                        throw new InvalidDataException("The protected local copy no longer matches the original file type.");
 
-                        using var stagedCompletion = await SendAgentRequestAsync(
-                            client, credentials,
-                            $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
-                            new LocalPrintUploadCompletionRequest(
-                                stagedAnalysis.PageCount, stagedAnalysis.PageSizesJson, stagedAnalysis.Extension,
-                                stagedAnalysis.MediaType, ticket.SizeBytes, ticket.Sha256),
-                            cancellationToken);
-                        if (!stagedCompletion.IsSuccessStatusCode)
+                    using var stagedCompletion = await SendAgentRequestAsync(
+                        client, credentials,
+                        $"api/v1/agent/private-relays/{ticket.TicketId:D}/complete",
+                        new LocalPrintUploadCompletionRequest(
+                            stagedAnalysis.PageCount, stagedAnalysis.PageSizesJson, stagedAnalysis.Extension,
+                            stagedAnalysis.MediaType, ticket.SizeBytes, ticket.Sha256),
+                        cancellationToken);
+                    if (!stagedCompletion.IsSuccessStatusCode)
+                    {
+                        if (!await RejectPermanentPrivateRelayCompletionAsync(
+                                client, credentials, ticket, stagedCompletion, cancellationToken))
                         {
-                            if (!await RejectPermanentPrivateRelayCompletionAsync(
-                                    client, credentials, ticket, stagedCompletion, cancellationToken))
-                            {
-                                logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; its existing protected local copy is retained for acknowledgement retry.", ticket.JobNumber, (int)stagedCompletion.StatusCode);
-                                retryableFailure = true;
-                            }
+                            logger.LogWarning("Private relay completion for {JobNumber} returned HTTP {StatusCode}; its existing protected local copy is retained for acknowledgement retry.", ticket.JobNumber, (int)stagedCompletion.StatusCode);
+                            retryableFailure = true;
                         }
-                        else
-                        {
-                            await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
-                            logger.LogInformation("Private relay {JobNumber} was confirmed using its existing protected local copy; no second payload download was needed.", ticket.JobNumber);
-                        }
+                    }
+                    else
+                    {
+                        await localQueueStore.MarkLocalUploadFinalizedAsync(ticket.PrintJobId, cancellationToken);
+                        logger.LogInformation("Private relay {JobNumber} was confirmed using its existing protected local copy; no second payload download was needed.", ticket.JobNumber);
                     }
                     continue;
                 }
