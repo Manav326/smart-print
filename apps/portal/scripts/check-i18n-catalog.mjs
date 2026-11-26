@@ -45,7 +45,7 @@ function placeholders(value) {
 const catalogs = {
   english: readCatalog("English", "const english = {", "} as const;"),
   hindi: readCatalog("Hindi", "const hindi:", ";\n\nconst hinglish"),
-  hinglish: readCatalog("Hinglish", "const hinglish:", ";\n\nexport const UI_LOCALE_OPTIONS"),
+  hinglish: readCatalog("Hinglish", "const hinglish:", ";\n\nconst uiCatalogs"),
 };
 const baseKeys = [...catalogs.english.keys()];
 for (const [locale, catalog] of Object.entries(catalogs)) {
