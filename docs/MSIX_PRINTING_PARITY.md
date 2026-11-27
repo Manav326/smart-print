@@ -43,11 +43,11 @@ The Agent appsettings.json is generated before packaging because MSIX contents a
 
 ## Website EXE and Store MSIX coexistence/migration
 
-The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They intentionally use the same Windows service name (`QRtoPrintSmartPrintAgent`), TCP port 17842, named pipe and machine-wide `%ProgramData%\\QRtoPrint` data. Installing both at once risks a service-registration collision and competing Agent instances.
+The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They intentionally use the same Windows service name (`QRtoPrintSmartPrintAgent`), TCP port 17842, named pipe and machine-wide `%ProgramData%\QRtoPrint` data. Installing both at once risks a service-registration collision and competing Agent instances.
 
 Switching distribution must be performed in this order:
 1. Uninstall the currently installed Windows distribution first.
-2. Confirm its uninstaller removed the Agent service but retained `%ProgramData%\\QRtoPrint`.
+2. Confirm its uninstaller removed the Agent service but retained `%ProgramData%\QRtoPrint`.
 3. Install the other distribution.
 4. Verify the same machine identity, enrollment, paired devices and queued jobs remain available.
 
