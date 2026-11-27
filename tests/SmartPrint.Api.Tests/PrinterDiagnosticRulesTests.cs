@@ -39,8 +39,9 @@ public sealed class PrinterDiagnosticRulesTests
     }
 
     [Theory]
-    [InlineData("""{"color":true,"colorStatus":"unknown","duplex":true,"duplexStatus":"supported"}""", "Mono", false, 1)]
+    [InlineData("""{"color":true,"colorStatus":"unknown","duplex":true,"duplexStatus":"supported"}""", "Mono", true, 2)]
     [InlineData("""{"color":true,"colorStatus":"supported","duplex":true,"duplexStatus":"unknown"}""", "Colour", false, 1)]
+    [InlineData("""{"color":true,"colorStatus":"unknown","duplex":true,"duplexStatus":"unknown"}""", "Mono", false, 1)]
     [InlineData("""{"color":false,"colorStatus":"unsupported","duplex":false,"duplexStatus":"unsupported"}""", "Mono", false, 1)]
     public void DoesNotPromoteUnknownOrUnsupportedCapabilities(
         string json, string colourMode, bool duplex, int pageCount)
