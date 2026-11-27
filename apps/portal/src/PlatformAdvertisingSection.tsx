@@ -276,7 +276,7 @@ export default function PlatformAdvertisingSection({ tokens }: { tokens: AuthTok
                 <option value="FILES">{t("Customer My Files · Card")}</option>
                 <option value="SHOP_OVERVIEW">{t("Shop owner workspace · Overview")}</option>
               </select>
-              <small>{formats[draft.placement].dimensions}</small>
+              <small>{t(formats[draft.placement].dimensions)}</small>
             </label>
             <div className="platform-ad-field full">
               <span>{t("Banner image")}</span>
@@ -284,7 +284,7 @@ export default function PlatformAdvertisingSection({ tokens }: { tokens: AuthTok
                 {draft.creativeUrl && <img src={draft.creativeUrl} alt={t("Selected campaign banner")} />}
                 <div className="platform-ad-upload-copy">
                   <strong>{draft.creativeFileName || t("No image uploaded")}</strong>
-                  <small>{t("JPG, PNG or WebP · maximum 3 MB")} · {formats[draft.placement].dimensions}</small>
+                  <small>{t("JPG, PNG or WebP · maximum 3 MB")} · {t(formats[draft.placement].dimensions)}</small>
                 </div>
                 <label className="secondary-button">
                   <Upload size={13} /> {uploading ? t("Uploading…") : t("Choose image")}
