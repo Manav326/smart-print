@@ -226,6 +226,7 @@ public sealed class TenantEntitlementService(SmartPrintDbContext db)
         var periodEnd = periodStart.AddMonths(1);
         var createdJobs = await db.PrintJobs.AsNoTracking().LongCountAsync(
             item => item.TenantId == tenantId &&
+                    item.Origin != "PRINTER_DIAGNOSTIC" &&
                     item.CreatedUtc >= periodStart &&
                     item.CreatedUtc < periodEnd,
             cancellationToken);
