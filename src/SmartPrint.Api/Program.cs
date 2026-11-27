@@ -12556,7 +12556,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
 
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
     var canRefreshExpiredQuote = savedQuoteExpired &&
-        (job.Status is "AWAITING_CUSTOMER_APPROVAL" or "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED");
+        (job.Status is "QUOTE_EXPIRED" or "AWAITING_CUSTOMER_APPROVAL" or "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED");
     var previousQuotedAmountMinor = job.QuotedAmountMinor;
     if (canRefreshExpiredQuote)
     {
