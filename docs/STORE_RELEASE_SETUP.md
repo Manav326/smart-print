@@ -160,7 +160,7 @@ Create/associate a Microsoft Entra ID app with the Partner Center account and gr
 | `MICROSOFT_STORE_CLIENT_ID` | Variable | Entra application/client ID |
 | `MICROSOFT_STORE_CLIENT_SECRET` | Secret | Entra client-secret **value** (not secret ID) |
 
-The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission.
+The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission. Before it changes the package, it also verifies that Partner Center declares `dependsOnDriversOrNT=true` and has a required public HTTPS privacy-policy URL. It stops without changing the package if either declaration is missing.
 
 ### G. Google Play Console (one-time manual setup)
 
