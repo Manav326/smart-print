@@ -122,7 +122,7 @@ internal object AndroidCustomerLocale {
         "Connect to shop Wi-Fi" to "शॉप के वाई-फ़ाई से जुड़ें",
         "Payment QR saved to your device." to "पेमेंट QR आपके डिवाइस में सेव हो गया।",
         "Could not share this document." to "यह दस्तावेज़ शेयर नहीं हो सका।",
-        "No app is available to open this link." to "इस लिंक को खोलने के लिए कोई ऐप उपलब्ध नहीं है।"
+        "No app is available to open this link." to "इस लिंक को खोलने के लिए कोई ऐप उपलब्ध नहीं है।",
         "Add folders" to "फ़ोल्डर जोड़ें", "Add photos of your ID" to "अपने ID की फ़ोटो जोड़ें",
         "Browse phone" to "फ़ोन ब्राउज़ करें", "Cancel scan" to "स्कैन रद्द करें",
         "Choose from SmartPrint My Files" to "SmartPrint मेरी फ़ाइलों से चुनें",
