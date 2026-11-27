@@ -96,10 +96,21 @@ if ($null -eq $root) {
     throw "WACK did not produce a complete XML report at '$report' within $ReportWaitSeconds seconds (exit code $wackExitCode).$htmlHint"
 }
 
+if (
+    -not $root.HasAttribute("PARTIAL_RUN") -or
+    -not $root.HasAttribute("LATEST_VERSION") -or
+    [string]::IsNullOrWhiteSpace($root.GetAttribute("VALIDATION_TYPE"))
+) {
+    throw "WACK report is missing the completion, kit-freshness or validation-type metadata required for Store review."
+}
+if ($root.GetAttribute("PARTIAL_RUN") -eq "TRUE") {
+    throw "WACK marked this as a partial run. Complete all tests and rerun before Store submission."
+}
+
 $result = $root.GetAttribute("OVERALL_RESULT")
 $appName = $root.GetAttribute("APP_NAME")
 $appVersion = $root.GetAttribute("APP_VERSION")
-$kitIsLatest = -not ($root.HasAttribute("LATEST_VERSION") -and $root.GetAttribute("LATEST_VERSION") -eq "FALSE")
+$kitIsLatest = ($root.GetAttribute("LATEST_VERSION") -ne "FALSE")
 $nonPassingTests = @(
     foreach ($test in $root.SelectNodes("REQUIREMENTS/REQUIREMENT/TEST")) {
         $resultNode = $test.SelectSingleNode("RESULT")
