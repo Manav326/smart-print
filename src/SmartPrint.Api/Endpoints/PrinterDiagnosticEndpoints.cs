@@ -500,13 +500,6 @@ public static class PrinterDiagnosticEndpoints
                 });
             }
 
-            if (decision == "NOTHING_PRINTED" && !virtualOutput && blockedBeforeSubmission == false &&
-                !verifiedSpoolerAbsence)
-            {
-                await transaction.RollbackAsync(ct);
-                return Results.Conflict(new { code = "diagnostic_no_output_not_verified", message = "There is no verified no-output observation for this physical test." });
-            }
-
             if (decision == "NO_OUTPUT_RECEIVED" &&
                 (!virtualOutput || !verifiedSpoolerAbsence))
             {
