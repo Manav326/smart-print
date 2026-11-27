@@ -2376,6 +2376,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Cloud → Shop Agent": "क्लाउड → शॉप Agent",
     "Phone → Shop Agent": "फ़ोन → शॉप Agent",
     "GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {days} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.": "GB में दशमलव इकाइयाँ उपयोग होती हैं (1 GB = 1,000,000,000 बाइट)। पेलोड बाइट मूल दस्तावेज़ की सामग्री दर्शाते हैं। Cloud egress API response body में लिखे बाइट मापता है, Agent द्वारा प्राप्ति की पुष्टि नहीं। समय में API/Agent प्रोसेसिंग और response लिखना शामिल है; यह नेटवर्क लेटेंसी, बैंडविड्थ या थ्रूपुट टेस्ट नहीं है। HTTP/multipart headers और TLS overhead शामिल नहीं हैं; provider द्वारा बिल किए गए ट्रैफ़िक का मिलान infrastructure या proxy metrics से करें। कच्चे ट्रांसफ़र इवेंट {days} दिनों तक रखे जाते हैं, फिर दैनिक सारांश में समेटे जाते हैं। डैशबोर्ड उन रास्तों का अनुमान नहीं लगाता जिनकी माप व्यवस्था नहीं है।",
+    "there": "आप",
   },  hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
     "Your print shop": "Aapki print shop",
@@ -4378,6 +4379,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Cloud → Shop Agent": "Cloud → Shop Agent",
     "Phone → Shop Agent": "Phone → Shop Agent",
     "GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {days} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.": "GB decimal units use karta hai (1 GB = 1,000,000,000 bytes). Payload bytes original document content dikhate hain. Cloud egress API response body mein likhe bytes measure karta hai, Agent acknowledgement nahi. Time mein API/Agent processing aur response writes shamil hain; yeh network latency, bandwidth ya throughput test nahi hai. HTTP/multipart headers aur TLS overhead include nahi hote; provider-billed traffic ko infrastructure ya proxy metrics se reconcile karein. Raw transfer events {days} din rakhe jaate hain, phir daily aggregates mein fold hote hain. Dashboard un paths ka estimate nahi karta jo instrumented nahi hain.",
+    "there": "aap",
   },
 };
 
