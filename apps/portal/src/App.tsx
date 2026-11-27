@@ -6454,6 +6454,31 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     !entry.excluded&&!!entry.quote&&quoteExpiredForBatchItem(entry.item)&&
     shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))
   );
+  const expiredQuoteRefreshKey=quoteRows
+    .filter(entry=>{
+      const status=statusForBatchItem(entry.item);
+      return !entry.excluded&&
+        quoteExpiredForBatchItem(entry.item)&&
+        ["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)&&
+        !shouldBlockQuoteRefreshForStatus(status);
+    })
+    .map(entry=>entry.item.job.id)
+    .sort()
+    .join("|");
+  const automaticQuoteRefreshAttemptRef=useRef("");
+  useEffect(()=>{
+    if(!expiredQuoteRefreshKey){
+      automaticQuoteRefreshAttemptRef.current="";
+      return;
+    }
+    if(busy||batchLockedForPayment||hasAcceptedQuoteLocked||
+      automaticQuoteRefreshAttemptRef.current===expiredQuoteRefreshKey)return;
+    // Renew an expired quote in the background. The API preserves the current
+    // approval stage when the price is unchanged and requires fresh acceptance
+    // when it changes; payment creation remains a separate customer action.
+    automaticQuoteRefreshAttemptRef.current=expiredQuoteRefreshKey;
+    void getQuote();
+  },[expiredQuoteRefreshKey,busy,batchLockedForPayment,hasAcceptedQuoteLocked]);
   const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
     ?money(batchQuoteTotal,batchQuoteCurrency)
     :batchQuoteNeedsRefresh>0||hasAcceptedQuoteLocked?"—"
