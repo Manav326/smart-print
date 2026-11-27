@@ -142,7 +142,10 @@ test("one accessible theme control is available to all application route familie
   const adminAuth = read("../src/PlatformAdminAuthScreen.tsx");
   const admin = read("../src/PlatformAdminConsole.tsx");
 
-  assert.match(toggle, /aria-label=\{dark \? "Switch to light theme" : "Switch to dark theme"\}/);
+  assert.match(toggle, /useLocale/);
+  assert.match(toggle, /translateUiText\(locale, dark \? "Switch to light theme" : "Switch to dark theme"\)/);
+  assert.match(toggle, /aria-label=\{label\}/);
+  assert.match(toggle, /title=\{label\}/);
   assert.match(app, /<PublicLandingPage dark=\{dark\} onToggleTheme=\{toggleTheme\}/);
   assert.match(app, /<CustomerEntry publicCode=\{route\.publicCode\} dark=\{dark\}/);
   assert.match(app, /<ShopConsole tokens=\{tokens\} onSignOut=\{onShopSignOut\} dark=\{dark\}/);
