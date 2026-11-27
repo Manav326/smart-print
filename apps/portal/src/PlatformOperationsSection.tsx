@@ -126,7 +126,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
       <label className="platform-ops-reason"><span>{t("Approval / revocation reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Reason required for the audit history")}/></label>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="inline-success" role="status">{success}</div>}
-      {loading ? <div className="platform-plan-empty">Loading discovered virtual queues…</div> : queues.length === 0
+      {loading ? <div className="platform-plan-empty">{t("Loading discovered virtual queues…")}</div> : queues.length === 0
         ? <div className="platform-plan-empty">{t("No unsupported virtual Windows queues are currently discovered.")}</div>
         : <div className="platform-ops-history-list">
             {queues.map(queue => {
@@ -238,9 +238,9 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
             <div className="platform-ops-grid">
               {fields.map(field => (
                 <label className="platform-ops-field" key={field.key}>
-                  <span><strong>{field.label}</strong><small>{field.hint}</small></span>
+                  <span><strong>{field.label}</strong><small>{t(field.hint)}</small></span>
                   <input type="number" min={field.min} max={field.max} step={1} disabled={field.locked} value={draft[field.key]}
-                    onChange={event => updateNumber(field.key, event.target.value)} aria-label={field.label}/>
+                    onChange={event => updateNumber(field.key, event.target.value)} aria-label={t(field.label)}/>
                 </label>
               ))}
             </div>
