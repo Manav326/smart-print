@@ -8744,6 +8744,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
             }
             if (updated) await db.SaveChangesAsync(ct);
         }
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
         return Results.Ok(new { job.Id, job.Status, job.FailureCode, job.OutputType, DuplicateRequest = true });
     }
     if (job.Status is not ("PRINT_SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING") || job.ClaimedByAgentDeviceId != device.Id)
