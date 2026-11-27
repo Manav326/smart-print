@@ -54,6 +54,7 @@ jobs:
     timeout-minutes: 45
     env:
       SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://example.invalid' }}
+      WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
       MSIX_PACKAGE_NAME: ${{ inputs.package_name || 'SmartPrint.Test' }}
       MSIX_PUBLISHER: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
       MSIX_APP_DISPLAY_NAME: ${{ inputs.app_display_name || 'Smart Print' }}
@@ -103,6 +104,25 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
           Copy-Item -LiteralPath $nativeExe -Destination artifacts/desktop/SmartPrint.Desktop.exe
           Get-ChildItem -LiteralPath "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File | Copy-Item -Destination artifacts/desktop -Force
+      - name: Download and verify Microsoft-signed Evergreen WebView2 runtime
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WEBVIEW2_STANDALONE_X64_URL)) {
+            throw "Repository variable WEBVIEW2_STANDALONE_X64_URL is required to preserve the existing WebView2 prerequisite behavior in MSIX."
+          }
+          $runtimeUri = [Uri]$env:WEBVIEW2_STANDALONE_X64_URL
+          if (-not $runtimeUri.IsAbsoluteUri -or $runtimeUri.Scheme -ne "https" -or $runtimeUri.UserInfo) {
+            throw "WEBVIEW2_STANDALONE_X64_URL must be an absolute HTTPS URL without embedded credentials."
+          }
+          $runtimePath = "artifacts/desktop/MicrosoftEdgeWebView2RuntimeInstallerX64.exe"
+          Invoke-WebRequest -Uri $runtimeUri -OutFile $runtimePath -MaximumRedirection 5
+          $runtime = Get-Item -LiteralPath $runtimePath
+          if ($runtime.Length -lt 50MB) { throw "Downloaded WebView2 standalone runtime is unexpectedly small ($($runtime.Length) bytes)." }
+          $signature = Get-AuthenticodeSignature -LiteralPath $runtimePath
+          if ($signature.Status -ne [System.Management.Automation.SignatureStatus]::Valid -or $signature.SignerCertificate.Subject -notmatch "Microsoft") {
+            throw "WebView2 standalone runtime is not validly signed by Microsoft."
+          }
+          Write-Host "Verified Microsoft-signed Evergreen WebView2 runtime ($([math]::Round($runtime.Length / 1MB, 1)) MiB)."
       - name: Publish the existing Windows Agent unchanged
         shell: pwsh
         run: |
