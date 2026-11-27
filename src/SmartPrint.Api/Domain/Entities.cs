@@ -384,6 +384,26 @@ public sealed class PrintDocument
     public DateTimeOffset? PurgedUtc { get; set; }
 }
 
+/// <summary>
+/// Audit record for an owner-initiated printer diagnostic. The linked PrintJob and
+/// PrintDocument carry execution only; this record never represents a paid order.
+/// </summary>
+public sealed class PrinterDiagnosticAttempt
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrinterDeviceId { get; set; }
+    public Guid AgentDeviceId { get; set; }
+    public Guid PrintJobId { get; set; }
+    public string TemplateVersion { get; set; } = "SP-DIAG-1";
+    public string CapabilitiesJson { get; set; } = "{}";
+    public string? OwnerDecision { get; set; }
+    public string? OwnerNotes { get; set; }
+    public Guid? ConfirmedByUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset? ConfirmedUtc { get; set; }
+}
+
 public sealed class LocalPrintUploadTicket
 {
     public Guid Id { get; set; } = Guid.NewGuid();
