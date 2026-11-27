@@ -777,7 +777,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, dp(4), 0, 0)
             }
             brandMeta.addView(TextView(this@MainActivity).apply {
-                text = "by"
+                text = AndroidCustomerLocale.translate(this@MainActivity, "by")
                 textSize = 9f
                 setTextColor(getColor(R.color.qp_muted))
                 includeFontPadding = false
@@ -4262,7 +4262,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addPrivateSecurityWatermark(container: FrameLayout) {
         val securityMark = TextView(this).apply {
-            text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
+            text = AndroidCustomerLocale.translate(this@MainActivity, "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")
             textSize = 9f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             letterSpacing = 0.12f
