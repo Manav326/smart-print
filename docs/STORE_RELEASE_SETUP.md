@@ -123,7 +123,7 @@ SmartPrint's current public privacy-policy page is `https://smartprint.quantaedg
 
 Set the Partner Center Properties fields `isPrivacyPolicyRequired=true` and `privacyPolicyUrl=https://smartprint.quantaedge.in/privacy-policy/`. The publisher preflight performs an unauthenticated HTTPS GET and checks that the listing metadata has the service disclosure described above. If the actual production privacy practices change, update the policy before submission rather than bypassing the preflight.
 
-### E. Android upload signing
+### F. Android upload signing
 
 The release build already expects the existing Android upload keystore and signing values. Confirm these four GitHub repository Actions secrets exist and correspond to the same keystore used for prior Android releases:
 
@@ -142,7 +142,7 @@ Add this optional GitHub repository Actions variable if the app already has Play
 
 Never generate a new upload key for a later release. Keep a secure offline backup of the keystore and passwords. If the existing key is lost, stop and plan Google's upload-key reset process rather than silently replacing it.
 
-### F. Microsoft Partner Center (one-time manual setup)
+### G. Microsoft Partner Center (one-time manual setup)
 
 The Microsoft Store Submission API cannot create the first product or perform the initial submission. Complete these actions once in [Partner Center](https://partner.microsoft.com/dashboard):
 
@@ -176,7 +176,7 @@ The publishing script patches only the existing X64 package, commits the package
 
 **Configuration audit (27 November 2026):** the latest published release, `v0.1.102`, contains `SmartPrint-Windows-Setup.exe` but not `SmartPrint-Windows-Store-Setup.exe`. The release run skipped the signed Store installer because these were empty: `WINDOWS_CODESIGN_PFX_BASE64`, `WINDOWS_CODESIGN_PFX_PASSWORD`, `WEBVIEW2_STANDALONE_X64_URL`, and `SMARTPRINT_WINDOWS_PUBLISHER`. The release log also showed `PUBLIC_DOWNLOAD_BASE_URL`, `CLOUDFLARE_R2_ACCOUNT_ID`, and `CLOUDFLARE_R2_BUCKET` unset. The Store publication workflow additionally requires R2 credentials and the Partner Center product, seller, Entra tenant/client IDs and client secret. Until these are configured in GitHub Actions/Environment settings, the existing service-preserving Store EXE route cannot produce or submit its signed installer. Never paste the PFX or Entra client secret into chat.
 
-### G. Google Play Console (one-time manual setup)
+### H. Google Play Console (one-time manual setup)
 
 1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
 2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually through Play Console. The publishing action cannot create the package entry; use the same upload keystore that will be configured in GitHub Actions.
