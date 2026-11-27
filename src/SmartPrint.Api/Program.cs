@@ -8723,14 +8723,19 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
                 // Only an Agent lookup that proves the submitted spooler entry is absent
                 // may replace a last-known RETAINED observation.
                 var verifiedAtUtc = DateTimeOffset.UtcNow;
-                job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-                job.SpoolerObservedUtc = verifiedAtUtc;
-                job.FailureCode = reason;
                 var progress = SpoolerOutputConfirmationPolicy.MergePageProgress(
                     job.SpoolerPagesPrinted, job.SpoolerTotalPages,
                     request.PagesPrinted, request.TotalPages);
                 job.SpoolerPagesPrinted = progress.PagesPrinted;
                 job.SpoolerTotalPages = progress.TotalPages;
+                // Repeated queue-absence reports must preserve a prior complete
+                // PRINTED observation just like the first report does below.
+                if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+                        job.SpoolerStatus, "OUTPUT_UNCONFIRMED",
+                        progress.PagesPrinted, progress.TotalPages))
+                    job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+                job.SpoolerObservedUtc = verifiedAtUtc;
+                job.FailureCode = reason;
                 job.UpdatedUtc = verifiedAtUtc;
                 updated = true;
             }
