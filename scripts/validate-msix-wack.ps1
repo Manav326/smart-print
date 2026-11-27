@@ -111,8 +111,12 @@ $result = $root.GetAttribute("OVERALL_RESULT")
 $appName = $root.GetAttribute("APP_NAME")
 $appVersion = $root.GetAttribute("APP_VERSION")
 $kitIsLatest = ($root.GetAttribute("LATEST_VERSION") -ne "FALSE")
+$allWackTests = @($root.SelectNodes("REQUIREMENTS/REQUIREMENT/TEST"))
+if ($allWackTests.Count -eq 0) {
+    throw "WACK report contains no test results. It is not valid evidence for Store submission."
+}
 $nonPassingTests = @(
-    foreach ($test in $root.SelectNodes("REQUIREMENTS/REQUIREMENT/TEST")) {
+    foreach ($test in $allWackTests) {
         $resultNode = $test.SelectSingleNode("RESULT")
         $testResult = if ($null -ne $resultNode) { $resultNode.InnerText.Trim() } else { "" }
         if ($testResult -eq "PASS") { continue }
