@@ -148,7 +148,7 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
             app.MapGroup("/api/v1/shop").MapPrinterDiagnosticEndpoints();
             await app.StartAsync();
 
-            var endpoints = app.DataSources
+            var endpoints = ((IEndpointRouteBuilder)app).DataSources
                 .SelectMany(source => source.Endpoints)
                 .OfType<RouteEndpoint>()
                 .ToArray();
