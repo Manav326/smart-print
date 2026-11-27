@@ -59,12 +59,23 @@ function Invoke-NativeTool {
         if (-not $process.Start()) { throw "Could not start $Operation." }
         $stdoutTask = $process.StandardOutput.ReadToEndAsync()
         $stderrTask = $process.StandardError.ReadToEndAsync()
-        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
-            try { $process.Kill($true) } catch { try { $process.Kill() } catch { } }
-            $process.WaitForExit()
-            throw "$Operation exceeded its $TimeoutSeconds-second timeout and was terminated."
+        $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+        $completed = $false
+        while (-not $completed) {
+            $remainingMilliseconds = ($TimeoutSeconds * 1000) - [int]$stopwatch.ElapsedMilliseconds
+            if ($remainingMilliseconds -le 0) {
+                try { $process.Kill($true) } catch { try { $process.Kill() } catch { } }
+                $process.WaitForExit()
+                throw "$Operation exceeded its $TimeoutSeconds-second timeout and was terminated."
+            }
+            $waitMilliseconds = [Math]::Min(30000, $remainingMilliseconds)
+            $completed = $process.WaitForExit($waitMilliseconds)
+            if (-not $completed) {
+                Write-Host "RUNNING: $Operation (elapsed $([int]$stopwatch.Elapsed.TotalSeconds)s / timeout ${TimeoutSeconds}s)"
+            }
         }
         $process.WaitForExit()
+        $stopwatch.Stop()
         $stdout = $stdoutTask.GetAwaiter().GetResult()
         $stderr = $stderrTask.GetAwaiter().GetResult()
         if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-Host $stdout.TrimEnd() }
