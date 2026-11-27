@@ -154,7 +154,7 @@ jobs:
             $localStatusBody = $localStatus.Content | ConvertFrom-Json
           }
           if ($localStatusBody.readiness.queueInitialized -ne $true) { throw "The LocalService Agent could not initialize its protected machine-wide print queue." }
-          $queueRoot = Join-Path $env:ProgramData "QRtoPrint\\LocalQueue"
+          $queueRoot = Join-Path $env:ProgramData "QRtoPrint\LocalQueue"
           if (-not (Test-Path -LiteralPath $queueRoot -PathType Container)) { throw "The protected LocalService print queue directory was not created." }
           $queueAcl = Get-Acl -LiteralPath $queueRoot
           $localServiceAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "LOCAL SERVICE" -and $_.FileSystemRights.ToString() -match "FullControl" })
@@ -162,7 +162,7 @@ jobs:
           if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0) { throw "The protected queue ACL does not grant FullControl only to its required service/system principals." }
 
           $package = Get-AppxPackage -Name "SmartPrint.Test"
-          $agentPath = Join-Path $package.InstallLocation "Agent\\SmartPrint.Agent.exe"
+          $agentPath = Join-Path $package.InstallLocation "Agent\SmartPrint.Agent.exe"
           $firewallMatches = foreach ($rule in Get-NetFirewallRule -Direction Inbound -Enabled True) {
             $appFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
             $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
@@ -173,8 +173,8 @@ jobs:
 
           $webView2Guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
           $webView2Paths = @(
-            "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\$webView2Guid",
-            "HKCU:\\Software\\Microsoft\\EdgeUpdate\\Clients\\$webView2Guid"
+            "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$webView2Guid",
+            "HKCU:\Software\Microsoft\EdgeUpdate\Clients\$webView2Guid"
           )
           $webView2Versions = foreach ($path in $webView2Paths) {
             try { (Get-ItemProperty -LiteralPath $path -Name "pv" -ErrorAction Stop).pv } catch { }
