@@ -14,7 +14,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its service in
 |---|---|
 | Agent lifecycle | Windows registers QRtoPrintSmartPrintAgent as an automatic packaged service under LocalService; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
 | Desktop IPC | Existing named-pipe status, enrollment and network-selection operations remain available to the desktop UI. |
-| Local API | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary. |
+| Local API / phone-to-printer | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary. The packaged CORS allow-list contains the exact customer portal origin supplied by `SMARTPRINT_PUBLIC_BASE_URL` plus `http://tauri.localhost`; it does not use a wildcard or the development `localhost:3000` origin. The package builder verifies these settings after unpacking the signed MSIX. |
 | LAN | Package declares private-network access and an inbound all-profile firewall exception for the Agent on TCP 17842. Agent-side selected-interface/subnet validation remains authoritative and must be tested on Private, Public and Domain profiles. |
 | Printer discovery | Same WindowsPrinterDiscovery and Windows spooler integration are used. |
 | Printing | Same queue, worker, PDF rendering and print executor are used; no alternate print implementation is introduced. |
@@ -39,7 +39,7 @@ The desktop app is a full-trust Win32 process, not an AppContainer app. Microsof
 
 The package minimum OS is Windows 10 version 2004 (build 19041), matching packaged-service support. This minimum version does not, by itself, guarantee that WebView2 is present on every Windows edition or managed device.
 
-The Agent appsettings.json is generated before packaging because MSIX contents are immutable. The API origin is embedded from release build configuration; no post-install edit to the package directory is attempted.
+The Agent appsettings.json is generated before packaging because MSIX contents are immutable. The API base URL and customer portal CORS origin are both embedded from `SMARTPRINT_PUBLIC_BASE_URL`, matching the existing website installer configuration; the Tauri origin is added separately. No post-install edit to the package directory is attempted.
 
 ## Website EXE and Store MSIX coexistence/migration
 
