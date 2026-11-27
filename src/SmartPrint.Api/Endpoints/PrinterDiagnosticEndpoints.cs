@@ -139,6 +139,17 @@ public static class PrinterDiagnosticEndpoints
                 return Results.NotFound();
             }
 
+            // Serialize starts across every printer belonging to this tenant so
+            // the shop-wide daily diagnostic cap cannot be exceeded concurrently.
+            var lockedTenants = await db.Tenants.FromSqlInterpolated(
+                $"SELECT * FROM \"Tenants\" WHERE \"Id\" = {tenantId} FOR UPDATE")
+                .ToListAsync(ct);
+            if (lockedTenants.Count == 0)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.NotFound();
+            }
+
             var now = DateTimeOffset.UtcNow;
             var readinessFailure = await ValidatePrinterReadyAsync(
                 db, environment, tenantId, printer, now, ct);
