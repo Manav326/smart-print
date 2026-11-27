@@ -1838,7 +1838,7 @@ async function uploadCustomerPrivateRelay(
 
   // A direct Agent claim already owns this ticket. Do not start a cloud relay
   // concurrently; reconcile that same local handoff first to prevent duplicate
-  // queue staging after a lost LAN response.
+  // queue staging after a lost LAN response. This has not started a second encrypted transfer.
   if (existing.state === "PENDING" &&
       (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY")) {
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
