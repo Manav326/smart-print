@@ -16,6 +16,7 @@ on:
       - "src/SmartPrint.Agent/**"
       - "tests/SmartPrint.Agent.Tests/**"
       - "apps/desktop/**"
+      - "apps/portal/public/privacy-policy/index.html"
       - "pnpm-lock.yaml"
       - "docs/MSIX_*.md"
       - "docs/STORE_RELEASE_SETUP.md"
@@ -99,6 +100,23 @@ jobs:
             }
             Write-Host "PowerShell syntax passed: $scriptPath"
           }
+
+      - name: Validate Windows privacy-policy disclosures
+        shell: pwsh
+        run: |
+          $policy = Get-Content -LiteralPath "apps/portal/public/privacy-policy/index.html" -Raw
+          foreach ($requiredDisclosure in @(
+            "Windows desktop and Agent information",
+            "NT AUTHORITY\LocalService",
+            "Wi-Fi network name (SSID)",
+            "TCP port 17842",
+            "machine-level Agent data"
+          )) {
+            if (-not $policy.Contains($requiredDisclosure)) {
+              throw "The public SmartPrint privacy-policy source is missing the Windows disclosure: $requiredDisclosure"
+            }
+          }
+          Write-Host "Windows desktop/Agent privacy disclosures are present in the published policy source."
 
       - name: Validate one canonical Agent service identity across distribution paths
         shell: pwsh
