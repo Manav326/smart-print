@@ -41,6 +41,18 @@ The package minimum OS is Windows 10 version 2004 (build 19041), matching packag
 
 The Agent appsettings.json is generated before packaging because MSIX contents are immutable. The API origin is embedded from release build configuration; no post-install edit to the package directory is attempted.
 
+## Website EXE and Store MSIX coexistence/migration
+
+The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They intentionally use the same Windows service name (`QRtoPrintSmartPrintAgent`), TCP port 17842, named pipe and machine-wide `%ProgramData%\\QRtoPrint` data. Installing both at once risks a service-registration collision and competing Agent instances.
+
+Switching distribution must be performed in this order:
+1. Uninstall the currently installed Windows distribution first.
+2. Confirm its uninstaller removed the Agent service but retained `%ProgramData%\\QRtoPrint`.
+3. Install the other distribution.
+4. Verify the same machine identity, enrollment, paired devices and queued jobs remain available.
+
+The existing website EXE uninstaller intentionally preserves machine data. The MSIX uninstall validation also checks that the package service is removed while machine data remains. However, a full EXE-to-MSIX and MSIX-to-EXE identity/queue migration test on a machine that has actually used the EXE is still required before promising seamless migration. Do not tell customers that both packages can be installed together.
+
 ## Automated validation
 
 .github/workflows/msix-validation.yml builds the desktop app and Agent, packages and signs an ephemeral CI MSIX, installs it, and verifies:
