@@ -119,6 +119,20 @@ if (hinglishTranslatedCount / screenHinglish.size < 0.65) {
   throw new Error("Hinglish screen copy must remain meaningfully translated, not mostly English fallback");
 }
 
+const requiredDynamicScreenCopy = [
+  "Customer app · Home",
+  "Customer app · My Files",
+  "Shop owner · Overview",
+  "640 × 200 px (2× asset for a 320 × 100 display)",
+  "600 × 500 px (2× asset for a 300 × 250 card)",
+  "1456 × 180 px (2× asset for a 728 × 90 display)",
+];
+for (const key of requiredDynamicScreenCopy) {
+  if (!screenHindi.has(key) || !screenHinglish.has(key)) {
+    throw new Error("Missing dynamic UI translation for " + key);
+  }
+}
+
 const localizedScreens = [
   "App.tsx",
   "AuthScreen.tsx",
