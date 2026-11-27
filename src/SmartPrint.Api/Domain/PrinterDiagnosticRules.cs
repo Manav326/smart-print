@@ -91,6 +91,57 @@ public static class PrinterDiagnosticRules
         settings.IsDuplex == duplex &&
         settings.PageCount == pageCount;
 
+    public static bool IsTerminalOutputObservation(
+        string? outputType,
+        string? jobStatus,
+        string? spoolerStatus,
+        DateTimeOffset? spoolerSubmittedUtc,
+        DateTimeOffset? spoolerObservedUtc,
+        string? failureCode,
+        int? spoolerJobId,
+        int pagesPrinted,
+        int totalPages,
+        DateTimeOffset? outputCompletedUtc,
+        DateTimeOffset nowUtc)
+    {
+        var normalizedOutputType = outputType?.Trim();
+        var normalizedJobStatus = jobStatus?.Trim();
+        var normalizedSpoolerStatus = spoolerStatus?.Trim();
+
+        if (normalizedOutputType is not (PrinterTypePolicy.Physical or PrivatePrintingOutputPolicy.TestVirtual))
+            return false;
+
+        // A failure reported before StartDoc is a terminal negative result:
+        // no Windows spooler submission was made.
+        if (string.Equals(normalizedJobStatus, "LOCAL_QUEUE_READY", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(normalizedSpoolerStatus, "BLOCKED_BEFORE_SUBMISSION", StringComparison.OrdinalIgnoreCase) &&
+            spoolerSubmittedUtc is null)
+            return true;
+
+        // The virtual test route records a completed artifact, not physical paper.
+        if (string.Equals(normalizedOutputType, PrivatePrintingOutputPolicy.TestVirtual, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(normalizedJobStatus, "TEST_OUTPUT_READY", StringComparison.OrdinalIgnoreCase) &&
+            outputCompletedUtc is not null &&
+            string.Equals(normalizedSpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (!SpoolerOutputConfirmationPolicy.HasVerifiedAgentSpoolerObservation(
+                normalizedSpoolerStatus,
+                spoolerSubmittedUtc,
+                spoolerObservedUtc,
+                nowUtc,
+                failureCode,
+                spoolerJobId))
+            return false;
+
+        if (string.Equals(normalizedSpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+            return pagesPrinted >= 0 && totalPages >= 0 &&
+                (totalPages == 0 || pagesPrinted >= totalPages);
+
+        return string.Equals(normalizedJobStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(normalizedSpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static bool ReadExplicitBoolean(JsonElement root, string valueName, string statusName) =>
         root.TryGetProperty(valueName, out var value) &&
         value.ValueKind == JsonValueKind.True &&
