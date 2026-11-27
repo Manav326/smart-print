@@ -51,15 +51,16 @@ The canonical public privacy-policy URL has not been confirmed from this reposit
 SmartPrint is a Windows desktop printing application. The packaged background service is required for the print Agent to remain available independently of the desktop window.
 
 Suggested test sequence:
-1. Install the package on a supported Windows desktop using an account permitted to install packages containing a Windows service.
-2. Launch SmartPrint and complete sign-in/pairing using the test credentials supplied privately in Partner Center, if sign-in is required.
-3. Confirm the Agent service is registered and running as NT AUTHORITY\LocalService.
-4. Confirm the desktop reports printer discovery status. If no physical printer is attached to the test machine, use an available Windows virtual printer only to verify that the Windows print subsystem is reachable; this does not establish physical-print parity.
-5. For LAN testing, connect the PC and a paired phone to the same selected shop network, complete the in-app phone connection test, and submit a small test document.
-6. Close the desktop window and confirm the Agent remains running.
-7. Upgrade the package and confirm the service and machine data remain intact.
-8. Uninstall the package and verify the documented machine-data retention behavior.
-9. Run Windows App Certification Kit (WACK) against the exact MSIX in an elevated, active desktop session. The included `scripts/validate-msix-wack.ps1` checks the complete report and package identity/version; retain its XML/HTML reports with the submission evidence.
+1. Ensure the website EXE distribution is not installed side by side. If switching from it, uninstall it first; it shares the same service name and machine data with the MSIX.
+2. Install the package on a supported Windows desktop using an account permitted to install packages containing a Windows service.
+3. Launch SmartPrint and complete sign-in/pairing using the test credentials supplied privately in Partner Center, if sign-in is required.
+4. Confirm the Agent service is registered and running as NT AUTHORITY\LocalService.
+5. Confirm the desktop reports printer discovery status. If no physical printer is attached to the test machine, use an available Windows virtual printer only to verify that the Windows print subsystem is reachable; this does not establish physical-print parity.
+6. For LAN testing, connect the PC and a paired phone to the same selected shop network, complete the in-app phone connection test, and submit a small test document.
+7. Close the desktop window and confirm the Agent remains running.
+8. Upgrade the package and confirm the service and machine data remain intact.
+9. Uninstall the package and verify the documented machine-data retention behavior.
+10. Run Windows App Certification Kit (WACK) against the exact MSIX in an elevated, active desktop session. The included `scripts/validate-msix-wack.ps1` checks the complete report and package identity/version; retain its XML/HTML reports with the submission evidence.
 
 Do not provide production customer credentials. Create a dedicated certification account with minimum required permissions and provide its credentials only in Partner Center's private certification notes.
 
@@ -105,6 +106,7 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] Named-pipe and loopback API integration tests.
 - [ ] Queue persistence and machine-identity continuity tests across upgrade.
 - [ ] Uninstall behavior and customer-data retention/deletion verification.
+- [ ] EXE-to-MSIX and MSIX-to-EXE migration test on a machine with real pairing/identity/queue data; verify both distributions are not installed side by side.
 - [ ] Firewall behavior on Private, Public and Domain network profiles; confirm only the intended shop LAN clients can reach the Agent.
 - [ ] Complete Windows App Certification Kit report for the exact production-identity MSIX, with overall result PASS; retain XML/HTML report.
 - [ ] Physical print tests with USB and network printers, PDF and photo jobs, cancellation, printer offline/reconnect, sleep/resume and queue recovery.
