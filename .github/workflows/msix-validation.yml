@@ -246,9 +246,9 @@ jobs:
           # Record SCM crash-recovery parity without stopping the remaining
           # install/queue/network/uninstall tests. A missing restart action is
           # enforced as a final release gate after all other evidence is collected.
-          $failureActions = (& sc.exe qfailure "QRtoPrint Smart Print Agent" 2>&1 | Out-String)
+          $failureActions = (& sc.exe qfailure "QRtoPrintSmartPrintAgent" 2>&1 | Out-String)
           $failureActionsExit = $LASTEXITCODE
-          $failureFlag = (& sc.exe qfailureflag "QRtoPrint Smart Print Agent" 2>&1 | Out-String)
+          $failureFlag = (& sc.exe qfailureflag "QRtoPrintSmartPrintAgent" 2>&1 | Out-String)
           $failureFlagExit = $LASTEXITCODE
           $recoveryReady = ($failureActionsExit -eq 0 -and $failureActions -match "RESTART" -and $failureFlagExit -eq 0 -and $failureFlag -match "1")
           "recovery_ready=$($recoveryReady.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
@@ -341,7 +341,7 @@ jobs:
           Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store-Upgrade.msix"
           $deadline = (Get-Date).AddSeconds(90)
           do {
-            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrint Smart Print Agent'" -ErrorAction SilentlyContinue
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
             if ($service -and $service.State -eq "Running") { break }
             Start-Sleep -Seconds 3
           } while ((Get-Date) -lt $deadline)
@@ -353,7 +353,7 @@ jobs:
         run: |
           $package = Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME -ErrorAction SilentlyContinue
           if ($package) { Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop }
-          $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrint Smart Print Agent'" -ErrorAction SilentlyContinue
+          $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
           if ($service) { throw "MSIX uninstall left the Agent service registered." }
           $marker = Join-Path $env:ProgramData "QRtoPrint\msix-upgrade-preservation-test.txt"
           if (Test-Path -LiteralPath $marker) {
