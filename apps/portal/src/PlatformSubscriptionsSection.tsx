@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useLocale, translateUiText } from "./i18n";
 import { formatIstDate } from "./date-time";
 import { CalendarClock, CheckCircle2, ChevronLeft, ChevronRight, CreditCard, History, RefreshCw, Search, ShieldCheck, X } from "lucide-react";
 import {
@@ -64,6 +65,8 @@ function date(value: string | null | undefined) {
 }
 
 export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [page, setPage] = useState<PlatformSubscriptionsPage | null>(null);
   const [plans, setPlans] = useState<PlatformPlan[]>([]);
   const [loading, setLoading] = useState(true);
@@ -98,7 +101,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       setPage(subscriptions);
       setPlans(catalogue);
     }).catch(exception => {
-      if (current) setError(exception instanceof Error ? exception.message : "Could not load subscription administration.");
+      if (current) setError(exception instanceof Error ? t(exception.message) : t("Could not load subscription administration."));
     }).finally(() => {
       if (current) setLoading(false);
     });
@@ -120,13 +123,13 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     if (!assignTenant) return;
     const [planVersionId, billingInterval] = selectedOption.split("|");
     if (!planVersionId || !billingInterval || reason.trim().length < 10) {
-      setError("Choose a plan and provide a reason of at least 10 characters.");
+      setError(t("Choose a plan and provide a reason of at least 10 characters."));
       return;
     }
     const normalizedPaymentReference = paymentReference.trim();
     if (selectedAssignment?.requiresPayment &&
         (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(normalizedPaymentReference))) {
-      setError("Confirm that the payment was received and enter its transaction reference.");
+      setError(t("Confirm that the payment was received and enter its transaction reference."));
       return;
     }
     setBusy(true);
@@ -146,7 +149,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       setHistoryTenant(null);
       setRefreshKey(value => value + 1);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "The subscription could not be assigned.");
+      setError(exception instanceof Error ? t(exception.message) : t("The subscription could not be assigned."));
     } finally {
       setBusy(false);
     }
@@ -165,7 +168,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     try {
       setHistory(await getPlatformSubscriptionHistory(tokens.accessToken, tenant.id));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not load subscription history.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load subscription history."));
     } finally {
       setHistoryLoading(false);
     }
@@ -177,49 +180,49 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
     <section className="platform-plans platform-subscriptions">
       <div className="platform-plans-intro">
         <div>
-          <div className="platform-plan-kicker"><CreditCard size={14}/> SUBSCRIPTION OPERATIONS</div>
-          <h2>Shop subscriptions</h2>
-          <p>Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.</p>
+          <div className="platform-plan-kicker"><CreditCard size={14}/> {t("SUBSCRIPTION OPERATIONS")}</div>
+          <h2>{t("Shop subscriptions")}</h2>
+          <p>{t("Choose a published plan. Once the payment is received and confirmed, grant the shop access from this screen.")}</p>
         </div>
         <div className="platform-plans-actions">
-          <button className="secondary-button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+          <button className="secondary-button" onClick={() => setRefreshKey(value => value + 1)} disabled={loading}><RefreshCw size={14}/> {t("Refresh")}</button>
         </div>
       </div>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
-      {success && <div className="inline-success" role="status"><CheckCircle2 size={15}/><span>{success}</span><button className="icon-button" onClick={() => setSuccess("")} aria-label="Dismiss"><X size={14}/></button></div>}
+      {success && <div className="inline-success" role="status"><CheckCircle2 size={15}/><span>{success}</span><button className="icon-button" onClick={() => setSuccess("")} aria-label={t("Dismiss")}><X size={14}/></button></div>}
 
       <section className="panel platform-tenants-panel">
         <div className="platform-tenants-heading">
-          <div><h2>Subscription directory</h2><p>Current subscription per tenant; older assignments remain available in history.</p></div>
+          <div><h2>{t("Subscription directory")}</h2><p>{t("Current subscription per tenant; older assignments remain available in history.")}</p></div>
           <span className="neutral-chip">{page?.totalCount ?? 0} shops</span>
         </div>
         <div className="platform-tenant-filters">
-          <label className="platform-search"><Search size={15}/><input value={search} onChange={event => { setSearch(event.target.value); setPageNumber(1); }} placeholder="Search shop name or tenant slug"/></label>
-          <span className="platform-status-filter"><ShieldCheck size={14}/> Platform-only controls</span>
+          <label className="platform-search"><Search size={15}/><input value={search} onChange={event => { setSearch(event.target.value); setPageNumber(1); }} placeholder={t("Search shop name or tenant slug")}/></label>
+          <span className="platform-status-filter"><ShieldCheck size={14}/> {t("Platform-only controls")}</span>
         </div>
 
-        {loading && !page ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading subscriptions…</div> : null}
-        {!loading && page && page.items.length === 0 ? <div className="platform-empty">No shops match this search.</div> : null}
+        {loading && !page ? <div className="platform-loading-inline"><span className="button-spinner"/>{t("Loading subscriptions…")}</div> : null}
+        {!loading && page && page.items.length === 0 ? <div className="platform-empty">{t("No shops match this search.")}</div> : null}
         {page && page.items.length > 0 && (
           <div className="platform-table-scroll">
             <table className="platform-tenant-table platform-subscription-table">
-              <thead><tr><th>SHOP</th><th>ASSIGNED PLAN</th><th>STATUS</th><th>PERIOD END</th><th>ACTIONS</th></tr></thead>
+              <thead><tr><th>{t("SHOP")}</th><th>{t("ASSIGNED PLAN")}</th><th>{t("STATUS")}</th><th>{t("PERIOD END")}</th><th>{t("ACTIONS")}</th></tr></thead>
               <tbody>
                 {page.items.map(tenant => (
                   <tr key={tenant.id}>
                     <td><div className="platform-shop-cell"><div className="platform-shop-icon"><CreditCard size={15}/></div><div><strong>{tenant.businessName}</strong><small>{tenant.slug}</small></div></div></td>
                     <td>
                       <div className="platform-subs-copy">
-                        <strong>{tenant.plan?.name ?? tenant.subscription?.planCode ?? "No plan assigned"}</strong>
-                        <small>{tenant.subscription ? `${tenant.subscription.billingInterval} · ${tenant.plan ? `v${tenant.plan.version}` : "legacy"}` : "No subscription record"}</small>
+                        <strong>{tenant.plan?.name ?? tenant.subscription?.planCode ?? t("No plan assigned")}</strong>
+                        <small>{tenant.subscription ? `${tenant.subscription.billingInterval} · ${tenant.plan ? `v${tenant.plan.version}` : t("legacy")}` : t("No subscription record")}</small>
                       </div>
                     </td>
                     <td><span className={`platform-subscription-state ${(tenant.subscription?.status ?? "unassigned").toLowerCase()}`}>{tenant.subscription?.status ?? "Unassigned"}</span></td>
                     <td><div className="platform-subs-copy"><strong>{date(tenant.subscription?.periodEndUtc)}</strong><small>{tenant.subscription ? `Started ${date(tenant.subscription.periodStartUtc)}` : "—"}</small></div></td>
                     <td><div className="platform-subscription-actions">
-                      <button className="secondary-button small" type="button" onClick={() => void toggleHistory(tenant)}><History size={13}/> History</button>
-                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>Grant plan access</button>
+                      <button className="secondary-button small" type="button" onClick={() => void toggleHistory(tenant)}><History size={13}/> {t("History")}</button>
+                      <button className="primary-button small" type="button" disabled={!canAssign} onClick={() => openAssignment(tenant)}>{t("Grant plan access")}</button>
                     </div></td>
                   </tr>
                 ))}
@@ -230,19 +233,19 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         {page && <div className="platform-pagination">
           <span>Page {page.page} · {page.totalCount.toLocaleString("en-IN")} shops</span>
           <div>
-            <button className="icon-button" onClick={() => setPageNumber(value => Math.max(1, value - 1))} disabled={page.page <= 1 || loading} aria-label="Previous page"><ChevronLeft size={17}/></button>
-            <button className="icon-button" onClick={() => setPageNumber(value => value + 1)} disabled={page.page * page.pageSize >= page.totalCount || loading} aria-label="Next page"><ChevronRight size={17}/></button>
+            <button className="icon-button" onClick={() => setPageNumber(value => Math.max(1, value - 1))} disabled={page.page <= 1 || loading} aria-label={t("Previous page")}><ChevronLeft size={17}/></button>
+            <button className="icon-button" onClick={() => setPageNumber(value => value + 1)} disabled={page.page * page.pageSize >= page.totalCount || loading} aria-label={t("Next page")}><ChevronRight size={17}/></button>
           </div>
         </div>}
       </section>
 
       {historyTenant && (
         <section className="panel platform-tenants-panel platform-subscription-history">
-          <div className="platform-tenants-heading"><div><h2>Assignment history</h2><p>Append-only platform audit events for {page?.items.find(item => item.id === historyTenant)?.businessName ?? "this shop"}.</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label="Close history"><X size={15}/></button></div>
-          {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading history…</div> :
-            history.length === 0 ? <div className="platform-empty">No platform assignment events have been recorded for this shop yet.</div> :
+          <div className="platform-tenants-heading"><div><h2>{t("Assignment history")}</h2><p>{t("Append-only platform audit events for {shop}.").replace("{shop}", page?.items.find(item => item.id === historyTenant)?.businessName ?? t("this shop"))}</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label={t("Close history")}><X size={15}/></button></div>
+          {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/>{t("Loading history…")}</div> :
+            history.length === 0 ? <div className="platform-empty">{t("No platform assignment events have been recorded for this shop yet.")}</div> :
             <div className="platform-table-scroll"><table className="platform-tenant-table platform-history-table">
-              <thead><tr><th>EVENT</th><th>PLAN</th><th>STATUS</th><th>PREVIOUS STATUS</th><th>PERIOD</th><th>REASON</th><th>RECORDED</th></tr></thead>
+              <thead><tr><th>{t("EVENT")}</th><th>{t("PLAN")}</th><th>{t("STATUS")}</th><th>{t("PREVIOUS STATUS")}</th><th>{t("PERIOD")}</th><th>{t("REASON")}</th><th>{t("RECORDED")}</th></tr></thead>
               <tbody>{history.map(event => <tr key={event.id}>
                 <td><strong>{event.eventType.replace(/_/g, " ")}</strong></td>
                 <td>{event.planCode} · {event.billingInterval}{event.paymentReference ? <small>Payment ref: {event.paymentReference}</small> : null}</td>
@@ -261,8 +264,8 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
         <div className="platform-assignment-backdrop" role="presentation" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setAssignTenant(null); }}>
           <section className="panel platform-assignment-modal" role="dialog" aria-modal="true" aria-labelledby="subscription-assignment-title">
             <div className="platform-assignment-heading">
-              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> SUBSCRIPTION ACCESS</div><h2 id="subscription-assignment-title">Grant plan access</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
-              <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label="Close assignment"><X size={16}/></button>
+              <div><div className="platform-plan-kicker"><CalendarClock size={14}/> {t("SUBSCRIPTION ACCESS")}</div><h2 id="subscription-assignment-title">{t("Grant plan access")}</h2><p>{assignTenant.businessName} · {assignTenant.slug}</p></div>
+              <button className="icon-button" onClick={() => setAssignTenant(null)} disabled={busy} aria-label={t("Close assignment")}><X size={16}/></button>
             </div>
             <label className="platform-assignment-field">Published plan
               <select value={selectedOption} onChange={event => {
@@ -275,21 +278,21 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
             </label>
             {selectedAssignment?.requiresPayment && <>
               <label className="platform-assignment-field">Payment transaction reference / UTR
-                <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} maxLength={100} placeholder="Enter the bank / UPI transaction reference" disabled={busy}/>
+                <input value={paymentReference} onChange={event => setPaymentReference(event.target.value)} maxLength={100} placeholder={t("Enter the bank / UPI transaction reference")} disabled={busy}/>
               </label>
               <label className="platform-assignment-payment-check">
                 <input type="checkbox" checked={paymentConfirmed} onChange={event => setPaymentConfirmed(event.target.checked)} disabled={busy}/>
-                <span>I checked the payment account and confirmed that this amount was received.</span>
+                <span>{t("I checked the payment account and confirmed that this amount was received.")}</span>
               </label>
             </>}
             <label className="platform-assignment-field">Reason for access grant
-              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder="Record why this plan is being granted." disabled={busy}/>
+              <textarea rows={3} maxLength={500} value={reason} onChange={event => setReason(event.target.value)} placeholder={t("Record why this plan is being granted.")} disabled={busy}/>
               <small>{reason.trim().length}/500 characters · minimum 10</small>
             </label>
             <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>{selectedAssignment?.requiresPayment ? "Access is granted as soon as you confirm the payment was received and enter its transaction reference. The amount and granting operator are retained in the audit history." : "Trial and explicitly free plans can be granted without payment. Every assignment is recorded in the audit history."}</span></div>
             <div className="platform-assignment-actions">
-              <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>Cancel</button>
-              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? "Granting…" : "Grant access"}</button>
+              <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>{t("Cancel")}</button>
+              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? t("Granting…") : t("Grant access")}</button>
             </div>
           </section>
         </div>

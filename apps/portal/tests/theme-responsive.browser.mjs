@@ -202,9 +202,11 @@ async function preparePage(context, route) {
         ? profile
         : path.endsWith("/print-jobs")
           ? sampleJobs
-          : path.endsWith("/payments")
-            ? samplePayments
-            : path.endsWith("/printers")
+          : path.startsWith("/api/v1/shop/subscription/payments")
+            ? { items: [], skip: 0, take: 20, totalCount: 0 }
+            : path.endsWith("/payments")
+              ? samplePayments
+              : path.endsWith("/printers")
               ? samplePrinters
               : path.endsWith("/agent-devices")
                 ? sampleAgents
@@ -225,9 +227,43 @@ async function preparePage(context, route) {
                         verifiedCollectionsByMethod: [],
                         refundsRecordedByMethod: []
                       }
-                    : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
-                      ? null
-                      : [];
+                    : path.endsWith("/subscription")
+                      ? {
+                          generatedUtc: "2026-11-27T00:00:00.000Z",
+                          subscription: {
+                            id: "e2e-shop-subscription",
+                            planCode: "TRIAL",
+                            status: "Trial",
+                            billingInterval: "Monthly",
+                            periodStartUtc: "2026-11-01T00:00:00.000Z",
+                            periodEndUtc: "2026-12-01T00:00:00.000Z",
+                            createdUtc: "2026-11-01T00:00:00.000Z"
+                          },
+                          plan: null,
+                          entitlements: {
+                            maxPrinters: 3,
+                            maxAgentDevices: 2,
+                            maxQrStations: 3,
+                            maxMonthlyPrintJobs: 500,
+                            maxDocumentBytes: 52428800,
+                            cloudAssistedPrintingEnabled: true,
+                            whiteLabelEnabled: false,
+                            advancedReportsEnabled: false,
+                            isLegacyUnconfigured: false,
+                            isAccessActive: true
+                          },
+                          usage: {
+                            printerCount: 1,
+                            agentDeviceCount: 1,
+                            qrStationCount: 0,
+                            monthlyPrintJobCount: 8,
+                            monthlyPeriodStartUtc: "2026-11-01T00:00:00.000Z",
+                            monthlyPeriodEndUtc: "2026-12-01T00:00:00.000Z"
+                          }
+                        }
+                      : path.endsWith("/pricing") || path.endsWith("/payment-settings")
+                        ? null
+                        : [];
       await request.fulfill({
         status: 200,
         contentType: "application/json",
@@ -592,7 +628,22 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
 
   if (route.auth === "shop") {
     const openAccountMenu = async () => {
-      await page.locator(".account-menu-trigger").click();
+      const trigger = page.locator(".topbar .account-menu-trigger");
+      try {
+        await trigger.waitFor({ state: "visible", timeout: 8000 });
+      } catch (error) {
+        const diagnostic = {
+          url: page.url(),
+          shellCount: await page.locator(".app-shell").count(),
+          topbarCount: await page.locator(".topbar").count(),
+          topbarText: await page.locator(".topbar").innerText().catch(() => "topbar unavailable"),
+          accountTriggerCount: await page.locator(".account-menu-trigger").count(),
+          bodyText: (await page.locator("body").innerText().catch(() => "")).slice(0, 2500)
+        };
+        await page.screenshot({ path: join(artifactDirectory, `account-menu-missing-${route.label}-${themeLabel}-${viewport.width}.png`), fullPage: true, animations: "disabled" }).catch(() => {});
+        throw new Error(`Shop account menu trigger did not render after workspace navigation: ${JSON.stringify(diagnostic)}. Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await trigger.click();
       await page.locator("#shop-account-menu").waitFor({ state: "visible" });
     };
 
@@ -667,10 +718,24 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     const chooseAccountItem = async (label, expectedTitle) => {
       await openAccountMenu();
       await page.locator("#shop-account-menu").getByRole("button", { name: label, exact: true }).click();
-      await page.waitForFunction(
-        title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
-        expectedTitle
-      );
+      try {
+        await page.waitForFunction(
+          title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
+          expectedTitle,
+          { timeout: 8000 }
+        );
+      } catch (error) {
+        const diagnostic = {
+          expectedTitle,
+          url: page.url(),
+          heading: await page.locator(".page-heading h1").textContent().catch(() => "heading unavailable"),
+          activeNavigation: await page.locator(".sidebar .nav-item.active").allTextContents().catch(() => []),
+          menuVisible: await page.locator("#shop-account-menu").isVisible().catch(() => false),
+          menuText: await page.locator("#shop-account-menu").innerText().catch(() => "menu unavailable")
+        };
+        await page.screenshot({ path: join(artifactDirectory, `account-menu-navigation-${route.label}-${themeLabel}-${viewport.width}.png`), fullPage: true, animations: "disabled" }).catch(() => {});
+        throw new Error(`Account menu navigation did not reach its expected workspace section: ${JSON.stringify(diagnostic)}. Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await assertNoHorizontalOverflow(page, route, viewport);
       await assertRouteContrast(page, route);
       results.push({ check: `${route.label} / account / ${label} / ${themeLabel} / ${viewport.width}px`, passed: true });
@@ -700,15 +765,20 @@ async function exercisePhotoStudioBrowser() {
     { mode: "customer", theme: "light", width: 520, height: 900 },
     { mode: "shop", theme: "dark", width: 390, height: 568 },
     { mode: "shop", theme: "light", width: 768, height: 1024 },
-    { mode: "shop", theme: "dark", width: 1440, height: 1000 }
+    { mode: "shop", theme: "dark", width: 1440, height: 1000 },
+    { mode: "customer", theme: "light", width: 320, height: 568, locale: "hindi", htmlLang: "hi" },
+    { mode: "shop", theme: "dark", width: 390, height: 568, locale: "hinglish", htmlLang: "hi-Latn" },
+    { mode: "customer", theme: "dark", width: 768, height: 1024, locale: "hinglish", htmlLang: "hi-Latn" },
+    { mode: "shop", theme: "light", width: 1440, height: 1000, locale: "hindi", htmlLang: "hi" }
   ];
 
   for (const [index, item] of cases.entries()) {
-    const caseName = `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`;
+    const caseName = `Photo Studio ${item.mode} / ${item.locale ?? "english"} / ${item.theme} / ${item.width}x${item.height}`;
     const caseStartedAt = Date.now();
     console.log(`[QA-CASE-START] ${index + 1}/${cases.length} | ${caseName} | opening editor and verifying layout, focus, page preview and PDF output`);
     const context = await browser.newContext({ viewport: { width: item.width, height: item.height } });
     const page = await context.newPage();
+    if (item.locale) await page.addInitScript(locale => localStorage.setItem("smartprint-ui-locale", locale), item.locale);
     await page.goto(
       `${baseUrl}/tests/photo-studio.browser.html?mode=${item.mode}&theme=${item.theme}`,
       { waitUntil: "domcontentloaded" }
@@ -718,8 +788,9 @@ async function exercisePhotoStudioBrowser() {
     await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true");
 
     await openButton.click();
-    const dialog = page.getByRole("dialog", { name: "Photo Studio" });
+    const dialog = page.locator('[role="dialog"][aria-labelledby="photo-studio-title"]');
     await dialog.waitFor({ state: "visible" });
+    assert.ok((await dialog.locator("#photo-studio-title").textContent())?.trim(), "Photo Studio must expose a localized accessible title.");
     assert.equal(await dialog.getAttribute("aria-busy"), "false");
 
     const measurements = await page.evaluate(() => {
@@ -738,6 +809,7 @@ async function exercisePhotoStudioBrowser() {
         bodyWidth: document.body.scrollWidth,
         dialog: rect("[role='dialog']"),
         header: rect("[role='dialog'] header"),
+        languageSelector: rect(".sp-language-switcher"),
         preview: rect("[class*='canvasWorkspace']"),
         canvas: rect("canvas"),
         panel: rect("[class*='toolPanel']"),
@@ -753,6 +825,14 @@ async function exercisePhotoStudioBrowser() {
       `Photo Studio has horizontal overflow at ${item.width}x${item.height}: ${JSON.stringify(measurements)}`);
     assert.ok(measurements.header && measurements.header.top >= -1 && measurements.header.bottom <= item.height + 1,
       `Photo Studio header is clipped: ${JSON.stringify(measurements)}`);
+    if (item.locale) {
+      const languageSelector = page.locator(".sp-language-switcher select").first();
+      await languageSelector.waitFor({ state: "visible" });
+      assert.equal(await page.locator("html").getAttribute("lang"), item.htmlLang);
+      assert.equal(await languageSelector.inputValue(), item.locale);
+      assert.ok(measurements.languageSelector && measurements.languageSelector.right <= item.width + 1,
+        `Photo Studio language selector is clipped at ${item.width}x${item.height}: ${JSON.stringify(measurements.languageSelector)}`);
+    }
     assert.ok(measurements.canvas && measurements.canvas.width > 0 && measurements.canvas.height > 0,
       `Photo Studio page preview is missing: ${JSON.stringify(measurements)}`);
     assert.ok(measurements.footer && measurements.footer.bottom <= item.height + 1,
@@ -761,10 +841,17 @@ async function exercisePhotoStudioBrowser() {
       `Photo Studio primary action is clipped: ${JSON.stringify(measurements)}`);
     assert.equal(measurements.bodyOverflow, "hidden", "The editor must prevent background page scroll while open.");
     await page.screenshot({
-      path: join(artifactDirectory, `photo-studio-${item.mode}-${item.width}x${item.height}-${item.theme}.png`),
+      path: join(artifactDirectory, `photo-studio-${item.mode}-${item.locale ?? "english"}-${item.width}x${item.height}-${item.theme}.png`),
       fullPage: false,
       animations: "disabled"
     });
+
+    if (item.locale) {
+      results.push({ check: caseName, passed: true, language: item.locale, viewport: `${item.width}x${item.height}` });
+      await context.close();
+      console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName} | translated editor layout verified`);
+      continue;
+    }
 
     // Cancel should restore focus to the exact customer/shop entry control.
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
@@ -946,13 +1033,18 @@ async function exercisePhotoStudioFeatureMatrix() {
     const canvas = editor.locator("canvas");
     await canvas.waitFor({ state: "visible" });
     assert.equal(await page.evaluate(() => document.body.style.overflow), "hidden");
-    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Language");
 
-    // Focus loop, Escape close, focus restoration and browser capture deterrents.
+    // The locale selector is now the first control; verify the focus trap wraps
+    // from it to the final editor action and back without skipping the close button.
+    const languageSelector = editor.getByRole("combobox", { name: "Language" });
     const closeButton = editor.getByRole("button", { name: "Close Photo Studio" });
-    await closeButton.focus();
+    assert.equal(await languageSelector.count(), 1);
+    assert.equal(await closeButton.count(), 1);
     await page.keyboard.press("Shift+Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim().includes("Prepare A4 sheet")), true);
+    await page.keyboard.press("Tab");
+    assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Language");
     await page.keyboard.press("Tab");
     assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close Photo Studio");
     const shortcutPrevented = await page.evaluate(() => {
@@ -1428,6 +1520,124 @@ try {
     }
   }
 
+  // Re-run the responsive and contrast checks with the actual translated UI, not just English.
+  // Hindi and Hinglish can be longer than English, so they must pass the same viewport checks.
+  console.log("[QA-STEP-START] Localized UI responsive acceptance | Hindi and Hinglish across customer, shop and platform-admin routes.");
+  const localizedViewports = [
+    { label: "phone-320", width: 320, height: 568 },
+    { label: "phone-390", width: 390, height: 844 },
+    { label: "tablet-768", width: 768, height: 1024 },
+    { label: "desktop-1440", width: 1440, height: 1000 }
+  ];
+  const localizedLocales = [
+    { id: "hindi", htmlLang: "hi" },
+    { id: "hinglish", htmlLang: "hi-Latn" }
+  ];
+  let localizedCaseIndex = 0;
+  const localizedTotal = localizedViewports.length * localizedLocales.length * routes.length;
+  for (const locale of localizedLocales) {
+    for (const viewport of localizedViewports) {
+      for (const route of routes) {
+        localizedCaseIndex += 1;
+        const caseName = `Localized route ${route.label} / ${locale.id} / ${viewport.label} / light + dark`;
+        const caseStartedAt = Date.now();
+        console.log(`[QA-CASE-START] ${localizedCaseIndex}/${localizedTotal} | ${caseName} | selecting locale, checking persistence, overflow and contrast`);
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, route.ready);
+
+        const localeSelector = page.locator(".sp-language-switcher select").first();
+        await localeSelector.waitFor({ state: "visible" });
+        const availableLocales = await localeSelector.locator("option").evaluateAll(options => options.map(option => option.value));
+        assert.deepEqual(availableLocales, ["english", "hindi", "hinglish"], "The selector must expose exactly the three approved languages.");
+        await localeSelector.selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        assert.equal(await localeSelector.inputValue(), locale.id);
+        assert.equal(await page.evaluate(() => localStorage.getItem("smartprint-ui-locale")), locale.id,
+          "The selected language must persist for this customer/shop/admin browser profile.");
+
+        const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
+        await assertRouteContrast(page, route);
+        await page.locator(".theme-toggle-button").first().click();
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+        const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
+        await assertRouteContrast(page, route);
+        await page.locator(".theme-toggle-button").first().click();
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+
+        results.push({
+          check: caseName,
+          language: locale.id,
+          viewport: viewport.label,
+          lightDocumentWidth: lightLayout.rootWidth,
+          darkDocumentWidth: darkLayout.rootWidth,
+          passed: true
+        });
+        await context.close();
+        console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
+      }
+    }
+  }
+  console.log("[QA-STEP-END] Localized UI responsive acceptance | all Hindi/Hinglish customer, shop and admin cases passed.");
+
+  // Specifically open the shop billing and platform advertising pages in both languages.
+  // These nested pages were not covered by the initial dashboard-only responsive matrix.
+  for (const locale of localizedLocales) {
+    for (const viewport of [
+      { label: "phone-390", width: 390, height: 844 },
+      { label: "desktop-1440", width: 1440, height: 1000 }
+    ]) {
+      {
+        const route = { label: "shop-subscription", auth: "shop" };
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, ".app-shell");
+        await page.locator(".sp-language-switcher select").first().selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        const accountTrigger = page.locator(".account-menu-trigger");
+        await accountTrigger.waitFor({ state: "visible" });
+        await accountTrigger.click();
+        const accountMenu = page.locator("#shop-account-menu");
+        await accountMenu.waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const subscriptionItem = accountMenu.locator(".account-menu-item").nth(2);
+        await subscriptionItem.waitFor({ state: "visible" });
+        const accountSubscriptionLabel = (await subscriptionItem.innerText()).trim();
+        assert.notEqual(accountSubscriptionLabel, "Trial & subscription",
+          "The shop owner's account-menu subscription entry must be localized.");
+        if (locale.id === "hindi") assert.equal(accountSubscriptionLabel, "ट्रायल और सब्सक्रिप्शन");
+        if (locale.id === "hinglish") assert.equal(accountSubscriptionLabel, "Trial aur subscription");
+        await subscriptionItem.click();
+        await page.locator(".subscription-payment-panel").waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const heading = await page.locator(".subscription-payment-panel h2").textContent();
+        assert.notEqual(heading?.trim(), "Choose or renew a plan",
+          "The subscription heading must not remain English after selecting Hindi or Hinglish.");
+        await context.close();
+      }
+      {
+        const route = { label: "platform-advertising", auth: "admin" };
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, ".app-shell");
+        await page.locator(".sp-language-switcher select").first().selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        const advertisingNav = page.locator(".primary-nav .nav-item").nth(4);
+        if (viewport.width <= 760) await page.locator(".mobile-menu").click();
+        await advertisingNav.waitFor({ state: "visible" });
+        await advertisingNav.click();
+        await page.locator(".platform-ad-intro h2").waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const heading = await page.locator(".platform-ad-intro h2").textContent();
+        assert.notEqual(heading?.trim(), "Advertising campaigns", "The platform advertising heading must not remain English after selecting Hindi or Hinglish.");
+        await context.close();
+      }
+    }
+  }
+
   // Exercise the actual shared Photo Studio component on phone, tablet and desktop.
   console.log("[QA-STEP-START] Photo Studio browser acceptance | six customer/shop and light/dark viewport combinations.");
   await exercisePhotoStudioBrowser();
@@ -1482,6 +1692,59 @@ try {
     console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | Windows Desktop minimum viewport`);
   }
 
+  // The native Windows shell has its own entry point; verify locale persistence and layout there too.
+  for (const locale of localizedLocales) {
+    const caseName = `Windows desktop localized shell / ${locale.id} / 1000x680 / light + dark`;
+    const caseStartedAt = Date.now();
+    const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
+    const desktopRoute = { label: "windows-desktop-localized", auth: "shop" };
+    const page = await preparePage(context, desktopRoute);
+    await page.addInitScript(({ shopSession, localeId }) => {
+      localStorage.setItem("smartprint-ui-locale", localeId);
+      window.__TAURI_INTERNALS__ = {
+        invoke: async command => {
+          if (command === "read_secure_session") return JSON.stringify(shopSession);
+          if (command === "write_secure_session") return null;
+          if (command === "get_local_agent_status") {
+            return { serviceReachable: false, localApiReachable: false, paired: false, agentDeviceId: null, status: "Not paired", apiBaseUrl: null };
+          }
+          return null;
+        }
+      };
+    }, {
+      localeId: locale.id,
+      shopSession: {
+        tokenType: "Bearer",
+        accessToken: shopToken,
+        refreshToken: "visual-qa-refresh-token",
+        accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
+      }
+    });
+    await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
+    assert.equal(await page.locator("html").getAttribute("lang"), locale.htmlLang);
+    assert.equal(await page.locator(".sp-language-switcher select").first().inputValue(), locale.id);
+    const lightLayout = await assertNoHorizontalOverflow(page, desktopRoute, { width: 1000, height: 680 });
+    await assertRouteContrast(page, desktopRoute);
+    await page.locator(".theme-toggle-button").first().click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    const darkLayout = await assertNoHorizontalOverflow(page, desktopRoute, { width: 1000, height: 680 });
+    await assertRouteContrast(page, desktopRoute);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("html").getAttribute("lang"), locale.htmlLang, "The native desktop shell must retain the selected language after reload.");
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+    results.push({
+      check: caseName,
+      lightDocumentWidth: lightLayout.rootWidth,
+      darkDocumentWidth: darkLayout.rootWidth,
+      passed: true
+    });
+    await context.close();
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
+  }
+
   // Exercise the actual shop and admin sign-out controls after changing theme.
   for (const [index, route] of routes.filter(item => item.auth).entries()) {
     const caseName = `${route.label} sign-out/sign-in and theme persistence`;
@@ -1516,8 +1779,8 @@ try {
 
     await page.getByLabel("Email address").fill("theme-qa@example.invalid");
     await page.locator('input[autocomplete="current-password"]').fill("ThemeQa-Password-2026!");
-    const signInLabel = route.auth === "admin" ? "Sign in to administration" : "Sign in to workspace";
-    await page.getByRole("button", { name: signInLabel }).click();
+    const signInLabel = route.auth === "admin" ? "Sign in to administration" : "Sign in";
+    await page.locator("form").getByRole("button", { name: signInLabel, exact: true }).click();
     await waitForRoute(page, ".app-shell");
     assert.equal(await page.locator("html").getAttribute("data-theme"), "dark", `${route.label} sign-in must restore Dark.`);
     await page.reload({ waitUntil: "domcontentloaded" });
