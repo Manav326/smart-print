@@ -1816,7 +1816,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
     <div className="photo-order-receipt">
       <div className="photo-order-receipt-summary">
         <span>{t("Server-calculated amount")}</span><strong>{amount}</strong>
-        <small>{t("{count} photos · {size} · {pages} A4 page(s)", {count: formatUiNumber(locale, job.photoCount), size: job.photoSizeCode, pages: formatUiNumber(locale, job.pageCount)})}</small>
+        <small>{t("{count} photos · {size} · {pages} A4 page(s)", {count: formatUiNumber(job.photoCount, locale), size: job.photoSizeCode, pages: formatUiNumber(job.pageCount, locale)})}</small>
       </div>
       {payment.status==="VERIFIED"
         ? <div className="file-review-note"><Check size={16}/><span>{t("Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.")}</span></div>
