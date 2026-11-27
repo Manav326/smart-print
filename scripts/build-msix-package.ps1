@@ -94,7 +94,7 @@ if (-not $settings.Agent.PSObject.Properties["LocalApi"] -or $null -eq $settings
 }
 Set-JsonProperty $settings.Agent "ApiBaseUrl" $apiUri.GetLeftPart([UriPartial]::Authority)
 Set-JsonProperty $settings.Agent.LocalApi "Enabled" $true
-Set-JsonProperty $settings.Agent.LocalApi "AllowedOrigins" @("http://tauri.localhost")
+Set-JsonProperty $settings.Agent.LocalApi "AllowedOrigins" @($PublicApiOrigin, "http://tauri.localhost")
 $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
 Write-Host "Preparing Agent configuration and package assets."
@@ -177,13 +177,20 @@ foreach ($file in @(
     }
 }
 
+$packagedSettingsPath = Join-Path $verify "Agent\appsettings.json"
+$packagedSettings = Get-Content -LiteralPath $packagedSettingsPath -Raw | ConvertFrom-Json
+$allowedOrigins = @($packagedSettings.Agent.LocalApi.AllowedOrigins)
+if ($allowedOrigins -notcontains $PublicApiOrigin) { throw "Packaged Agent CORS settings are missing the customer portal origin: $PublicApiOrigin" }
+if ($allowedOrigins -notcontains "http://tauri.localhost") { throw "Packaged Agent CORS settings are missing the Tauri desktop origin." }
+if ($allowedOrigins -contains "http://localhost:3000") { throw "Development localhost origin must not be included in the Store package." }
+
 $m = [xml](Get-Content -LiteralPath (Join-Path $verify "AppxManifest.xml") -Raw)
 $n = [System.Xml.XmlNamespaceManager]::new($m.NameTable)
 $n.AddNamespace("d6", "http://schemas.microsoft.com/appx/manifest/desktop/windows10/6")
 $n.AddNamespace("d2", "http://schemas.microsoft.com/appx/manifest/desktop/windows10/2")
 $n.AddNamespace("rc", "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
 $n.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
-if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrintSmartPrintAgent' and @StartAccount='localService' and @StartupType='auto']", $n)) {
+if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrint Smart Print Agent' and @StartAccount='localService' and @StartupType='auto']", $n)) {
     throw "Packaged LocalService Agent declaration is missing."
 }
 if (-not $m.SelectSingleNode("//d2:FirewallRules[@Executable='Agent\SmartPrint.Agent.exe']/d2:Rule[@Direction='in' and @IPProtocol='TCP' and @LocalPortMin='17842' and @LocalPortMax='17842' and @Profile='all']", $n)) {
