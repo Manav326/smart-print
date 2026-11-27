@@ -2638,9 +2638,10 @@ class MainActivity : AppCompatActivity() {
                         val privatePrinting = job.optBoolean(
                             "privatePrinting", historyItem?.privatePrinting ?: false
                         )
-                        val fileName = if (privatePrinting) "Private document" else
+                        val fileName = if (privatePrinting) AndroidCustomerLocale.translate(this, "Private document") else
                             job.optString("originalFileName").takeIf(String::isNotBlank)
-                                ?: historyItem?.originalFileName ?: "Print document"
+                                ?: historyItem?.originalFileName
+                                ?: AndroidCustomerLocale.translate(this, "Print document")
                         val fileCard = card()
                         val fileBody = LinearLayout(this).apply {
                             orientation = LinearLayout.VERTICAL
