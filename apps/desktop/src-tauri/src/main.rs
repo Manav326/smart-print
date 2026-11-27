@@ -433,7 +433,168 @@ mod tests {
     }
 }
 
+
+#[cfg(windows)]
+mod msix_webview2 {
+    use std::process::Command;
+
+    const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+    const MB_OK: u32 = 0x0000_0000;
+    const MB_ICONINFORMATION: u32 = 0x0000_0040;
+    const MB_ICONERROR: u32 = 0x0000_0010;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentPackageFullName(package_full_name_length: *mut u32, package_full_name: *mut u16) -> u32;
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
+    }
+
+    fn is_msix_packaged_process() -> bool {
+        let mut length = 0u32;
+        unsafe {
+            GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) == ERROR_INSUFFICIENT_BUFFER
+        }
+    }
+
+    fn show_message(title: &str, message: &str, icon: u32) {
+        let title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+        let message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            MessageBoxW(std::ptr::null_mut(), message.as_ptr(), title.as_ptr(), MB_OK | icon);
+        }
+    }
+
+    fn parse_registry_output(output: &str) -> bool {
+        output.lines().any(|line| {
+            let mut fields = line.split_whitespace();
+            let name = fields.next().unwrap_or_default();
+            let kind = fields.next().unwrap_or_default();
+            let value = fields.next().unwrap_or_default();
+            name.eq_ignore_ascii_case("pv")
+                && kind.eq_ignore_ascii_case("REG_SZ")
+                && !value.is_empty()
+                && value != "0.0.0.0"
+        })
+    }
+
+    fn registry_key_has_runtime(key: &str) -> bool {
+        Command::new("reg.exe")
+            .args(["query", key, "/v", "pv"])
+            .output()
+            .map(|output| output.status.success() && parse_registry_output(&String::from_utf8_lossy(&output.stdout)))
+            .unwrap_or(false)
+    }
+
+    fn webview2_runtime_installed() -> bool {
+        let machine_key = format!(
+            r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        );
+        let user_key = format!(
+            r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        );
+        registry_key_has_runtime(&machine_key) || registry_key_has_runtime(&user_key)
+    }
+
+    pub fn ensure_runtime_for_msix() -> bool {
+        // The website EXE installer already installs WebView2 before launch.
+        // Keep its runtime behavior unchanged; this fallback is MSIX-only.
+        if !is_msix_packaged_process() || webview2_runtime_installed() {
+            return true;
+        }
+
+        show_message(
+            "Preparing Smart Print",
+            "Smart Print is preparing the required Microsoft WebView2 Runtime. This is a one-time setup on this PC. Please wait.",
+            MB_ICONINFORMATION,
+        );
+
+        let installer = match std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(|parent| parent.join("MicrosoftEdgeWebView2RuntimeInstallerX64.exe")))
+        {
+            Some(path) if path.is_file() => path,
+            _ => {
+                show_message(
+                    "Smart Print setup could not continue",
+                    "The bundled Microsoft WebView2 Runtime installer is missing. Repair or reinstall Smart Print, then try again.",
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+        };
+
+        let status = Command::new(&installer)
+            .args(["/silent", "/install"])
+            .status();
+
+        match status {
+            Ok(exit) if matches!(exit.code(), Some(0) | Some(3010)) => {}
+            Ok(exit) => {
+                show_message(
+                    "Smart Print could not prepare WebView2",
+                    &format!(
+                        "Microsoft WebView2 Runtime setup returned exit code {:?}. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
+                        exit.code()
+                    ),
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+            Err(error) => {
+                show_message(
+                    "Smart Print could not prepare WebView2",
+                    &format!(
+                        "Microsoft WebView2 Runtime setup could not start: {error}. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print."
+                    ),
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+        }
+
+        if !webview2_runtime_installed() {
+            show_message(
+                "Smart Print could not prepare WebView2",
+                "Microsoft WebView2 Runtime is still unavailable. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
+                MB_ICONERROR,
+            );
+            return false;
+        }
+
+        true
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::parse_registry_output;
+
+        #[test]
+        fn accepts_a_real_webview2_runtime_version() {
+            assert!(parse_registry_output("pv    REG_SZ    140.0.3485.54"));
+        }
+
+        #[test]
+        fn rejects_empty_or_zero_webview2_runtime_versions() {
+            assert!(!parse_registry_output("pv    REG_SZ    0.0.0.0"));
+            assert!(!parse_registry_output("pv    REG_SZ"));
+            assert!(!parse_registry_output("ERROR: The system was unable to find the specified registry key or value."));
+        }
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if !msix_webview2::ensure_runtime_for_msix() {
+        std::process::exit(1);
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_local_agent_status,
