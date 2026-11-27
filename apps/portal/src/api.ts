@@ -8,6 +8,7 @@ import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./deskto
 import { authStorageKey } from "./portal-routing";
 import {
   customerPrivateRelayPollDelay,
+  shouldContinueCustomerPrivateRelayStatusRetries,
   shouldReconcileCustomerPrivateRelayPostError,
   shouldRetryCustomerPrivateRelayStatusError
 } from "./private-relay-retry";
@@ -1801,6 +1802,8 @@ async function uploadCustomerPrivateRelay(
     } catch(exception) {
       if(!shouldRetryCustomerPrivateRelayStatusError(exception))throw exception;
       initialStatusErrors+=1;
+      if(!shouldContinueCustomerPrivateRelayStatusRetries(initialStatusErrors))
+        throw new LocalUploadOutcomeUnknownError("The original Private Printing ticket is preserved, but the shop status service is temporarily unavailable. Retry this same file to resume reconciliation; SmartPrint will not create a second print job or use cloud/plaintext fallback.");
       await new Promise(resolve=>window.setTimeout(resolve,
         customerPrivateRelayPollDelay(0,initialStatusErrors,false)));
     }
@@ -1852,6 +1855,8 @@ async function uploadCustomerPrivateRelay(
       } catch (exception) {
         if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
         consecutiveErrors += 1;
+        if(!shouldContinueCustomerPrivateRelayStatusRetries(consecutiveErrors))
+          throw new LocalUploadOutcomeUnknownError("The original Private Printing ticket is preserved, but the shop status service is temporarily unavailable. Retry this same file to resume reconciliation; SmartPrint will not create a second print job or use cloud/plaintext fallback.");
         continue;
       }
       const currentStage = status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state);
@@ -1937,6 +1942,8 @@ async function uploadCustomerPrivateRelay(
     } catch (exception) {
       if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
       consecutiveErrors+=1;
+      if(!shouldContinueCustomerPrivateRelayStatusRetries(consecutiveErrors))
+        throw new LocalUploadOutcomeUnknownError("The original Private Printing ticket is preserved, but the shop status service is temporarily unavailable. Retry this same file to resume reconciliation; SmartPrint will not create a second print job or use cloud/plaintext fallback.");
       await new Promise(resolve => window.setTimeout(resolve,
         customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
       continue;
