@@ -127,6 +127,14 @@ public sealed class PrinterDiagnosticRulesTests
             123, 2, 2, null, now));
     }
 
+    [Theory]
+    [InlineData("TEST_VIRTUAL", "PRINTED", true)]
+    [InlineData("TEST_VIRTUAL", "QUEUED", false)]
+    [InlineData("PHYSICAL", "PRINTED", false)]
+    public void VirtualOutputReceiptRequiresTheExplicitVirtualModeAndPrintedObservation(
+        string outputType, string spoolerStatus, bool expected) =>
+        Assert.Equal(expected, PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(outputType, spoolerStatus));
+
     [Fact]
     public void MatchesResolvedSettingsAsAnImmutableServerDecision()
     {

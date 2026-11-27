@@ -80,6 +80,10 @@ public static class PrinterDiagnosticRules
         }
     }
 
+    public static bool IsVirtualOutputPrintCompleted(string? outputType, string? spoolerStatus) =>
+        string.Equals(outputType, PrivatePrintingOutputPolicy.TestVirtual, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(spoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase);
+
     public static bool MatchesResolvedSettings(
         PrinterDiagnosticSettings settings,
         string? paperSize,

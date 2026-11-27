@@ -8854,15 +8854,29 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     // RETAINED flag, but it must not silently mark the physical pages as complete.
     if (job.Status == "OUTPUT_UNCONFIRMED")
     {
+        if (PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(job.OutputType, request.SpoolerStatus))
+        {
+            var previous = job.Status;
+            job.Status = "TEST_OUTPUT_READY";
+            job.OutputCompletedUtc = now;
+            job.OutputConfirmedUtc = null;
+            if (job.PrivatePrinting)
+                job.PrivateDocumentPurgeRequestedUtc ??= now;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous,
+                NewStatus = job.Status, ActorType = "PrintAgent", ActorId = device.Id,
+                ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
+            });
+        }
         await db.SaveChangesAsync(ct);
         if (diagnosticTransaction is not null)
             await diagnosticTransaction.CommitAsync(ct);
-        return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
+        return Results.Ok(new { job.Id, job.Status, job.OutputType, job.OutputCompletedUtc, job.SpoolerStatus });
     }
 
     var previous = job.Status;
-    if (job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
-        string.Equals(request.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+    if (PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(job.OutputType, request.SpoolerStatus))
     {
         job.Status = "TEST_OUTPUT_READY";
         job.OutputCompletedUtc = now;
