@@ -21,7 +21,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its service in
 | Pairing and identity | Existing encrypted machine identity, enrollment, revocation, DPAPI and device identity behavior remain in the Agent. |
 | Private printing | Existing encrypted local queue and protected temporary-document handling remain in the Agent. |
 | Persistence | %ProgramData%\QRtoPrint is outside the package and must survive package upgrade and uninstall. |
-| WebView2 | Package currently relies on the machine's Evergreen WebView2 Runtime. It does not bundle an installer or fixed runtime. Runtime availability and the supported Windows edition/version matrix are release gates. |
+| WebView2 | The MSIX bundles Microsoft's signed Evergreen standalone runtime installer. Before Tauri initializes, the packaged app checks the WebView2 registry registration and silently installs the bundled Evergreen runtime only if it is missing. The runtime remains Evergreen and receives Microsoft updates; no fixed runtime is frozen into the app. A clean-machine first-launch test remains a release gate. |
 
 ## Package implementation
 
@@ -63,7 +63,7 @@ The existing website EXE uninstaller intentionally preserves machine data. The M
 5. The package firewall rule applies to the Agent executable and TCP 17842 across the intended Windows network profiles.
 6. A package upgrade preserves %ProgramData%\QRtoPrint and keeps the Agent service running.
 7. Package uninstall removes the packaged service but preserves machine data.
-8. The Windows runner has a valid Evergreen WebView2 Runtime registration.
+8. The Windows runner has a valid Evergreen WebView2 Runtime registration, and the package contains the Microsoft-signed standalone installer for machines where the runtime is absent.
 
 The current `desktop6:Service` manifest schema exposes service name, startup type, start account, arguments and dependencies, but no SCM failure-action settings. The existing EXE installer configures SCM recovery with `sc.exe`; the current MSIX package does not yet demonstrate equivalent crash recovery. This is a release blocker. Do not claim crash-recovery parity until a Store-compatible method is implemented and a forced Agent-process crash test proves automatic restart.
 
