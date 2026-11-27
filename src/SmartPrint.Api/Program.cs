@@ -6820,7 +6820,7 @@ agentApi.MapPost("/jobs/diagnostics/reconcile", async (
         .Select(attempt => attempt.PrintJobId)
         .ToListAsync(ct);
 
-    return Results.Ok(new AgentPrinterDiagnosticReconciliationResponse(confirmed));
+    return Results.Ok(new { confirmedJobIds = confirmed });
 });
 
 agentApi.MapPost("/jobs/claim", async (
