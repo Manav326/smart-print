@@ -12,7 +12,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its Agent serv
 
 | Area | Required behavior |
 |---|---|
-| Agent lifecycle | Windows registers `QRtoPrintSmartPrintAgent` (display name `QRtoPrint Smart Print Agent`) as an automatic packaged service under LocalService, matching the Agent binary's configured service name; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
+| Agent lifecycle | Windows registers `QRtoPrintSmartPrintAgent` as an automatic packaged service. The EXE installer sets the friendly display name `QRtoPrint Smart Print Agent`; the `desktop6:Service` MSIX schema has no separate display-name attribute, so the Services.msc label may differ. under LocalService, matching the Agent binary's configured service name; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
 | Desktop IPC | Existing named-pipe status, enrollment and network-selection operations remain available to the desktop UI. |
 | Local API / phone-to-printer | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary. The packaged CORS allow-list contains the exact customer portal origin supplied by `SMARTPRINT_PUBLIC_BASE_URL` plus `http://tauri.localhost`; it does not use a wildcard or the development `localhost:3000` origin. The package builder verifies these settings after unpacking the signed MSIX. |
 | LAN | Package declares private-network access and an inbound all-profile firewall exception for the Agent on TCP 17842. Agent-side selected-interface/subnet validation remains authoritative and must be tested on Private, Public and Domain profiles. |
@@ -43,7 +43,7 @@ The Agent appsettings.json is generated before packaging because MSIX contents a
 
 ## Website EXE and Store MSIX coexistence/migration
 
-The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They share TCP port 17842, the named pipe and machine-wide `%ProgramData%\QRtoPrint` data. Both installers and the Agent binary now use the same SCM service key `QRtoPrintSmartPrintAgent`; the display name remains `QRtoPrint Smart Print Agent`. This removes the previous service-name mismatch. Both packages must not be installed side by side because they would compete for the same local API, pipe and machine data.
+The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They share TCP port 17842, the named pipe and machine-wide `%ProgramData%\QRtoPrint` data. Both installers and the Agent binary now use the same SCM service key `QRtoPrintSmartPrintAgent`. The EXE installer sets the friendly display name `QRtoPrint Smart Print Agent`; the `desktop6:Service` MSIX schema has no separate display-name attribute, so we do not claim the Services.msc label is identical. This removes the previous service-name mismatch. Both packages must not be installed side by side because they would compete for the same local API, pipe and machine data.
 
 Switching distribution must be performed in this order; verify removal of the old distribution's own service key before installing the new one:
 1. Uninstall the currently installed Windows distribution first.
