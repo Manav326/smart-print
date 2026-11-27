@@ -93,7 +93,7 @@ The safest next step is to extend the existing Windows queue pathway and its own
 
 ### Phase A — diagnostic vertical slice on installed Windows queues
 
-<badge>Implemented in PR #132; physical hardware qualification remains open</badge>
+**Phase A status:** Implemented in PR #132; physical hardware qualification remains open.
 
 The Phase A code path is implemented as an owner-initiated, one-copy diagnostic on an already installed Windows queue. It adds a separate `PrinterDiagnosticAttempt` audit record and API start/confirm endpoints; produces a branded, versioned one-page PDF; uses the existing protected Agent queue, isolated Windows worker, and authorization immediately before `StartDoc`; records spooler evidence separately from the owner's physical-output decision; and excludes diagnostics from customer financial fulfilment, charging and monthly print-job usage.
 
