@@ -2939,7 +2939,7 @@ function PrinterDiagnosticControls({
       {pendingAttempt && !canConfirm && (
         <div className={pendingNeedsAttention ? "printer-diagnostic-pending is-stale" : "printer-diagnostic-pending"}>
           <p className="field-hint">{pendingNeedsAttention
-            ? t("This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.")
+            ? t("This test is taking longer than expected. Reconnect the Windows computer so the pending job can report its final result before another test.")
             : staged
               ? t("Waiting for Windows to finish this test. Keep the printer and paired computer on.")
               : t("Test queued. Keep the paired Windows computer and Print Agent online; SmartPrint will check automatically.")}</p>
