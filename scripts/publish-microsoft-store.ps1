@@ -119,6 +119,26 @@ function Invoke-StoreApi {
     throw "Microsoft Store API request exhausted its retry policy for $Method $Path."
 }
 
+Write-Host "Verifying the Partner Center dependency declaration and public privacy-policy metadata before touching the package."
+$metadataResponse = Invoke-StoreApi -Method GET -Path "/submission/v1/product/$ProductId/metadata?languages=en-us"
+$metadata = $metadataResponse.responseData
+if ($null -eq $metadata) { throw "Partner Center did not return product metadata. Refusing to submit without checking required declarations." }
+$dependsOnDriversOrNt = $null
+if ($metadata.PSObject.Properties["dependsOnDriversOrNT"]) { $dependsOnDriversOrNt = $metadata.dependsOnDriversOrNT }
+if ($null -eq $dependsOnDriversOrNt -and $metadata.properties -and $metadata.properties.PSObject.Properties["dependsOnDriversOrNT"]) { $dependsOnDriversOrNt = $metadata.properties.dependsOnDriversOrNT }
+if ($dependsOnDriversOrNt -ne $true) {
+    throw "Partner Center must declare dependsOnDriversOrNT=true for SmartPrint. The Windows Agent installs a non-Microsoft LocalService NT service. Set the declaration in the product properties, save the draft, and rerun; no package changes or submission were made."
+}
+$properties = $metadata.properties
+if ($null -eq $properties -or $properties.isPrivacyPolicyRequired -ne $true) {
+    throw "Partner Center must mark a privacy policy as required for SmartPrint. Set isPrivacyPolicyRequired=true and save the draft before submitting."
+}
+$privacyPolicyUrl = [string]$properties.privacyPolicyUrl
+$privacyPolicyUri = $null
+if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyPolicyUri) -or $privacyPolicyUri.Scheme -ne "https") {
+    throw "Partner Center must contain a real public HTTPS privacyPolicyUrl for SmartPrint. Supply and verify the product-specific policy before submitting."
+}
+Write-Host "Partner Center service-dependency declaration and HTTPS privacy-policy metadata are present."
 $draftStatusPath = "/submission/v1/product/$ProductId/status"
 $initialStatus = Invoke-StoreApi -Method GET -Path $draftStatusPath
 if (-not [string]::IsNullOrWhiteSpace([string]$initialStatus.responseData.ongoingSubmissionId)) {
