@@ -238,7 +238,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
             <div className="platform-ops-grid">
               {fields.map(field => (
                 <label className="platform-ops-field" key={field.key}>
-                  <span><strong>{field.label}</strong><small>{t(field.hint)}</small></span>
+                  <span><strong>{t(field.label)}</strong><small>{t(field.hint)}</small></span>
                   <input type="number" min={field.min} max={field.max} step={1} disabled={field.locked} value={draft[field.key]}
                     onChange={event => updateNumber(field.key, event.target.value)} aria-label={t(field.label)}/>
                 </label>
