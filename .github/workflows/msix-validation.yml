@@ -230,6 +230,7 @@ jobs:
         timeout-minutes: 50
         shell: pwsh
         env:
+          CERT_SUBJECT: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
           PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
