@@ -703,10 +703,10 @@ class MainActivity : AppCompatActivity() {
         }
         if (!requestedBefore || shouldExplain) {
             AlertDialog.Builder(this)
-                .setTitle("Connect to shop Wi-Fi")
-                .setMessage("Allow SmartPrint to check the shop computer and send selected documents directly over the shop Wi-Fi. Cloud-assisted upload remains available.")
-                .setPositiveButton("Continue") { _, _ -> launchPermissionRequest() }
-                .setNegativeButton("Not now") { _, _ -> completeLocalNetworkPermissionRequest(false) }
+                .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "Connect to shop Wi-Fi"))
+                .setMessage(AndroidCustomerLocale.translate(this@MainActivity, "Allow SmartPrint to check the shop computer and send selected documents directly over the shop Wi-Fi. Cloud-assisted upload remains available."))
+                .setPositiveButton(AndroidCustomerLocale.translate(this@MainActivity, "Continue")) { _, _ -> launchPermissionRequest() }
+                .setNegativeButton(AndroidCustomerLocale.translate(this@MainActivity, "Not now")) { _, _ -> completeLocalNetworkPermissionRequest(false) }
                 .setOnCancelListener { completeLocalNetworkPermissionRequest(false) }
                 .show()
         } else {
@@ -737,7 +737,7 @@ class MainActivity : AppCompatActivity() {
         toolbar = MaterialToolbar(this).apply {
             title = ""
             subtitle = ""
-            contentDescription = "SmartPrint by QuantaEdge"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "SmartPrint by QuantaEdge")
             setTitleTextColor(getColor(R.color.qp_text))
             setSubtitleTextColor(getColor(R.color.qp_muted))
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
@@ -746,7 +746,7 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.HORIZONTAL
                 gravity = Gravity.CENTER_VERTICAL
                 importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
-                contentDescription = "SmartPrint by QuantaEdge"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "SmartPrint by QuantaEdge")
             }
             val logo = ImageView(this@MainActivity).apply {
                 setImageResource(R.drawable.ic_launcher_foreground)
@@ -769,7 +769,7 @@ class MainActivity : AppCompatActivity() {
                 text = name
                 textSize = 16f
                 includeFontPadding = false
-                contentDescription = "SmartPrint"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "SmartPrint")
             })
             val brandMeta = LinearLayout(this@MainActivity).apply {
                 orientation = LinearLayout.HORIZONTAL
@@ -777,7 +777,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(0, dp(4), 0, 0)
             }
             brandMeta.addView(TextView(this@MainActivity).apply {
-                text = "by"
+                text = AndroidCustomerLocale.translate(this@MainActivity, "by")
                 textSize = 9f
                 setTextColor(getColor(R.color.qp_muted))
                 includeFontPadding = false
@@ -801,7 +801,7 @@ class MainActivity : AppCompatActivity() {
                 text = parentName
                 textSize = 10f
                 includeFontPadding = false
-                contentDescription = "QuantaEdge"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "QuantaEdge")
             }, LinearLayout.LayoutParams(-2, -2))
             toolbarPageContext = TextView(this@MainActivity).apply {
                 tag = "smartprint-toolbar-page"
@@ -843,7 +843,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             accountAction = ImageView(this@MainActivity).apply {
-                contentDescription = "Account"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Account")
                 setImageResource(R.drawable.ic_account)
                 imageTintList = ColorStateList.valueOf(this@MainActivity.getColor(R.color.qp_text))
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -903,21 +903,21 @@ class MainActivity : AppCompatActivity() {
     ): NavigationBarView {
         val created = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
         created.apply {
-            menu.add(Menu.NONE, HOME, 0, "Home").apply {
+            menu.add(Menu.NONE, HOME, 0, AndroidCustomerLocale.translate(this@MainActivity, "Home")).apply {
                 setIcon(R.drawable.ic_nav_home)
-                setContentDescription("Home")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Home"))
             }
-            menu.add(Menu.NONE, FILES, 1, "Files").apply {
+            menu.add(Menu.NONE, FILES, 1, AndroidCustomerLocale.translate(this@MainActivity, "Files")).apply {
                 setIcon(R.drawable.ic_nav_files)
-                setContentDescription("My Files")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "My Files"))
             }
-            menu.add(Menu.NONE, SCAN_PRINT, 2, "Print").apply {
+            menu.add(Menu.NONE, SCAN_PRINT, 2, AndroidCustomerLocale.translate(this@MainActivity, "Print")).apply {
                 setIcon(R.drawable.ic_nav_scan_print)
-                setContentDescription("Print at a shop")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Print at a shop"))
             }
-            menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
+            menu.add(Menu.NONE, ACTIVITY, 3, AndroidCustomerLocale.translate(this@MainActivity, "Activity")).apply {
                 setIcon(R.drawable.ic_nav_activity)
-                setContentDescription("Activity")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Activity"))
             }
             labelVisibilityMode = if (
                 useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(configuration.screenWidthDp)
@@ -1078,14 +1078,14 @@ class MainActivity : AppCompatActivity() {
 
     private fun setToolbarPage(title: String) {
         if (::toolbarPageContext.isInitialized) {
-            toolbarPageContext.text = "·  " + title.trim().uppercase(Locale.ROOT)
+            toolbarPageContext.text = "·  " + AndroidCustomerLocale.translate(this, title).trim().uppercase(Locale.ROOT)
         }
     }
 
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
         toolbar.navigationIcon = getDrawable(R.drawable.ic_arrow_back)
         toolbar.setNavigationIconTint(getColor(R.color.qp_text))
-        toolbar.navigationContentDescription = description
+        toolbar.navigationContentDescription = AndroidCustomerLocale.translate(this, description)
         toolbar.setNavigationOnClickListener { action() }
     }
 
@@ -1145,6 +1145,47 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshCustomerNavigationLabels() {
+        navigation.menu.findItem(HOME)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Home")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Home"))
+        }
+        navigation.menu.findItem(FILES)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Files")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "My Files"))
+        }
+        navigation.menu.findItem(SCAN_PRINT)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Print")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Print at a shop"))
+        }
+        navigation.menu.findItem(ACTIVITY)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Activity")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Activity"))
+        }
+    }
+
+    private fun chooseCustomerLanguage() {
+        val locales = arrayOf(AndroidCustomerLocale.ENGLISH, AndroidCustomerLocale.HINDI, AndroidCustomerLocale.HINGLISH)
+        val labels = arrayOf("English", "हिन्दी", "Hinglish")
+        val selected = locales.indexOf(AndroidCustomerLocale.current(this)).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "Language / भाषा"))
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                AndroidCustomerLocale.save(this, locales[which])
+                refreshCustomerNavigationLabels()
+                dialog.dismiss()
+                if (profileVisible) showProfile() else when (navigation.selectedItemId) {
+                    FILES -> showFiles()
+                    SCAN_PRINT -> if (portalUrl != null) showPrint() else showScanPrint()
+                    ACTIVITY -> showActivity()
+                    else -> showHome()
+                }
+                webView?.evaluateJavascript(AndroidCustomerLocale.documentStartScript(this), null)
+            }
+            .setNegativeButton(AndroidCustomerLocale.translate(this@MainActivity, "Cancel"), null)
+            .show()
+    }
+
     private fun accountView(): View {
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val column = LinearLayout(this).apply {
@@ -1176,7 +1217,24 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8) })
         appearanceContent.addView(themeChoices)
         appearanceCard.addView(appearanceContent)
-        column.addView(appearanceCard, linearParams().apply { bottomMargin = dp(16) })
+        column.addView(appearanceCard, linearParams().apply { bottomMargin = dp(10) })
+
+        val languageCard = card()
+        val languageContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        languageContent.addView(text("Language", 15, R.color.qp_text, true))
+        languageContent.addView(text(
+            "Choose the language for customer-facing app screens.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(10)) })
+        languageContent.addView(button(AndroidCustomerLocale.label(this), false).apply {
+            minHeight = dp(44)
+            setOnClickListener { chooseCustomerLanguage() }
+        }, LinearLayout.LayoutParams(-1, dp(44)))
+        languageCard.addView(languageContent)
+        column.addView(languageCard, linearParams().apply { bottomMargin = dp(16) })
 
         column.addView(text(
             if (auth == null) "Guest access is ready" else "Smart Print customer",
@@ -1203,8 +1261,8 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), 0, 0, 0)
             }
-            details.addView(text(auth.displayName.ifBlank { "Smart Print customer" }, 16, R.color.qp_text, true))
-            details.addView(text(auth.email, 12, R.color.qp_muted, false).apply {
+            details.addView(text(auth.displayName.ifBlank { "Smart Print customer" }, 16, R.color.qp_text, true, translate = auth.displayName.isBlank()))
+            details.addView(text(auth.email, 12, R.color.qp_muted, false, translate = false).apply {
                 setPadding(0, dp(3), 0, 0)
             })
             profile.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
@@ -1241,7 +1299,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         val displayName = EditText(this).apply {
-            hint = "Name"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, "Name")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             visibility = if (accountCreateMode) View.VISIBLE else View.GONE
             maxLines = 1
@@ -1251,7 +1309,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(11), dp(12), dp(11))
         }
         val email = EditText(this).apply {
-            hint = "Email address"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, "Email address")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             maxLines = 1
             setTextColor(getColor(R.color.qp_text))
@@ -1260,7 +1318,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(11), dp(12), dp(11))
         }
         val password = EditText(this).apply {
-            hint = if (accountCreateMode) "Password · 12+ chars" else "Password"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, if (accountCreateMode) "Password · 12+ chars" else "Password")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             maxLines = 1
             setTextColor(getColor(R.color.qp_text))
@@ -1627,7 +1685,7 @@ class MainActivity : AppCompatActivity() {
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
             minHeight = dp(48)
-            contentDescription = "ID Studio — scan both sides of an ID"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "ID Studio — scan both sides of an ID")
             setOnClickListener { showIdStudioHome() }
         }, LinearLayout.LayoutParams(0, dp(48), 1f))
         studioActions.addView(button("Photo Studio", false).apply {
@@ -1637,7 +1695,7 @@ class MainActivity : AppCompatActivity() {
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             textSize = 11f
             minHeight = dp(48)
-            contentDescription = "Photo Studio — prepare photo sheets"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Photo Studio — prepare photo sheets")
             setOnClickListener { showDedicatedPhotoStudio() }
         }, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
         heroContent.addView(studioActions, LinearLayout.LayoutParams(-1, dp(48)).apply { topMargin = dp(10) })
@@ -1789,7 +1847,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
             })
-            addView(text(message, 12, R.color.qp_muted, false).apply {
+            addView(text(message, 12, R.color.qp_muted, false, translate = false).apply {
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
                 setPadding(0, dp(7), 0, dp(16))
@@ -1946,7 +2004,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { showProfile() }
             }, linearParams())
         } else {
-            column.addView(text(auth.email, 11, R.color.qp_muted, false)
+            column.addView(text(auth.email, 11, R.color.qp_muted, false, translate = false)
                 .apply { setPadding(0, dp(3), 0, dp(12)) })
             val history = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             column.addView(history, linearParams())
@@ -1988,7 +2046,7 @@ class MainActivity : AppCompatActivity() {
             setImageResource(android.R.drawable.ic_popup_sync)
             imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
             background = roundedDrawable(getColor(R.color.qp_card), dp(10), getColor(R.color.qp_outline))
-            contentDescription = "Refresh print history"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Refresh print history")
             isEnabled = !refreshing
             alpha = if (refreshing) 0.55f else 1f
             setPadding(dp(9), dp(9), dp(9), dp(9))
@@ -2001,7 +2059,7 @@ class MainActivity : AppCompatActivity() {
                 .apply { setPadding(0, 0, 0, dp(8)) })
         }
         if (refreshError != null) {
-            container.addView(text(refreshError, 11, R.color.qp_danger, false)
+            container.addView(text(refreshError, 11, R.color.qp_danger, false, translate = false)
                 .apply { setPadding(0, 0, 0, dp(8)) })
         }
         if (groups.isEmpty()) {
@@ -2024,7 +2082,7 @@ class MainActivity : AppCompatActivity() {
         filterRow.addView(text("Status", 11, R.color.qp_muted, true),
             LinearLayout.LayoutParams(dp(55), -2))
         val statusSpinner = android.widget.Spinner(this).apply {
-            contentDescription = "History status filter"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "History status filter")
             val labels = listOf("All statuses") + statusValues.map(::activityStatusLabel)
             adapter = android.widget.ArrayAdapter(
                 this@MainActivity,
@@ -2045,7 +2103,7 @@ class MainActivity : AppCompatActivity() {
         var rendering = false
         val pager = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            contentDescription = "History pagination"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "History pagination")
             setPadding(0, dp(9), 0, 0)
             visibility = View.GONE
         }
@@ -2054,7 +2112,7 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
         }
         val pageRange = text("", 10, R.color.qp_muted, true).apply {
-            contentDescription = "History page range"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "History page range")
         }
         val pageSizeChoices = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -2073,17 +2131,17 @@ class MainActivity : AppCompatActivity() {
             minHeight = dp(34)
             minWidth = dp(0)
             textSize = 19f
-            contentDescription = "Previous page"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Previous page")
         }
         val pageLabel = text("", 10, R.color.qp_text, true).apply {
             gravity = Gravity.CENTER
-            contentDescription = "History page indicator"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "History page indicator")
         }
         val next = button("›", false).apply {
             minHeight = dp(34)
             minWidth = dp(0)
             textSize = 19f
-            contentDescription = "Next page"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Next page")
         }
         pageNavigation.addView(previous, LinearLayout.LayoutParams(dp(42), dp(34)))
         pageNavigation.addView(pageLabel, LinearLayout.LayoutParams(0, -2, 1f))
@@ -2123,7 +2181,7 @@ class MainActivity : AppCompatActivity() {
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dp(2), dp(8), dp(2), dp(6))
                     }
-                    monthHeader.addView(text(monthLabel, 15, R.color.qp_text, true),
+                    monthHeader.addView(text(monthLabel, 15, R.color.qp_text, true, translate = false),
                         LinearLayout.LayoutParams(0, -2, 1f))
                     monthHeader.addView(text("${monthBatches.size} orders", 10, R.color.qp_muted, true))
                     results.addView(monthHeader, linearParams())
@@ -2160,7 +2218,7 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                         }
-                        top.addView(text(title, 13, R.color.qp_text, true),
+                        top.addView(text(title, 13, R.color.qp_text, true, translate = false),
                             LinearLayout.LayoutParams(0, -2, 1f))
                         top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
                             setPadding(dp(8), dp(5), dp(8), dp(5))
@@ -2201,7 +2259,7 @@ class MainActivity : AppCompatActivity() {
                                 else getColor(R.color.qp_primary)
                             )
                             progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_outline))
-                            contentDescription = "Batch completion ${outcome.progressPercent} percent"
+                            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Batch completion ${outcome.progressPercent} percent")
                         }
                         body.addView(progress, LinearLayout.LayoutParams(-1, dp(6)).apply {
                             topMargin = dp(2)
@@ -2245,7 +2303,7 @@ class MainActivity : AppCompatActivity() {
                         actionRow.addView(button("Track order", false).apply {
                             minHeight = dp(28)
                             textSize = 9f
-                            contentDescription = "Track order $title"
+                            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Track order $title")
                             setOnClickListener { showCustomerJobDetails(batch) }
                         }, LinearLayout.LayoutParams(dp(96), dp(28)))
                         body.addView(actionRow, linearParams().apply { topMargin = dp(5) })
@@ -2264,7 +2322,7 @@ class MainActivity : AppCompatActivity() {
                         minHeight = dp(30)
                         minWidth = dp(0)
                         textSize = 10f
-                        contentDescription = "Show $size orders per page"
+                        contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Show $size orders per page")
                         setPadding(dp(8), dp(4), dp(8), dp(4))
                         setOnClickListener {
                             if (selectedPageSize != size) {
@@ -2488,9 +2546,9 @@ class MainActivity : AppCompatActivity() {
                     val files = payload.optJSONArray("files") ?: JSONArray()
                     if (files.length() == 0) {
                         AlertDialog.Builder(this)
-                            .setTitle("Order details unavailable")
-                            .setMessage("No files were found for this print order.")
-                            .setPositiveButton("Close", null)
+                            .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "Order details unavailable"))
+                            .setMessage(AndroidCustomerLocale.translate(this@MainActivity, "No files were found for this print order."))
+                            .setPositiveButton(AndroidCustomerLocale.translate(this@MainActivity, "Close"), null)
                             .show()
                         return@onSuccess
                     }
@@ -2515,7 +2573,7 @@ class MainActivity : AppCompatActivity() {
                         setPadding(dp(16), dp(12), dp(16), dp(18))
                     }
 
-                    detailColumn.addView(text(headline, 18, R.color.qp_text, true)
+                    detailColumn.addView(text(headline, 18, R.color.qp_text, true, translate = false)
                         .apply { setPadding(0, 0, 0, dp(5)) })
                     val orderName = order.optString("batchName").takeIf(String::isNotBlank)
                         ?: order.optString("batchGroupName").takeIf(String::isNotBlank)
@@ -2552,7 +2610,7 @@ class MainActivity : AppCompatActivity() {
                             else getColor(R.color.qp_primary)
                         )
                         progressBackgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_outline))
-                        contentDescription = "Order completion ${outcome.progressPercent} percent"
+                        contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Order completion ${outcome.progressPercent} percent")
                     }
                     summaryBody.addView(progress, LinearLayout.LayoutParams(-1, dp(6)).apply {
                         topMargin = dp(9)
@@ -2580,9 +2638,10 @@ class MainActivity : AppCompatActivity() {
                         val privatePrinting = job.optBoolean(
                             "privatePrinting", historyItem?.privatePrinting ?: false
                         )
-                        val fileName = if (privatePrinting) "Private document" else
+                        val fileName = if (privatePrinting) AndroidCustomerLocale.translate(this, "Private document") else
                             job.optString("originalFileName").takeIf(String::isNotBlank)
-                                ?: historyItem?.originalFileName ?: "Print document"
+                                ?: historyItem?.originalFileName
+                                ?: AndroidCustomerLocale.translate(this, "Print document")
                         val fileCard = card()
                         val fileBody = LinearLayout(this).apply {
                             orientation = LinearLayout.VERTICAL
@@ -2592,7 +2651,7 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                         }
-                        fileHeader.addView(text(fileName, 12, R.color.qp_text, true),
+                        fileHeader.addView(text(fileName, 12, R.color.qp_text, true, translate = false),
                             LinearLayout.LayoutParams(0, -2, 1f))
                         fileHeader.addView(text(
                             activityStatusLabel(job.optString("status")),
@@ -2636,7 +2695,7 @@ class MainActivity : AppCompatActivity() {
                                 ?: historyItem?.currency ?: "INR"
                         )
                         if (paymentSummary != null) {
-                            fileBody.addView(text(paymentSummary, 9, R.color.qp_muted, false)
+                            fileBody.addView(text(paymentSummary, 9, R.color.qp_muted, false, translate = false)
                                 .apply { setPadding(0, dp(5), 0, 0) })
                         }
                         fileCard.addView(fileBody)
@@ -2759,9 +2818,9 @@ class MainActivity : AppCompatActivity() {
                     trackingDialog.show()
                 }.onFailure { error ->
                     AlertDialog.Builder(this)
-                        .setTitle("Order details unavailable")
+                        .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "Order details unavailable"))
                         .setMessage(error.message ?: "Please reconnect and try again.")
-                        .setPositiveButton("Close", null)
+                        .setPositiveButton(AndroidCustomerLocale.translate(this@MainActivity, "Close"), null)
                         .show()
                 }
             }
@@ -3062,7 +3121,7 @@ class MainActivity : AppCompatActivity() {
         if (!isPicker) {
             val searchRow = LinearLayout(this).apply { orientation = LinearLayout.HORIZONTAL; gravity = Gravity.CENTER_VERTICAL }
             val search = EditText(this).apply {
-                hint = "Search this folder"
+                hint = AndroidCustomerLocale.translate(this@MainActivity, "Search this folder")
                 maxLines = 1
                 setSingleLine(true)
                 textSize = 14f
@@ -3085,14 +3144,15 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(2), dp(3), dp(2), dp(8))
         }
-        val breadcrumbText = if (path.isBlank()) "My Files" else "My Files  ›  " + path.replace("/", "  ›  ")
-        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
+        val breadcrumbText = if (path.isBlank()) AndroidCustomerLocale.translate(this, "My Files") else
+            AndroidCustomerLocale.translate(this, "My Files") + "  ›  " + path.replace("/", "  ›  ")
+        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true, translate = false),
             LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
             val up = ImageView(this).apply {
                 setImageResource(R.drawable.ic_arrow_upward)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_text))
-                contentDescription = "Go up one folder"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Go up one folder")
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
                 setPadding(dp(9), dp(9), dp(9), dp(9))
                 background = roundedDrawable(getColor(R.color.qp_soft), dp(11))
@@ -3363,7 +3423,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, dp(4), 0)
         }
-        details.addView(text(file.name, 13, R.color.qp_text, true).apply {
+        details.addView(text(file.name, 13, R.color.qp_text, true, translate = false).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         })
@@ -3371,7 +3431,7 @@ class MainActivity : AppCompatActivity() {
             val count = runCatching { store.list(file).size }.getOrDefault(0)
             "$count items"
         } else android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length())
-        details.addView(text(info, 10, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
+        details.addView(text(info, 10, R.color.qp_muted, false, translate = false).apply { setPadding(0, dp(2), 0, 0) })
         row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
 
         if (file.isDirectory) {
@@ -3393,7 +3453,7 @@ class MainActivity : AppCompatActivity() {
             if (isPicker && fileChooserSelectFolders) {
                 val selected = CheckBox(this).apply {
                     isChecked = chooserSelectedFolderPaths.contains(file.canonicalPath)
-                    contentDescription = "Select folder " + file.name
+                    contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Select folder ") + file.name
                     buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
                     setOnCheckedChangeListener { _, checked -> setChooserFolderSelected(file, checked) }
                 }
@@ -3403,14 +3463,14 @@ class MainActivity : AppCompatActivity() {
             val selected = CheckBox(this).apply {
                 isChecked = chooserSelectedFilePaths.contains(file.canonicalPath)
                 isEnabled = !pickerPreparingSelection
-                contentDescription = "Select " + file.name
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Select ") + file.name
                 setOnCheckedChangeListener { _, checked -> setChooserFileSelected(file, checked) }
             }
             row.addView(selected, LinearLayout.LayoutParams(dp(40), dp(40)))
         } else if (!isPicker && showActions && librarySelectionMode) {
             val selected = CheckBox(this).apply {
                 isChecked = selectedFilePaths.contains(file.canonicalPath)
-                contentDescription = "Select " + file.name
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Select ") + file.name
                 buttonTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
                 setOnCheckedChangeListener { _, checked ->
                     if (checked) selectedFilePaths.add(file.canonicalPath) else selectedFilePaths.remove(file.canonicalPath)
@@ -3424,7 +3484,7 @@ class MainActivity : AppCompatActivity() {
             val more = ImageView(this).apply {
                 setImageResource(R.drawable.ic_more_vertical)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_muted))
-                contentDescription = "More options for " + file.name
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "More options for ") + file.name
                 setPadding(dp(8), dp(8), dp(8), dp(8))
                 isClickable = true
                 isFocusable = true
@@ -3716,7 +3776,7 @@ class MainActivity : AppCompatActivity() {
         }
         scroll.addView(column)
 
-        column.addView(text(file.name, 15, R.color.qp_text, true))
+        column.addView(text(file.name, 15, R.color.qp_text, true, translate = false))
         column.addView(text(
             "Rasterized copy · Original kept.",
             11, R.color.qp_muted, false
@@ -3766,7 +3826,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(button("View", false).apply {
                 minHeight = dp(42)
                 minWidth = dp(0)
-                contentDescription = "Preview page ${position + 1}"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Preview page ${position + 1}")
                 setOnClickListener {
                     try {
                         showImageSheet("Page ${position + 1}", DocumentBatchComposer.renderPagePreview(file, page))
@@ -3778,7 +3838,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(button("↻", false).apply {
                 minHeight = dp(42)
                 minWidth = dp(0)
-                contentDescription = "Rotate page ${position + 1}"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Rotate page ${position + 1}")
                 setOnClickListener {
                     pages[position] = page.copy(rotationDegrees = (page.rotationDegrees + 90) % 360)
                     renderPdfEditor(file, pages)
@@ -3787,7 +3847,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(button("↑", false).apply {
                 minHeight = dp(42)
                 minWidth = dp(0)
-                contentDescription = "Move page ${position + 1} up"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Move page ${position + 1} up")
                 isEnabled = position > 0
                 alpha = if (position > 0) 1f else 0.4f
                 setOnClickListener {
@@ -3801,7 +3861,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(button("↓", false).apply {
                 minHeight = dp(42)
                 minWidth = dp(0)
-                contentDescription = "Move page ${position + 1} down"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Move page ${position + 1} down")
                 isEnabled = position < pages.lastIndex
                 alpha = if (position < pages.lastIndex) 1f else 0.4f
                 setOnClickListener {
@@ -3815,7 +3875,7 @@ class MainActivity : AppCompatActivity() {
             actions.addView(button("×", false).apply {
                 minHeight = dp(42)
                 minWidth = dp(0)
-                contentDescription = "Remove page ${position + 1}"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Remove page ${position + 1}")
                 setOnClickListener {
                     if (pages.size <= 1) {
                         toast("A PDF needs one page.")
@@ -4171,7 +4231,7 @@ class MainActivity : AppCompatActivity() {
             setSingleLine(true)
             setText(initial)
             setSelection(text.length)
-            hint = "Name"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, "Name")
             textSize = 14f
             setTextColor(getColor(R.color.qp_text))
             setHintTextColor(getColor(R.color.qp_muted))
@@ -4202,7 +4262,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun addPrivateSecurityWatermark(container: FrameLayout) {
         val securityMark = TextView(this).apply {
-            text = "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW"
+            text = AndroidCustomerLocale.translate(this@MainActivity, "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW")
             textSize = 9f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             letterSpacing = 0.12f
@@ -4252,6 +4312,8 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureWebView(): WebView {
         webView?.let { return it }
+        // Capture the Activity context before entering WebViewClient callbacks.
+        val customerLocaleContext = applicationContext
         val view = WebView(this).apply {
             setBackgroundColor(getColor(R.color.qp_surface))
             isVerticalScrollBarEnabled = false
@@ -4281,7 +4343,7 @@ class MainActivity : AppCompatActivity() {
         if (themeBootstrapPlan.injectAtDocumentStart) {
             WebViewCompat.addDocumentStartJavaScript(
                 view,
-                SmartPrintThemeWebBootstrap.script(),
+                SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this),
                 setOf(trustedOrigin, offlinePhotoStudioOrigin)
             )
             webViewThemeBootstrapInstalled = true
@@ -4684,7 +4746,7 @@ class MainActivity : AppCompatActivity() {
                     // Fallback for WebView providers without DOCUMENT_START_SCRIPT.
                     // Reconcile saved preferences without forcing a reload or erasing
                     // a newer selection made inside the embedded portal.
-                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script(), null)
+                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(customerLocaleContext), null)
                 }
             }
             override fun onReceivedError(
@@ -4827,7 +4889,7 @@ class MainActivity : AppCompatActivity() {
             if (bitmap != null) runOnUiThread {
                 if (!isFinishing && !isDestroyed && imageView.tag == raw) {
                     imageView.setPadding(0, 0, 0, 0)
-                    imageView.contentDescription = "Connected shop logo"
+                    imageView.contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Connected shop logo")
                     imageView.setImageBitmap(bitmap)
                 } else bitmap.recycle()
             }
@@ -4953,7 +5015,7 @@ class MainActivity : AppCompatActivity() {
                     setCardBackgroundColor(getColor(R.color.qp_card))
                     isClickable = true
                     isFocusable = true
-                    contentDescription = "Sponsored: " + headline
+                    contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Sponsored: ") + headline
                 }
                 val row = LinearLayout(this).apply {
                     orientation = LinearLayout.HORIZONTAL
@@ -4975,14 +5037,14 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(11), 0, dp(5), 0)
                 }
-                copy.addView(text("SPONSORED · " + advertiser, 8, R.color.qp_muted, true))
-                copy.addView(text(headline, 12, R.color.qp_text, true).apply {
+                copy.addView(text(AndroidCustomerLocale.translate(this, "SPONSORED · ") + advertiser, 8, R.color.qp_muted, true, translate = false))
+                copy.addView(text(headline, 12, R.color.qp_text, true, translate = false).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     setPadding(0, dp(3), 0, 0)
                 })
                 if (body.isNotBlank()) {
-                    copy.addView(text(body, 10, R.color.qp_muted, false).apply {
+                    copy.addView(text(body, 10, R.color.qp_muted, false, translate = false).apply {
                         maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END
                         setPadding(0, dp(3), 0, 0)
@@ -5388,7 +5450,7 @@ class MainActivity : AppCompatActivity() {
                 val thumbnail = ImageView(this).apply {
                     setImageResource(R.drawable.ic_file)
                     scaleType = ImageView.ScaleType.FIT_CENTER
-                    contentDescription = "ID card front preview"
+                    contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "ID card front preview")
                     background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
                     tag = runCatching { file.canonicalPath }.getOrDefault(file.name)
                 }
@@ -5398,7 +5460,7 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
                 }
-                details.addView(text(displayName, 13, R.color.qp_text, true).apply {
+                details.addView(text(displayName, 13, R.color.qp_text, true, translate = false).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 })
@@ -5413,13 +5475,13 @@ class MainActivity : AppCompatActivity() {
                 actions.addView(button("View", false).apply {
                     minHeight = dp(34)
                     textSize = 11f
-                    contentDescription = "View ID card for $displayName"
+                    contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "View ID card for $displayName")
                     setOnClickListener { viewPreparedId(file) }
                 }, LinearLayout.LayoutParams(0, dp(36), 1f))
                 actions.addView(button("⋮", false).apply {
                     minHeight = dp(34)
                     minWidth = dp(40)
-                    contentDescription = "More actions for $displayName"
+                    contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "More actions for $displayName")
                     setOnClickListener {
                         val menu = mutableListOf<Pair<String, () -> Unit>>()
                         menu += "Rename" to {
@@ -5817,19 +5879,19 @@ class MainActivity : AppCompatActivity() {
             val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_file_image)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                contentDescription = "Photo file"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Photo file")
                 background = roundedDrawable(getColor(R.color.qp_soft), dp(8))
                 setPadding(dp(9), dp(9), dp(9), dp(9))
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
-            row.addView(text(photo.name, 12, R.color.qp_text, true).apply {
+            row.addView(text(photo.name, 12, R.color.qp_text, true, translate = false).apply {
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(9), 0, dp(6), 0)
             }, LinearLayout.LayoutParams(0, -2, 1f))
             row.addView(button("Use photo", true).apply {
                 minHeight = dp(38)
-                contentDescription = "Use ${photo.name} for ID $side"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Use ${photo.name} for ID $side")
                 setOnClickListener { saveIdStudioPhoto(side) { FileInputStream(photo) } }
             }, LinearLayout.LayoutParams(-2, dp(38)))
             column.addView(row, linearParams().apply { bottomMargin = dp(6) })
@@ -5894,7 +5956,7 @@ class MainActivity : AppCompatActivity() {
             minHeight = dp(48)
             isEnabled = hasFront && hasBack
             alpha = if (isEnabled) 1f else 0.55f
-            contentDescription = "Continue to ID review"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Continue to ID review")
             setOnClickListener {
                 if (idStudioStore.hasFront(draftId) && idStudioStore.hasBack(draftId)) {
                     showIdStudioReview()
@@ -5929,7 +5991,7 @@ class MainActivity : AppCompatActivity() {
         }
         val preview = ImageView(this).apply {
             scaleType = ImageView.ScaleType.CENTER_CROP
-            contentDescription = "ID $side scan preview"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "ID $side scan preview")
             background = roundedDrawable(getColor(R.color.qp_soft), dp(9))
             if (captured) loadIdStudioDraftThumbnail(this, side)
             else setImageResource(R.drawable.ic_file_image)
@@ -5940,7 +6002,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), 0, 0, 0)
         }
-        details.addView(text(title, 13, R.color.qp_text, true))
+        details.addView(text(title, 13, R.color.qp_text, true, translate = false))
         details.addView(text(
             if (captured) "Photo saved privately" else "No photo added yet",
             10, R.color.qp_muted, false
@@ -5952,13 +6014,13 @@ class MainActivity : AppCompatActivity() {
         actions.addView(button("Take photo", true).apply {
             minHeight = dp(36)
             textSize = 11f
-            contentDescription = "Take $side photo"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Take $side photo")
             setOnClickListener { startIdStudioSideScan(side) }
         }, LinearLayout.LayoutParams(0, dp(38), 1f))
         actions.addView(button("Import photo", false).apply {
             minHeight = dp(36)
             textSize = 11f
-            contentDescription = "Import $side photo"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Import $side photo")
             setOnClickListener { showIdStudioPhotoSourceSheet(side) }
         }, LinearLayout.LayoutParams(0, dp(38), 1f).apply { marginStart = dp(6) })
         details.addView(actions)
@@ -6216,7 +6278,7 @@ class MainActivity : AppCompatActivity() {
             true
         ).apply {
             gravity = Gravity.CENTER
-            contentDescription = "Change ID card dimensions"
+            contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Change ID card dimensions")
             isClickable = true
             isFocusable = true
             setPadding(dp(8), dp(4), dp(8), dp(4))
@@ -6239,10 +6301,10 @@ class MainActivity : AppCompatActivity() {
                 sizeFields.addView(widthInput, LinearLayout.LayoutParams(0, dp(48), 1f))
                 sizeFields.addView(heightInput, LinearLayout.LayoutParams(0, dp(48), 1f).apply { marginStart = dp(8) })
                 AlertDialog.Builder(this@MainActivity)
-                    .setTitle("ID card size · mm")
+                    .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "ID card size · mm"))
                     .setView(sizeFields)
-                    .setNegativeButton("Cancel", null)
-                    .setPositiveButton("Apply") { _, _ ->
+                    .setNegativeButton(AndroidCustomerLocale.translate(this@MainActivity, "Cancel"), null)
+                    .setPositiveButton(AndroidCustomerLocale.translate(this@MainActivity, "Apply")) { _, _ ->
                         val width = widthInput.text.toString().toFloatOrNull()
                         val height = heightInput.text.toString().toFloatOrNull()
                         if (width == null || height == null) {
@@ -6439,7 +6501,7 @@ class MainActivity : AppCompatActivity() {
             val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_file_image)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                contentDescription = "Prepared Photo Studio PDF"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Prepared Photo Studio PDF")
                 background = roundedDrawable(getColor(R.color.qp_card), dp(7))
                 setPadding(dp(9), dp(9), dp(9), dp(9))
             }
@@ -6486,7 +6548,7 @@ class MainActivity : AppCompatActivity() {
             val icon = ImageView(this).apply {
                 setImageResource(R.drawable.ic_file)
                 imageTintList = ColorStateList.valueOf(getColor(R.color.qp_primary))
-                contentDescription = "Prepared ID Studio PDF"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Prepared ID Studio PDF")
                 background = roundedDrawable(getColor(R.color.qp_card), dp(7))
                 setPadding(dp(9), dp(9), dp(9), dp(9))
             }
@@ -7670,7 +7732,7 @@ class MainActivity : AppCompatActivity() {
                 setDataAndType(uri, mediaType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(intent, "Open document"))
+            startActivity(Intent.createChooser(intent, AndroidCustomerLocale.translate(this@MainActivity, "Open document")))
         } catch (_: Exception) { toast("No app could open this document.") }
     }
 
@@ -7688,7 +7750,7 @@ class MainActivity : AppCompatActivity() {
                 clipData = ClipData.newUri(contentResolver, file.name, uri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
-            startActivity(Intent.createChooser(intent, "Share document"))
+            startActivity(Intent.createChooser(intent, AndroidCustomerLocale.translate(this@MainActivity, "Share document")))
         } catch (_: Exception) { toast("Could not share this document.") }
     }
 
@@ -7740,15 +7802,21 @@ class MainActivity : AppCompatActivity() {
         setCardBackgroundColor(getColor(R.color.qp_glass_card))
         useCompatPadding = false
     }
-    private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
-        text = value
+    private fun text(
+        value: String,
+        size: Int,
+        color: Int,
+        bold: Boolean,
+        translate: Boolean = true
+    ) = TextView(this).apply {
+        text = if (translate) AndroidCustomerLocale.translate(this@MainActivity, value) else value
         textSize = maxOf(size, 11).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
         includeFontPadding = false
     }
     private fun button(value: String, primary: Boolean) = MaterialButton(this).apply {
-        text = value
+        text = AndroidCustomerLocale.translate(this@MainActivity, value)
         isAllCaps = false
         minHeight = dp(42)
         minWidth = dp(0)
@@ -7773,6 +7841,6 @@ class MainActivity : AppCompatActivity() {
         return FrameLayout.LayoutParams(width, -1, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
+    private fun toast(value: String) = Toast.makeText(this, AndroidCustomerLocale.translate(this, value), Toast.LENGTH_LONG).show()
     private fun message(e: Exception) = e.message?.takeIf { it.isNotBlank() } ?: "Unexpected error"
 }

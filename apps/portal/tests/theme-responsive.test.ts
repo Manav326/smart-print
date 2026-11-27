@@ -761,7 +761,7 @@ test("native Android toolbar follows the transparent SmartPrint by QuantaEdge lo
   assert.ok(start >= 0 && end > start, "The native toolbar must keep an explicit brand metadata row.");
   const brandMeta = activity.slice(start, end);
 
-  assert.match(brandMeta, /text = "by"/);
+  assert.match(brandMeta, /text = AndroidCustomerLocale\.translate\(this@MainActivity, "by"\)/);
   assert.match(brandMeta, /SpannableString\("QuantaEdge"\)/);
   assert.match(brandMeta, /qp_parent_navy/);
   assert.match(brandMeta, /qp_parent_orange/);
