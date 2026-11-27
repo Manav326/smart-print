@@ -184,7 +184,7 @@ test("Photo Studio locks background scroll and supports accessible keyboard dism
  assert.match(studio,/document\.body\.style\.overflow = "hidden"/);
  assert.match(studio,/event\.key === "Escape"/);
  assert.match(studio,/event\.key !== "Tab"/);
- assert.match(studio,/disabled=\{busy\} aria-label="Close Photo Studio"/);
+ assert.match(studio,/disabled=\{busy\} aria-label=\{t\("Close Photo Studio"\)\}/);
  assert.match(css,/@media\(max-width:390px\)[\s\S]*?topbarMeta span:last-child\{display:none\}/);
 });
 
@@ -260,7 +260,7 @@ test("Photo Studio restores focus to the customer or shop control after it close
 test("customers are told when the shop has not enabled photo printing",()=>{
  const app=readFileSync(new URL("../src/App.tsx",import.meta.url),"utf8");
  assert.match(app,/Photo printing unavailable/);
- assert.match(app,/CustomerInlineNotice kind="info" title="Photo printing unavailable"/);
+ assert.match(app,/CustomerInlineNotice kind="info" title=\{t\("Photo printing unavailable"\)\}/);
  assert.match(app,/Ask the shop to enable photo printing and set its rates/);
 });
 
@@ -445,9 +445,9 @@ test("Photo Studio preview supports direct crop dragging with pointer capture an
 test("Photo Studio contextual help is readable, dismissible and theme-aware instead of permanent panel copy",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  const css=readFileSync(new URL("../src/PhotoStudio.module.css",import.meta.url),"utf8");
- assert.match(studio,/aria-label=\{"Help: "\+panelTitle\}/);
+ assert.match(studio,/aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
  assert.match(studio,/aria-expanded=\{openHelpTool===activeTool\}/);
- assert.match(studio,/role="region" aria-label=\{panelTitle\+" guidance"\}/);
+ assert.match(studio,/role="region" aria-label=\{t\("\{panel\} guidance",\{panel:panelTitle\}\)\}/);
  assert.match(studio,/openHelpToolRef\.current !== null/);
  assert.match(studio,/dismissOnOutsidePointer/);
  for(const help of ["Drag a photo to reframe it","Crop zoom changes the print","Balanced, true-to-life colour","A gentle warmer tone","Slightly clearer and brighter","Monochrome photo","Bold text","colour-key tool, not AI subject recognition","Name and DOB captions are optional"])
@@ -553,10 +553,10 @@ test("Photo Studio normalizes the live Number of copies input value on blur",()=
  const quantityField=quantityStart>=0 && quantityEnd>=0 ? studio.slice(quantityStart,quantityEnd+2) : "";
  assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.match(quantityField,/aria-label=\{t\("Number of copies"\)\}/);
  assert.ok(quantityField,"Number of copies input must exist by its stable ID.");
  assert.match(quantityField,/type="number"/);
- assert.match(quantityField,/aria-label="Number of copies"/);
+ assert.match(quantityField,/aria-label=\{t\("Number of copies"\)\}/);
  assert.match(quantityField,/onBlur=\{event\s*=>/);
  assert.match(quantityField,/event\.currentTarget\.value/);
  assert.doesNotMatch(quantityField,/Number\(copiesInput\)/,
@@ -606,7 +606,7 @@ test("Photo Studio browser acceptance covers every editor tool and failure recov
 test("Photo Studio text layers are independently selectable, editable, draggable and included in the A4 PDF",()=>{
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.match(studio,/id="photo-studio-tool-text"/);
- assert.match(studio,/title="Add, select and position text on the A4 sheet"/);
+ assert.match(studio,/title=\{t\("Add, select and position text on the A4 sheet"\)\}/);
  assert.doesNotMatch(studio,/id="photo-studio-tool-text"[^>]*disabled=/);
  assert.match(studio,/id="photo-studio-add-text"/);
  assert.match(studio,/id="photo-studio-text-content"/);
@@ -705,7 +705,7 @@ test("Photo Studio preview zoom is independent from crop zoom and print export",
  const studio=readFileSync(new URL("../src/PhotoStudio.tsx",import.meta.url),"utf8");
  assert.ok(studio.includes("const [previewScale,setPreviewScale]=useState(1)"));
  assert.ok(studio.includes("transform: `scale(${previewScale})`"));
- assert.ok(studio.includes('aria-label="Preview zoom in"'));
+ assert.ok(studio.includes('aria-label={t("Preview zoom in")}'));
  assert.ok(studio.includes('id="photo-studio-reset-preview" onClick={() => setPreviewScale(1)}'));
  assert.ok(studio.includes('id="photo-studio-zoom"'));
  assert.ok(studio.includes("value={zoom} onChange="));

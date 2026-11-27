@@ -142,7 +142,10 @@ test("one accessible theme control is available to all application route familie
   const adminAuth = read("../src/PlatformAdminAuthScreen.tsx");
   const admin = read("../src/PlatformAdminConsole.tsx");
 
-  assert.match(toggle, /aria-label=\{dark \? "Switch to light theme" : "Switch to dark theme"\}/);
+  assert.match(toggle, /useLocale/);
+  assert.match(toggle, /translateUiText\(locale, dark \? "Switch to light theme" : "Switch to dark theme"\)/);
+  assert.match(toggle, /aria-label=\{label\}/);
+  assert.match(toggle, /title=\{label\}/);
   assert.match(app, /<PublicLandingPage dark=\{dark\} onToggleTheme=\{toggleTheme\}/);
   assert.match(app, /<CustomerEntry publicCode=\{route\.publicCode\} dark=\{dark\}/);
   assert.match(app, /<ShopConsole tokens=\{tokens\} onSignOut=\{onShopSignOut\} dark=\{dark\}/);
@@ -175,8 +178,8 @@ test("light and dark palettes cover authentication, customer QR and public landi
     "Photo Studio title and help control must remain aligned in a dedicated header row.");
   assert.match(photoStudio, /\.helpTooltipPanel\s*\{[^}]*display:grid[^}]*line-height:1\.65/s,
     "Photo Studio guidance must use readable line spacing in its contextual panel.");
-  assert.match(photoStudioComponent, /aria-label=\{"Help: "\+panelTitle\}/);
-  assert.match(photoStudioComponent, /role="region" aria-label=\{panelTitle\+" guidance"\}/,
+  assert.match(photoStudioComponent, /aria-label=\{t\("Help: \{panel\}",\{panel:panelTitle\}\)\}/);
+  assert.match(photoStudioComponent, /role="region" aria-label=\{t\("\{panel\} guidance",\{panel:panelTitle\}\)\}/,
     "Photo Studio helper content must be available in the accessible contextual-help region.");
 });
 
@@ -380,10 +383,11 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(sidebar, /sectionGroups\.map/);
   assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
     "Trial, help and owner controls must not be permanently pinned in the sidebar.");
-  assert.match(app, /Personal details/);
-  assert.match(app, /Shop profile &amp; branding/);
-  assert.match(app, /Trial &amp; subscription/);
-  assert.match(app, /Help &amp; support/);
+  assert.match(app, /t\("Personal details"\)/);
+  assert.match(app, /t\("Shop profile & branding"\)/);
+  assert.match(app, /t\("Trial & subscription"\)/);
+  assert.match(app, /t\("Help & support"\)/);
+  assert.match(app, /t\("Sign out"\)/);
   assert.match(app, /accountMenuOpen/);
   assert.ok(app.indexOf("const [accountMenuOpen") < app.indexOf("if (!accountMenuOpen) return"),
     "The account-menu state must be initialized before its dismissal effect reads it.");
@@ -478,10 +482,10 @@ test("folder defaults inherit to files and advanced paper options are opt-in", (
   assert.ok(flow.includes("checked={defaults.advancedEnabled}"));
   assert.ok(flow.includes("checked={own.advancedEnabled}"));
   assert.ok(flow.includes("{!isIdStudioGroup&&defaults.advancedEnabled&&"));
-  assert.ok(flow.includes("<span>ID sheet</span>"));
-  assert.ok(flow.includes("<span>Print mode</span>"));
-  assert.ok(flow.includes('>B&W</button>'));
-  assert.ok(flow.includes('>Colour</button>'));
+  assert.ok(flow.includes("<span>{t(\"ID sheet\")}</span>"));
+  assert.ok(flow.includes("<span>{t(\"Print mode\")}</span>"));
+  assert.ok(flow.includes('>{t("B&W")}</button>'));
+  assert.ok(flow.includes('>{t("Colour")}</button>'));
   assert.ok(flow.includes("A4\",orientation:\"PORTRAIT\""));
   assert.ok(flow.includes('{defaults.colourMode==="Mono"'));
   assert.ok(flow.includes('Copies · all files'));
@@ -654,8 +658,8 @@ test("session renewal refreshes customer payment choices and explains unavailabl
   assert.match(app, /paymentOptions:session\.paymentOptions/);
   assert.match(backend, /PaymentOptions = paymentOptions/);
   assert.equal((app.match(/Ask the shop to enable UPI or cash at the counter/g) ?? []).length, 2);
-  assert.equal((app.match(/title="No payment method available"/g) ?? []).length, 2);
-  assert.equal((app.match(/title="Cash at counter unavailable"/g) ?? []).length, 2);
+  assert.equal((app.match(/title=\{t\("No payment method available"\)\}/g) ?? []).length, 2);
+  assert.equal((app.match(/title=\{t\("Cash at counter unavailable"\)\}/g) ?? []).length, 2);
 });
 
 test("contextual help supports outside-click and Escape dismissal", () => {
@@ -900,14 +904,14 @@ test("customer batch quote separates the total, included files, excluded files a
   const app = read("../src/App.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(app, /aria-label="Batch quote summary"/);
+  assert.match(app, /aria-label=\{t\("Batch quote summary"\)\}/);
   assert.match(app, /batchQuoteSummary/);
   assert.match(app, /customer-batch-quote-chip included/);
   assert.match(app, /customer-batch-quote-chip excluded/);
   assert.match(app, /customer-batch-quote-chip document/);
   assert.match(app, /customer-batch-quote-chip id-card/);
   assert.match(app, /customer-batch-quote-chip photo/);
-  assert.match(app, /aria-label="File-by-file prices"/);
+  assert.match(app, /aria-label=\{t\("File-by-file prices"\)\}/);
   assert.match(app, /customer-batch-quote-line-amount/);
   assert.match(app, /quoteRows\.map\(entry=>/);
   assert.match(app, /batchQuoteNeedsRefresh/);
@@ -930,7 +934,7 @@ test("shop batch review communicates included and excluded choices, valid quotes
   const app = read("../src/App.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(app, /aria-label="Batch review summary"/);
+  assert.match(app, /aria-label=\{t\("Batch review summary"\)\}/);
   assert.match(app, /Accepted value · valid quotes only/);
   assert.match(app, /Included files stay in one checkout/);
   assert.match(app, /See order status/);
@@ -998,7 +1002,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(css, /@media\(max-width:650px\)/);
   assert.match(css, /@media\(max-width:420px\)/);
   assert.match(css, /@media\(prefers-reduced-motion:reduce\)/);
-  assert.match(app, /aria-label="Selected files and print settings"/);
+  assert.match(app, /aria-label=\{t\("Selected files and print settings"\)\}/);
   assert.match(app, /role="progressbar"/);
   assert.match(app, /aria-pressed=\{selectedFileIndex===index\}/);
   assert.match(app, /Local transfer unavailable\./);
@@ -1007,7 +1011,7 @@ test("customer upload page uses a consistent responsive layout for every conditi
   assert.match(app, /cloudAssistedPrintingEnabled\?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"/);
   assert.match(app, /Boolean\(localAgent\?\.endpoints\.length\)&&message&&checkStatus/);
   assert.doesNotMatch(app, /title="Shop connection unavailable"/);
-  assert.match(app, /CustomerInlineNotice kind="info" title="Private Printing unavailable"/);
+  assert.match(app, /CustomerInlineNotice kind="info" title=\{t\("Private Printing unavailable"\)\}/);
   assert.match(app, /The paired shop computer must be online and publish its encryption key/);
   assert.doesNotMatch(app, /className="customer-privacy-unavailable"/);
   assert.doesNotMatch(css, /customer-privacy-unavailable/);
@@ -1050,10 +1054,10 @@ test("shop owners can only select online ready printer queues and new printers r
   assert.match(printerAvailability, /hasRecentHeartbeat\(printer\.lastSeenUtc, now\)/);
   assert.match(printerAvailability, /if \(!printer\.isActive\) return "Not selected for new jobs"/);
   assert.match(app, /Adding a new printer/);
-  assert.match(app, /Printers &amp; scanners, choose Add device/);
+  assert.match(app, /Windows Settings → Printers & scanners, choose Add device/);
   assert.match(app, /pair that PC's SmartPrint Print Agent to this shop/);
   assert.match(app, /lists the queue automatically/);
-  assert.match(app, /actionLabel="Check Print Agent"/);
+  assert.match(app, /actionLabel=\{t\("Check Print Agent"\)\}/);
   assert.match(app, /onOpenAgent=\{\(\) => navAction\("Print Agent"\)\}/);
   assert.match(app, /use Select to add a queue without replacing anything/);
   assert.ok(app.includes("setPendingReplacement(printer);") && app.includes('setReplacePrinterId("");'));

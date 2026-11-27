@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import PhotoStudio, { type PreparedPhotoSheet } from "../src/PhotoStudio";
+import { LanguageProvider } from "../src/i18n";
 import { A4_HEIGHT_POINTS, A4_HEIGHT_PX, A4_WIDTH_POINTS, A4_WIDTH_PX, getPhotoPaperPageGeometry, getPhotoSheetPhotoPositions, type PhotoSheetSize } from "../src/photo-studio-layout";
 
 function containsByteSequence(haystack: Uint8Array, needle: Uint8Array): boolean {
@@ -338,4 +339,4 @@ function PhotoStudioBrowserFixture() {
   </main>;
 }
 
-createRoot(document.getElementById("photo-studio-qa-root")!).render(<PhotoStudioBrowserFixture />);
+createRoot(document.getElementById("photo-studio-qa-root")!).render(<LanguageProvider><PhotoStudioBrowserFixture /></LanguageProvider>);

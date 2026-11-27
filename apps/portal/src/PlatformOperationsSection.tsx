@@ -41,6 +41,7 @@ const fields: Array<{ key: NumericKey; label: string; hint: string; min: number;
 ];
 
 type Draft = Omit<PlatformOperationalSettings, "updatedByUserId" | "updatedUtc">;
+import { useLocale, translateUiText } from "./i18n";
 function toDraft(value: PlatformOperationalSettings): Draft {
   const draft: Partial<PlatformOperationalSettings> = { ...value };
   delete draft.updatedByUserId;
@@ -49,6 +50,8 @@ function toDraft(value: PlatformOperationalSettings): Draft {
 }
 
 function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [queues, setQueues] = useState<PlatformVirtualPrinterTestQueue[]>([]);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(true);
@@ -62,7 +65,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       setQueues(await getPlatformVirtualPrinterTestQueues(tokens.accessToken));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not load virtual printer queues.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load virtual printer queues."));
     } finally {
       setLoading(false);
     }
@@ -72,7 +75,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 
   async function approve(queue: PlatformVirtualPrinterTestQueue) {
     if (reason.trim().length < 5) {
-      setError("Enter an approval reason of at least five characters.");
+      setError(t("Enter an approval reason of at least five characters."));
       return;
     }
     setBusyId(queue.id);
@@ -81,10 +84,10 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       await approvePlatformVirtualPrinterTestQueue(tokens.accessToken, queue.tenantId, queue.id, reason.trim());
       setReason("");
-      setSuccess("Virtual queue approved for this shop for seven days. The queue identity remains virtual.");
+      setSuccess(t("Virtual queue approved for this shop for seven days. The queue identity remains virtual."));
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not approve this virtual printer.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not approve this virtual printer."));
     } finally {
       setBusyId("");
     }
@@ -92,7 +95,7 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 
   async function revoke(queue: PlatformVirtualPrinterTestQueue, grantId: string) {
     if (reason.trim().length < 5) {
-      setError("Enter a revocation reason of at least five characters.");
+      setError(t("Enter a revocation reason of at least five characters."));
       return;
     }
     const confirmed = window.confirm(
@@ -105,10 +108,10 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
     try {
       await revokePlatformVirtualPrinterTestGrant(tokens.accessToken, grantId, reason.trim());
       setReason("");
-      setSuccess("Virtual printer grant revoked. New dispatches will be denied.");
+      setSuccess(t("Virtual printer grant revoked. New dispatches will be denied."));
       await reload();
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not revoke this virtual printer grant.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not revoke this virtual printer grant."));
     } finally {
       setBusyId("");
     }
@@ -117,14 +120,14 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
   return (
     <section className="panel platform-ops-history">
       <div className="platform-ops-heading">
-        <div><h3>Shop-scoped virtual printer test access</h3><p>Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.</p></div>
-        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> Refresh</button>
+        <div><h3>{t("Shop-scoped virtual printer test access")}</h3><p>{t("Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.")}</p></div>
+        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> {t("Refresh")}</button>
       </div>
-      <label className="platform-ops-reason"><span>Approval / revocation reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Reason required for the audit history"/></label>
+      <label className="platform-ops-reason"><span>{t("Approval / revocation reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Reason required for the audit history")}/></label>
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="inline-success" role="status">{success}</div>}
-      {loading ? <div className="platform-plan-empty">Loading discovered virtual queues…</div> : queues.length === 0
-        ? <div className="platform-plan-empty">No unsupported virtual Windows queues are currently discovered.</div>
+      {loading ? <div className="platform-plan-empty">{t("Loading discovered virtual queues…")}</div> : queues.length === 0
+        ? <div className="platform-plan-empty">{t("No unsupported virtual Windows queues are currently discovered.")}</div>
         : <div className="platform-ops-history-list">
             {queues.map(queue => {
               const activeGrant = queue.grants.find(grant => grant.isActive);
@@ -150,6 +153,8 @@ function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
 }
 
 export default function PlatformOperationsSection({ tokens }: { tokens: AuthTokens }) {
+  const { locale } = useLocale();
+  const t = (value: string) => translateUiText(locale, value);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [history, setHistory] = useState<PlatformOperationalSettingsAudit[]>([]);
   const [reason, setReason] = useState("");
@@ -169,7 +174,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       setDraft(toDraft(current));
       setHistory(events);
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not load platform operational settings.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load platform operational settings."));
     } finally {
       setLoading(false);
     }
@@ -186,7 +191,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
   async function save() {
     if (!draft) return;
     if (reason.trim().length < 5) {
-      setError("Enter an audit reason of at least five characters.");
+      setError(t("Enter an audit reason of at least five characters."));
       return;
     }
     setSaving(true);
@@ -197,10 +202,10 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       const saved = await updatePlatformOperationalSettings(tokens.accessToken, payload);
       setDraft(toDraft(saved));
       setReason("");
-      setSuccess("Platform settings saved. The API and connected Windows Agents will apply the updated values.");
+      setSuccess(t("Platform settings saved. The API and connected Windows Agents will apply the updated values."));
       setHistory(await getPlatformOperationalSettingsHistory(tokens.accessToken));
     } catch (exception) {
-      setError(exception instanceof Error ? exception.message : "Could not save platform settings.");
+      setError(exception instanceof Error ? t(exception.message) : t("Could not save platform settings."));
     } finally {
       setSaving(false);
     }
@@ -210,32 +215,32 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
     <section className="platform-ops-page">
       <div className="platform-ops-intro">
         <div>
-          <div className="platform-plan-kicker"><ShieldCheck size={14}/> PLATFORM POLICY</div>
-          <h2>Operations, quotas and data retention</h2>
-          <p>Central controls enforced by the API and paired Windows Agents. Every change is persisted with an audit reason.</p>
+          <div className="platform-plan-kicker"><ShieldCheck size={14}/> {t("PLATFORM POLICY")}</div>
+          <h2>{t("Operations, quotas and data retention")}</h2>
+          <p>{t("Central controls enforced by the API and paired Windows Agents. Every change is persisted with an audit reason.")}</p>
         </div>
         <button className="secondary-button" onClick={() => void reload()} disabled={loading || saving}>
-          <RefreshCw size={14}/> Refresh
+          <RefreshCw size={14}/> {t("Refresh")}
         </button>
       </div>
 
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="platform-plan-success" role="status"><ShieldCheck size={15}/>{success}</div>}
       {loading && !draft ? (
-        <div className="panel platform-loading"><LoaderCircle size={17} className="platform-spin"/> Loading platform settings…</div>
+        <div className="panel platform-loading"><LoaderCircle size={17} className="platform-spin"/>{t("Loading platform settings…")}</div>
       ) : draft ? (
         <>
           <section className="panel platform-ops-panel">
             <div className="platform-ops-heading">
-              <div><h3>Monthly print quota and retention</h3><p>Quota units are print jobs, not pages or copies. Paid plan limits remain versioned per plan.</p></div>
-              <span className="neutral-chip">Platform-managed</span>
+              <div><h3>{t("Monthly print quota and retention")}</h3><p>{t("Quota units are print jobs, not pages or copies. Paid plan limits remain versioned per plan.")}</p></div>
+              <span className="neutral-chip">{t("Platform-managed")}</span>
             </div>
             <div className="platform-ops-grid">
               {fields.map(field => (
                 <label className="platform-ops-field" key={field.key}>
-                  <span><strong>{field.label}</strong><small>{field.hint}</small></span>
+                  <span><strong>{t(field.label)}</strong><small>{t(field.hint)}</small></span>
                   <input type="number" min={field.min} max={field.max} step={1} disabled={field.locked} value={draft[field.key]}
-                    onChange={event => updateNumber(field.key, event.target.value)} aria-label={field.label}/>
+                    onChange={event => updateNumber(field.key, event.target.value)} aria-label={t(field.label)}/>
                 </label>
               ))}
             </div>
@@ -245,7 +250,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
                   const checked = event.target.checked;
                   setDraft(current => current ? { ...current, allowPrivatePrintingVirtualOutput: checked } : current);
                 }}/>
-              <span><strong>Allow Microsoft Print to PDF for Private Printing tests</strong><small>Non-production only. The Agent currently recognizes Microsoft Print to PDF as its supported virtual test queue. Other virtual drivers remain ineligible until their unattended output behaviour is explicitly validated. Production APIs always reject virtual output, even if this setting is accidentally enabled.</small></span>
+              <span><strong>{t("Allow Microsoft Print to PDF for Private Printing tests")}</strong><small>{t("Non-production only. The Agent currently recognizes Microsoft Print to PDF as its supported virtual test queue. Other virtual drivers remain ineligible until their unattended output behaviour is explicitly validated. Production APIs always reject virtual output, even if this setting is accidentally enabled.")}</small></span>
             </label>
             <label className="platform-ops-toggle">
               <input type="checkbox" checked={draft.allowPaidJobClaimsWhenSuspended}
@@ -253,10 +258,10 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
                   const checked = event.target.checked;
                   setDraft(current => current ? { ...current, allowPaidJobClaimsWhenSuspended: checked } : current);
                 }}/>
-              <span><strong>Allow already-paid jobs to continue during suspension</strong><small>Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.</small></span>
+              <span><strong>{t("Allow already-paid jobs to continue during suspension")}</strong><small>{t("Only jobs created and payment-verified before the latest suspension can be claimed. New orders and post-suspension payments remain blocked.")}</small></span>
             </label>
             <div className="platform-ops-save-row">
-              <label className="platform-ops-reason"><span>Audit reason</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder="Why are these platform settings changing?"/></label>
+              <label className="platform-ops-reason"><span>{t("Audit reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Why are these platform settings changing?")}/></label>
               <button className="primary-button" onClick={() => void save()} disabled={saving || loading}>
                 {saving ? <LoaderCircle size={14} className="platform-spin"/> : <Save size={14}/>} Save settings
               </button>
@@ -267,12 +272,12 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>
-            <div><strong>Safety behaviour</strong><p>Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents are deleted 72 hours after confirmed output. Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing source files are removed only after verified physical output or a verified non-production test output and the paired Agent acknowledges deletion. Test PDFs are not physical fulfilment and are separately retained in protected local storage for 24 hours. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.</p></div>
+            <div><strong>{t("Safety behaviour")}</strong><p>{t("Output-unconfirmed and unfinished jobs are never automatically deleted. Completed Standard Printing documents are deleted 72 hours after confirmed output. Eligible abandoned files are purged only after the abandonment window and once financial holds clear. Private Printing source files are removed only after verified physical output or a verified non-production test output and the paired Agent acknowledges deletion. Test PDFs are not physical fulfilment and are separately retained in protected local storage for 24 hours. Permanent tenant deactivation is blocked until unsettled print and financial work is resolved.")}</p></div>
           </section>
 
           <section className="panel platform-ops-history">
-            <div className="platform-ops-heading"><div><h3>Settings audit history</h3><p>Most recent platform-wide changes</p></div><span>{history.length} events</span></div>
-            {history.length === 0 ? <div className="platform-plan-empty">No operational settings changes have been recorded yet.</div> : (
+            <div className="platform-ops-heading"><div><h3>{t("Settings audit history")}</h3><p>{t("Most recent platform-wide changes")}</p></div><span>{history.length} events</span></div>
+            {history.length === 0 ? <div className="platform-plan-empty">{t("No operational settings changes have been recorded yet.")}</div> : (
               <div className="platform-ops-history-list">
                 {history.map(item => (
                   <details className="platform-ops-history-item" key={item.id}>

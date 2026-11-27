@@ -25,7 +25,7 @@ test("print queue columns stay constrained and scroll inside their own viewport"
 
 test("confirmed PDF export locations are shown as a separate, wrapping detail", () => {
   assert.match(app, /verifiedPdfExportPath\(job\) && <div className="queue-batch-file-output"/);
-  assert.match(app, /<span>Saved PDF location<\/span>/);
+  assert.match(app, /<span>\{t\("Saved PDF location"\)\}<\/span>/);
   assert.match(styles, /\.queue-batch-file-output code\s*\{[^}]*overflow-wrap:\s*anywhere/s);
 });
 
