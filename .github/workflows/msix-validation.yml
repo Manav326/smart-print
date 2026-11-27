@@ -419,6 +419,17 @@ jobs:
           if (Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "QRtoPrint Smart Print Agent Local API*" }) {
             throw "The EXE installer parity test left an Agent firewall rule behind."
           }
+      - name: Upload non-release MSIX validation candidate and public test certificate
+        if: success() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: smartprint-msix-validation-candidate-${{ inputs.version }}
+          path: |
+            artifacts/SmartPrint-Windows-Store.msix
+            artifacts/SmartPrint-MSIX-DevCert.cer
+          if-no-files-found: error
+          retention-days: 30
+
       - name: Enforce service recovery release gate
         if: success()
         shell: pwsh
@@ -426,13 +437,3 @@ jobs:
           if ("${{ steps.service_validation.outputs.recovery_ready }}" -ne "true") {
             throw "MSIX service crash-recovery parity is not proven. Do not release or submit this package."
           }
-      - name: Upload Store-submission MSIX and public test certificate
-        if: success() && github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: smartprint-msix-${{ inputs.version }}
-          path: |
-            artifacts/SmartPrint-Windows-Store.msix
-            artifacts/SmartPrint-MSIX-DevCert.cer
-          if-no-files-found: error
-          retention-days: 30
