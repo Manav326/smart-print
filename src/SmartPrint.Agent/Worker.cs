@@ -64,7 +64,8 @@ public sealed class Worker(
             RunAuthorizedPrintDispatchLoopAsync(stoppingToken),
             RunPrivateRelayLoopAsync(stoppingToken),
             RunPrivateDocumentPurgeLoopAsync(stoppingToken),
-            RunPrivateSpoolerCleanupLoopAsync(stoppingToken));
+            RunPrivateSpoolerCleanupLoopAsync(stoppingToken),
+            RunDiagnosticReconciliationLoopAsync(stoppingToken));
     }
 
     // A PostgreSQL-backed long poll wakes this Agent as soon as its own shop
@@ -1953,6 +1954,60 @@ public sealed class Worker(
         }
     }
 
+    private async Task RunDiagnosticReconciliationLoopAsync(CancellationToken ct)
+    {
+        while (!ct.IsCancellationRequested)
+        {
+            try
+            {
+                var credentials = LoadSecureCredentials();
+                var jobIds = localQueueStore.GetPendingDiagnosticReconciliationJobIds();
+                if (credentials is not null && jobIds.Count > 0)
+                {
+                    using var client = httpClientFactory.CreateClient("cloud");
+                    client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");
+                    using var response = await SendAgentRequestAsync(
+                        client,
+                        credentials,
+                        "api/v1/agent/jobs/diagnostics/reconcile",
+                        new AgentPrinterDiagnosticReconciliationRequest(jobIds),
+                        ct);
+                    if (response.IsSuccessStatusCode)
+                    {
+                        var reconciliation = await response.Content.ReadFromJsonAsync<AgentPrinterDiagnosticReconciliationResponse>(ct);
+                        foreach (var jobId in reconciliation?.ConfirmedJobIds.Distinct() ?? Array.Empty<Guid>())
+                        {
+                            ct.ThrowIfCancellationRequested();
+                            var entry = localQueueStore.Find(jobId);
+                            if (entry is null || entry.Origin != "PRINTER_DIAGNOSTIC")
+                                continue;
+                            await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
+                        }
+                    }
+                    else
+                    {
+                        logger.LogWarning("Diagnostic completion reconciliation returned HTTP {StatusCode}; protected local files remain queued.", (int)response.StatusCode);
+                    }
+                }
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (HttpRequestException exception)
+            {
+                logger.LogWarning(exception, "The Agent could not reconcile terminal diagnostic results; it will retry.");
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Diagnostic completion reconciliation failed; protected files remain queued for retry.");
+            }
+
+            try { await Task.Delay(pollInterval, ct); }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
+        }
+    }
+
     private async Task RunPrivateSpoolerCleanupLoopAsync(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
@@ -2101,7 +2156,15 @@ public sealed class Worker(
     {
         using var response = await SendAgentRequestAsync(client, credentials, $"api/v1/agent/jobs/{jobId}/print-blocked",
             new { reasonCode = code, message = message.Length > 300 ? message[..300] : message, spoolerJobName }, ct);
-        if (!response.IsSuccessStatusCode) logger.LogWarning("Print block for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
+        if (!response.IsSuccessStatusCode)
+        {
+            logger.LogWarning("Print block for {JobId} returned HTTP {StatusCode}.", jobId, (int)response.StatusCode);
+            return;
+        }
+
+        var cloudState = await response.Content.ReadFromJsonAsync<AgentCloudSpoolerStatusResponse>(ct);
+        if (cloudState?.Status == "COMPLETED")
+            await localQueueStore.MarkOutputConfirmedAsync(jobId, ct);
     }
 
     private async Task<bool> ReportOutputUnconfirmedAsync(HttpClient client, AgentCredentials credentials, Guid jobId, string code, string message, CancellationToken ct)
