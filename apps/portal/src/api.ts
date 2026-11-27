@@ -6,6 +6,11 @@ import { identifySupportedDocument } from "./document-content-policy";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
+import {
+  customerPrivateRelayPollDelay,
+  shouldReconcileCustomerPrivateRelayPostError,
+  shouldRetryCustomerPrivateRelayStatusError
+} from "./private-relay-retry";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -1736,38 +1741,6 @@ function waitForCustomerStagePoll(ms:number,signal:AbortSignal):Promise<void> {
     const timer=window.setTimeout(finish,ms);
     signal.addEventListener("abort",finish,{once:true});
   });
-}
-
-/** Bounded, jittered polling keeps slow private handoffs observable without hammering the API. */
-function customerPrivateRelayPollDelay(
-  consecutivePendingChecks:number,
-  consecutiveErrors:number,
-  stageChanged:boolean
-):number {
-  if(consecutiveErrors>0){
-    const backoff=Math.min(30_000,2_000*Math.pow(2,Math.min(consecutiveErrors-1,4)));
-    return Math.round(backoff*(0.8+Math.random()*0.4));
-  }
-  const base=stageChanged?1_500:Math.min(12_000,1_500*Math.pow(1.7,Math.min(consecutivePendingChecks,5)));
-  return Math.round(base*(0.85+Math.random()*0.3));
-}
-
-/** Status reads are safe to retry for transient transport/server/rate-limit failures. */
-function shouldRetryCustomerPrivateRelayStatusError(exception:unknown):boolean {
-  if(!(exception instanceof ApiError))return true;
-  return exception.status===0||exception.status===408||exception.status===429||exception.status>=500||
-    (exception.status===409&&exception.code==="private_relay_completion_missing");
-}
-
-/** Ambiguous relay writes are reconciled against the ticket before any retry. */
-function shouldReconcileCustomerPrivateRelayPostError(exception:unknown):boolean {
-  if(!(exception instanceof ApiError))return true;
-  return exception.status===0||exception.status===408||exception.status===429||exception.status>=500||
-    (exception.status===409&&[
-      "private_relay_direct_transfer_in_progress",
-      "private_relay_state_changed",
-      "private_relay_already_completed"
-    ].includes(exception.code??""));
 }
 
 async function pollCustomerPrivateRelayStages(
