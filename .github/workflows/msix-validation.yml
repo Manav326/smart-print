@@ -103,8 +103,8 @@ jobs:
           $expectedServiceName = "QRtoPrintSmartPrintAgent"
           $checks = [ordered]@{
             "src/SmartPrint.Agent/Program.cs" = '(?m)options\.ServiceName\s*=\s*"QRtoPrintSmartPrintAgent"'
-            "scripts/install-agent-service.ps1" = '(?m)^\$serviceName\s*=\s*"QRtoPrintSmartPrintAgent"$'
-            "scripts/uninstall-agent-service.ps1" = '(?m)^\$serviceName\s*=\s*"QRtoPrintSmartPrintAgent"$'
+            "scripts/install-agent-service.ps1" = '(?m)^\$serviceName\s*=\s*"QRtoPrintSmartPrintAgent"\r?$'
+            "scripts/uninstall-agent-service.ps1" = '(?m)^\$serviceName\s*=\s*"QRtoPrintSmartPrintAgent"\r?$'
             "scripts/build-msix-package.ps1" = '<desktop6:Service Name="QRtoPrintSmartPrintAgent"'
           }
           foreach ($entry in $checks.GetEnumerator()) {
