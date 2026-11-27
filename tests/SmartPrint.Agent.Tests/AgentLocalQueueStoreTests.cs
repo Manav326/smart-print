@@ -620,6 +620,65 @@ public sealed class AgentLocalQueueStoreTests
     }
 
     [Fact]
+    public async Task PermanentlyRejectedLocalUploadIsSecurelyRemovedFromProtectedQueue()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Photo Studio PDF rejected by server validation"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT"
+            };
+            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+
+            Assert.True(await store.DeleteRejectedLocalUploadAsync(job.Id, CancellationToken.None));
+
+            Assert.Null(store.Find(job.Id));
+            Assert.False(File.Exists(entry.DocumentPath));
+            Assert.Empty(Directory.GetFiles(root, "*.json"));
+            Assert.Empty(Directory.GetFiles(root, "*.qdoc"));
+            Assert.Empty(Directory.GetFiles(root, "*.qdoc.photo.source"));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task RejectedUploadCleanupNeverDeletesAQueueEntryAlreadyFinalizedForPayment()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "Validated private upload"u8.ToArray();
+            var job = CreateJob(bytes) with
+            {
+                Status = "LOCAL_UPLOAD_STAGED",
+                StorageMode = "LOCAL_AGENT"
+            };
+            var entry = await store.EnqueueLocalUploadAsync(job, bytes, CancellationToken.None);
+            await store.MarkLocalUploadFinalizedAsync(job.Id, CancellationToken.None);
+
+            Assert.False(await store.DeleteRejectedLocalUploadAsync(job.Id, CancellationToken.None));
+
+            Assert.Equal("LOCAL_UPLOAD_PENDING_PAYMENT", store.Find(job.Id)!.State);
+            Assert.True(File.Exists(entry.DocumentPath));
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(job.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task RejectsChangedContentForAnExistingJobId()
     {
         var root = CreateTemporaryDirectory();

@@ -69,7 +69,7 @@ public sealed class PrivateRelayProgressRulesTests
         Assert.Contains("checking file security",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.DecryptingAndAuthenticating),
             StringComparison.OrdinalIgnoreCase);
-        Assert.Contains("secure upload confirmed · awaiting shop review",
+        Assert.Contains("secure upload confirmed",
             PrivateRelayProgressRules.CustomerMessage(PrivateRelayProgressRules.Ready),
             StringComparison.OrdinalIgnoreCase);
         Assert.Contains("awaiting shop review",

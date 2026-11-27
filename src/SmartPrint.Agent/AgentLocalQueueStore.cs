@@ -1322,6 +1322,41 @@ public sealed class AgentLocalQueueStore
         }
     }
 
+    /// <summary>
+    /// Securely removes a protected local copy only after the API has permanently
+    /// rejected its unfinalized upload ticket. Finalized or paid queue entries are
+    /// never eligible for this cleanup path.
+    /// </summary>
+    public async Task<bool> DeleteRejectedLocalUploadAsync(Guid jobId, CancellationToken cancellationToken)
+    {
+        await stagedUploadLeaseGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entry = Find(jobId);
+            if (entry is null || entry.State != "LOCAL_UPLOAD_STAGED") return false;
+
+            var queueRootFull = Path.GetFullPath(queueRoot);
+            var queuePrefix = queueRootFull.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+            var documentPath = Path.GetFullPath(entry.DocumentPath);
+            if (!documentPath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The rejected local upload document path is outside the protected queue.");
+
+            var photoSourcePath = Path.GetFullPath(entry.PhotoSourcePath ?? entry.DocumentPath + ".photo.source");
+            if (!photoSourcePath.StartsWith(queuePrefix, comparison))
+                throw new InvalidDataException("The rejected local upload photo source path is outside the protected queue.");
+
+            await EraseProtectedQueueFileAsync(documentPath, queuePrefix, comparison, cancellationToken);
+            await EraseProtectedQueueFileAsync(photoSourcePath, queuePrefix, comparison, cancellationToken);
+            RemoveManifest(jobId, GetManifestPath(jobId));
+            return true;
+        }
+        finally
+        {
+            stagedUploadLeaseGate.Release();
+        }
+    }
+
     public async Task<bool> DeleteExpiredLocalUploadAsync(Guid jobId, DateTimeOffset now, CancellationToken cancellationToken)
     {
         await stagedUploadLeaseGate.WaitAsync(cancellationToken);

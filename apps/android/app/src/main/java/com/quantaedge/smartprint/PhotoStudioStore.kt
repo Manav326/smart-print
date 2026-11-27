@@ -189,6 +189,31 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
         }
     }
 
+    /**
+     * Returns the exact output metadata required by the customer upload contract.
+     * Older saved sheets stored layout/finish only inside editorSettings, so keep
+     * that fallback when reading pre-fix library entries.
+     */
+    fun readUploadSettings(file: File): JSONObject {
+        val metadata = readMetadata(file)
+        val editorSettings = metadata.optJSONObject("editorSettings")
+        val outputLayout = metadata.optString("photoOutputLayout")
+            .takeIf { it.isNotBlank() }
+            ?: editorSettings?.optString("photoOutputLayout")?.takeIf { it.isNotBlank() }
+            ?: "A4_SHEET"
+        val paperFinish = metadata.optString("photoPaperFinish")
+            .takeIf { it.isNotBlank() }
+            ?: editorSettings?.optString("photoPaperFinish")?.takeIf { it.isNotBlank() }
+            ?: if (outputLayout == "PHOTO_PAPER") "GLOSSY" else "PLAIN"
+
+        return JSONObject()
+            .put("sizeCode", metadata.optString("sizeCode"))
+            .put("photoCount", metadata.optInt("photoCount"))
+            .put("photosPerPage", metadata.optInt("photosPerPage"))
+            .put("photoOutputLayout", outputLayout)
+            .put("photoPaperFinish", paperFinish)
+    }
+
     fun renamePrepared(file: File, title: String): JSONObject {
         val metadata = readMetadata(file)
         val safe = safeTitle(title, metadata.optString("sizeCode"))
@@ -316,7 +341,8 @@ class PhotoStudioStore(filesDir: File, cacheDir: File) {
     private fun compactMetadata(supplied: JSONObject): JSONObject {
         val allowedKeys = listOf(
             "title", "sourceName", "sourceMime", "sizeCode", "photoCount",
-            "photosPerPage", "pageCount", "resolutionDpi", "captionHeightMm",
+            "photosPerPage", "photoOutputLayout", "photoPaperFinish",
+            "pageCount", "resolutionDpi", "captionHeightMm",
             "editorSettings", "id", "createdUtc", "updatedUtc"
         )
         return JSONObject().apply {

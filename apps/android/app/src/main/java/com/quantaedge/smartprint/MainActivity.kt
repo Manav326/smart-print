@@ -6793,11 +6793,10 @@ class MainActivity : AppCompatActivity() {
                         ensureNotCancelled()
                         if (photoStudioStore.isPreparedDocument(file)) {
                             // Decrypt this small metadata record only for selected sheets, never while listing.
-                            val metadata = photoStudioStore.readMetadata(file)
-                            put(JSONObject()
-                                .put("sizeCode", metadata.optString("sizeCode"))
-                                .put("photoCount", metadata.optInt("photoCount"))
-                                .put("photosPerPage", metadata.optInt("photosPerPage")))
+                            // Include the physical output contract as well as quantity.
+                            // Omitting these fields makes PHOTO_PAPER sheets look like A4 sheets
+                            // to the API and causes the Agent's final validation to reject them.
+                            put(photoStudioStore.readUploadSettings(file))
                         } else put(JSONObject.NULL)
                     }
                 }
