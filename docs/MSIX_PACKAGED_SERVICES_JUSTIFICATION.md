@@ -59,6 +59,7 @@ Suggested test sequence:
 6. Close the desktop window and confirm the Agent remains running.
 7. Upgrade the package and confirm the service and machine data remain intact.
 8. Uninstall the package and verify the documented machine-data retention behavior.
+9. Run Windows App Certification Kit (WACK) against the exact MSIX in an elevated, active desktop session. The included `scripts/validate-msix-wack.ps1` checks the complete report and package identity/version; retain its XML/HTML reports with the submission evidence.
 
 Do not provide production customer credentials. Create a dedicated certification account with minimum required permissions and provide its credentials only in Partner Center's private certification notes.
 
