@@ -2743,6 +2743,27 @@ function PrinterDiagnosticControls({
       const started = await startPrinterDiagnostic(token, printer.id, request);
       preparedRequestRef.current = null;
       idempotencyKeyRef.current = null;
+      setHistory(current => [{
+        id: started.id,
+        printJobId: started.printJobId,
+        templateVersion: started.templateVersion,
+        ownerDecision: null,
+        ownerNotes: null,
+        createdUtc: started.createdUtc,
+        confirmedUtc: null,
+        job: {
+          status: started.status,
+          spoolerStatus: "AWAITING_AGENT",
+          spoolerSubmittedUtc: null,
+          spoolerObservedUtc: null,
+          failureCode: null,
+          outputType: started.outputType,
+          copies: 1,
+          pageCount: started.pageCount,
+          localQueueReceivedUtc: null,
+          printDispatchAttempts: 0
+        }
+      }, ...current.filter(item => item.id !== started.id)]);
       setMessage(started.duplicateRequest
         ? t("This diagnostic request was already accepted. Checking its current state.")
         : t("One-copy diagnostic submitted to the paired SmartPrint Agent."));
