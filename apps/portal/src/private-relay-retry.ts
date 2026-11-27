@@ -13,13 +13,6 @@ export function customerPrivateRelayPollDelay(
   return Math.min(12_000,Math.round(base*(0.85+random()*0.3)));
 }
 
-/** Avoid an endless spinner when the status service itself remains unreachable. */
-export const MAX_CUSTOMER_PRIVATE_RELAY_STATUS_ERRORS=8;
-
-export function shouldContinueCustomerPrivateRelayStatusRetries(consecutiveErrors:number):boolean {
-  return consecutiveErrors<MAX_CUSTOMER_PRIVATE_RELAY_STATUS_ERRORS;
-}
-
 type StatusLikeError={status?:unknown;code?:unknown};
 
 /** Status reads are safe to retry for transport, timeout, rate-limit and server failures. */
