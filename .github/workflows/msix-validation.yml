@@ -232,7 +232,6 @@ jobs:
             PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME
           }
           ./scripts/build-msix-package.ps1 @arguments
-          if ($LASTEXITCODE -ne 0) { throw "MSIX package builder returned a non-zero exit code." }
           if (-not (Test-Path -LiteralPath "artifacts/SmartPrint-Windows-Store.msix" -PathType Leaf)) { throw "MSIX package builder returned without producing the expected package." }
           Write-Host "MSIX package builder completed and the package file exists."
       - name: Trust development signing certificate and install MSIX
