@@ -383,10 +383,11 @@ test("shop owner navigation groups daily work and moves account destinations int
   assert.match(sidebar, /sectionGroups\.map/);
   assert.doesNotMatch(sidebar, /plan-card|support-link|profile-row/,
     "Trial, help and owner controls must not be permanently pinned in the sidebar.");
-  assert.match(app, /Personal details/);
-  assert.match(app, /Shop profile &amp; branding/);
-  assert.match(app, /Trial &amp; subscription/);
-  assert.match(app, /Help &amp; support/);
+  assert.match(app, /t\("Personal details"\)/);
+  assert.match(app, /t\("Shop profile & branding"\)/);
+  assert.match(app, /t\("Trial & subscription"\)/);
+  assert.match(app, /t\("Help & support"\)/);
+  assert.match(app, /t\("Sign out"\)/);
   assert.match(app, /accountMenuOpen/);
   assert.ok(app.indexOf("const [accountMenuOpen") < app.indexOf("if (!accountMenuOpen) return"),
     "The account-menu state must be initialized before its dismissal effect reads it.");
