@@ -33,7 +33,7 @@ if (-not [string]::IsNullOrWhiteSpace($CertificatePath)) {
 }
 
 $appCertCandidates = @(
-    (Join-Path \${env:ProgramFiles(x86)} "Windows Kits\10\App Certification Kit\appcert.exe"),
+    (Join-Path ${env:ProgramFiles(x86)} "Windows Kits\10\App Certification Kit\appcert.exe"),
     (Join-Path $env:ProgramFiles "Windows Kits\10\App Certification Kit\appcert.exe")
 ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) }
 
