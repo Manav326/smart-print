@@ -49,6 +49,8 @@ internal object AndroidCustomerLocale {
         // the surrounding UI labels and count/status wording.
         return when (locale) {
             HINDI -> when {
+                source == "PRIVATE" -> "निजी"
+                source.startsWith("SPONSORED · ") -> "प्रायोजित · " + source.removePrefix("SPONSORED · ")
                 source.startsWith("Folder  ·  ") -> "फ़ोल्डर  ·  " + source.removePrefix("Folder  ·  ")
                 source.startsWith("Folder · ") -> "फ़ोल्डर · " + source.removePrefix("Folder · ")
                 source.startsWith("Page ") -> "पेज " + source.removePrefix("Page ")
@@ -60,6 +62,8 @@ internal object AndroidCustomerLocale {
                 else -> source
             }
             HINGLISH -> when {
+                source == "PRIVATE" -> "Private"
+                source.startsWith("SPONSORED · ") -> "Sponsored · " + source.removePrefix("SPONSORED · ")
                 source.startsWith("Folder  ·  ") -> "Folder  ·  " + source.removePrefix("Folder  ·  ")
                 source.startsWith("Folder · ") -> "Folder · " + source.removePrefix("Folder · ")
                 source.startsWith("Page ") -> "Page " + source.removePrefix("Page ")
