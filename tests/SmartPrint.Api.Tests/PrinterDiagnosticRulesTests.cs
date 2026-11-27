@@ -59,6 +59,63 @@ public sealed class PrinterDiagnosticRulesTests
         Assert.Contains("none of the standard", reason, StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [InlineData("QUEUED", "SPOOLER_ACCEPTED", false)]
+    [InlineData("PRINTING", "PRINTING", false)]
+    [InlineData("RETAINED", "SPOOLER_ACCEPTED", false)]
+    public void DoesNotAllowOwnerConfirmationWhileWindowsStillHasAnActiveJob(
+        string spoolerStatus, string jobStatus, bool expected)
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.Equal(expected, PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, jobStatus, spoolerStatus,
+            now.AddMinutes(-1), now, null, 123, 0, 1, null, now));
+    }
+
+    [Fact]
+    public void AllowsPhysicalConfirmationOnlyAfterPrintedObservationAndCompletePageProgress()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "PRINTING", "PRINTED",
+            now.AddMinutes(-1), now, null, 123, 2, 2, null, now));
+        Assert.False(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "PRINTING", "PRINTED",
+            now.AddMinutes(-1), now, null, 123, 1, 2, null, now));
+    }
+
+    [Fact]
+    public void AllowsOwnerToReportNoOutputAfterVerifiedPreSubmissionBlock()
+    {
+        Assert.True(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "LOCAL_QUEUE_READY", "BLOCKED_BEFORE_SUBMISSION",
+            null, null, "DRIVER_PREPARATION_FAILED", null, 0, 0, null, DateTimeOffset.UtcNow));
+    }
+
+    [Fact]
+    public void AllowsNoOutputDecisionAfterVerifiedSpoolerAbsenceOnly()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED",
+            now.AddMinutes(-1), now, "SPOOLER_JOB_NO_LONGER_VISIBLE", 123, 0, 1, null, now));
+        Assert.False(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "OUTPUT_UNCONFIRMED", "OUTPUT_UNCONFIRMED",
+            now.AddMinutes(-1), now, "AGENT_RESTART_DURING_PRINT_SUBMISSION", null, 0, 1, null, now));
+    }
+
+    [Fact]
+    public void VirtualOutputNeedsItsOwnCompletedTestArtifactOrVerifiedAbsence()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrivatePrintingOutputPolicy.TestVirtual, "TEST_OUTPUT_READY", "PRINTED",
+            now.AddMinutes(-1), now, null, 123, 1, 1, now, now));
+        Assert.False(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrivatePrintingOutputPolicy.TestVirtual, "SPOOLER_ACCEPTED", "QUEUED",
+            now.AddMinutes(-1), now, null, 123, 0, 1, null, now));
+    }
+
     [Fact]
     public void MatchesResolvedSettingsAsAnImmutableServerDecision()
     {
