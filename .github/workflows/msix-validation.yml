@@ -50,7 +50,7 @@ permissions:
 concurrency:
   # Use the same key for push and pull_request events from the same branch.
   group: smartprint-msix-validation-${{ github.head_ref || github.ref_name }}
-  # Keep a costly Windows packaging run alive when another commit is pushed.
+  # A newer commit supersedes the previous validation run for this branch.
   cancel-in-progress: true
 
 jobs:
@@ -169,12 +169,10 @@ jobs:
           $package.version = $desktopVersion
           $package | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding utf8
           Write-Host "Desktop application version aligned to $desktopVersion (MSIX package $env:MSIX_VERSION)."
-      - name: Build existing desktop frontend and native executable
+      - name: Build native desktop executable (Tauri runs the configured frontend build once)
         shell: pwsh
         run: |
           $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
-          pnpm --filter @smart-print/desktop build
-          if ($LASTEXITCODE -ne 0) { throw "Desktop frontend build failed." }
           pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
           if ($LASTEXITCODE -ne 0) { throw "Native desktop build failed." }
           $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
