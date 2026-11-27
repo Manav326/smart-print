@@ -8,15 +8,15 @@ public static class PrintJobQuoteRules
     public static string ResolveStatusAfterQuote(
         string? previousStatus,
         bool isExpiredQuoteRenewal,
-        bool priceChanged,
+        bool pricingCardChanged,
         bool instantPaymentEnabled)
     {
         if (!isExpiredQuoteRenewal)
             return instantPaymentEnabled ? "AWAITING_PAYMENT" : "AWAITING_CUSTOMER_APPROVAL";
 
-        // A changed price is never silently authorised, even when the shop
-        // normally enables instant payment. The customer must accept it again.
-        if (priceChanged)
+        // A changed shop pricing card requires fresh customer acceptance.
+        // Its version is authoritative; a calculated amount delta is not.
+        if (pricingCardChanged)
             return "AWAITING_CUSTOMER_APPROVAL";
 
         return previousStatus switch
