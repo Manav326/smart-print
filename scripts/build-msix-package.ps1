@@ -106,7 +106,7 @@ $manifest=@"
   <uap:VisualElements DisplayName="Smart Print" Description="SmartPrint desktop printing and shop connectivity" BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
   <Extensions><desktop6:Extension Category="windows.service" Executable="Agent\SmartPrint.Agent.exe"><desktop6:Service Name="QRtoPrintSmartPrintAgent" StartupType="auto" StartAccount="localService" /></desktop6:Extension></Extensions>
  </Application></Applications>
- <Extensions><desktop2:Extension Category="windows.firewallRules"><desktop2:FirewallRules Executable="Agent\SmartPrint.Agent.exe"><desktop2:Rule Direction="in" IPProtocol="TCP" LocalPortMin="17842" LocalPortMax="17842" Profile="private" /></desktop2:FirewallRules></desktop2:Extension></Extensions>
+ <Extensions><desktop2:Extension Category="windows.firewallRules"><desktop2:FirewallRules Executable="Agent\SmartPrint.Agent.exe"><desktop2:Rule Direction="in" IPProtocol="TCP" LocalPortMin="17842" LocalPortMax="17842" Profile="all" /></desktop2:FirewallRules></desktop2:Extension></Extensions>
  <Capabilities><uap:Capability Name="internetClient" /><uap:Capability Name="privateNetworkClientServer" /><rescap:Capability Name="runFullTrust" /><rescap:Capability Name="packagedServices" /></Capabilities>
 </Package>
 "@
@@ -131,7 +131,7 @@ $n.AddNamespace("d6","http://schemas.microsoft.com/appx/manifest/desktop/windows
 $n.AddNamespace("d2","http://schemas.microsoft.com/appx/manifest/desktop/windows10/2")
 $n.AddNamespace("rc","http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
 if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrintSmartPrintAgent' and @StartAccount='localService' and @StartupType='auto']",$n)) {throw "Packaged LocalService Agent declaration is missing."}
-if (-not $m.SelectSingleNode("//d2:FirewallRules[@Executable='Agent\SmartPrint.Agent.exe']/d2:Rule[@Direction='in' and @IPProtocol='TCP' and @LocalPortMin='17842' and @LocalPortMax='17842' and @Profile='private']",$n)) {throw "Private LAN firewall rule for Agent TCP 17842 is missing."}
+if (-not $m.SelectSingleNode("//d2:FirewallRules[@Executable='Agent\SmartPrint.Agent.exe']/d2:Rule[@Direction='in' and @IPProtocol='TCP' and @LocalPortMin='17842' and @LocalPortMax='17842' and @Profile='all']",$n)) {throw "Private LAN firewall rule for Agent TCP 17842 is missing."}
 if (-not $m.SelectSingleNode("//rc:Capability[@Name='packagedServices']",$n)) {throw "packagedServices restricted capability is missing."}
 Write-Host "SmartPrint MSIX created and signature/manifest verified: $out"
 Write-Host "SHA-256: $((Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant())"
