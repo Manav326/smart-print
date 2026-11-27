@@ -116,7 +116,7 @@ Use Partner Center support / the Store onboarding channel to request written gui
 
 **Subject:** Pre-submission guidance requested — SmartPrint desktop app with one LocalService printing Agent
 
-SmartPrint is a Windows desktop printing application for print shops. Its existing Windows architecture includes one app-owned background Windows NT service, `QRtoPrintSmartPrintAgent`, running as the built-in `NT AUTHORITY\\LocalService` account. The service maintains accepted print jobs when the desktop window is closed, discovers Windows printers, performs printing, and exposes the existing authenticated/selected-network local endpoint used by paired phones on the shop LAN. It does not install a kernel-mode printer driver and does not run as LocalSystem.
+SmartPrint is a Windows desktop printing application for print shops. Its existing Windows architecture includes one app-owned background Windows NT service, `QRtoPrintSmartPrintAgent`, running as the built-in `NT AUTHORITY\LocalService` account. The service maintains accepted print jobs when the desktop window is closed, discovers Windows printers, performs printing, and exposes the existing authenticated/selected-network local endpoint used by paired phones on the shop LAN. It does not install a kernel-mode printer driver and does not run as LocalSystem.
 
 We are evaluating the MSIX Store route using the `packagedServices` restricted capability and, separately, the Store EXE/MSI ingestion route using our signed offline installer. Before submitting, please clarify:
 
