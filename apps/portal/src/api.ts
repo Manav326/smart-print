@@ -2173,6 +2173,14 @@ export async function uploadCustomerDocumentLocally(
           "private_relay_expired"
         );
       }
+      if (expiredStatus?.state === "PENDING" && expiredStatus.transferPath) {
+        // The original encrypted transfer was accepted or claimed. Resume its
+        // durable status reconciliation automatically; never ask the customer
+        // to click again or create another encrypted payload.
+        return uploadCustomerPrivateRelay(
+          sessionToken, file, ticket, grantToken, null, onStage, onProgress
+        );
+      }
       throw new LocalUploadOutcomeUnknownError("Your secure print request is still attached to its original ticket. SmartPrint will check it again when the shop computer reconnects.");
     }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
@@ -2235,8 +2243,15 @@ export async function uploadCustomerDocumentLocally(
         "private_relay_validation_failed"
       );
     }
+    if (completed.state === "PENDING" && completed.transferPath) {
+      // The ticket already has a live encrypted transfer. Keep reconciling it
+      // instead of returning an error that forces a second customer action.
+      return uploadCustomerPrivateRelay(
+        sessionToken, file, ticket, grantToken, null, onStage, onProgress
+      );
+    }
     throw new LocalUploadOutcomeUnknownError(
-      "This private print request is already being checked by the shop computer. Retry to refresh its status; SmartPrint will not create another upload."
+      "This private print request is already being checked by the shop computer. SmartPrint will not create another upload."
     );
   }
 
