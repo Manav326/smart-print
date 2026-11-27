@@ -5077,3 +5077,35 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 /* Keep the shared release downloader aligned with the shop pairing panel. */
 .agent-installer-download{flex:0 1 300px;min-width:220px;max-width:340px;width:100%}
 @media(max-width:700px){.agent-installer-download{flex:1 1 auto;min-width:0;max-width:none;width:100%}}
+
+/* Printer diagnostic panel: compact, owner-focused and responsive. */
+.printer-diagnostic-panel{
+  display:grid;gap:10px;margin-top:14px;padding:12px;
+  border:1px solid var(--border);border-radius:12px;background:var(--surface-2)
+}
+.printer-diagnostic-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0
+}
+.printer-diagnostic-heading>div{display:grid;gap:3px;min-width:0}
+.printer-diagnostic-heading strong{font:700 11px Manrope,sans-serif;color:var(--text)}
+.printer-diagnostic-heading span,.printer-diagnostic-state,.printer-diagnostic-panel .field-hint{
+  font-size:10px;line-height:1.5;color:var(--muted)
+}
+.printer-diagnostic-heading .subtle-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;flex:0 0 auto
+}
+.printer-diagnostic-state{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--border)
+}
+.printer-diagnostic-state strong{color:var(--text)}
+.printer-diagnostic-confirmation{display:grid;gap:8px}
+.printer-diagnostic-confirmation>strong{font:700 11px Manrope,sans-serif;color:var(--text)}
+.printer-diagnostic-actions{display:flex;gap:6px;flex-wrap:wrap}
+.printer-diagnostic-actions .subtle-button{font-size:10px;padding:7px 9px;white-space:normal}
+.printer-diagnostic-panel .inline-success,.printer-diagnostic-panel .inline-error{font-size:10px;margin:0}
+@media(max-width:650px){
+  .printer-diagnostic-heading{align-items:flex-start;flex-direction:column}
+  .printer-diagnostic-heading .subtle-button{width:100%}
+  .printer-diagnostic-actions{display:grid;grid-template-columns:1fr}
+  .printer-diagnostic-actions .subtle-button{width:100%}
+}
