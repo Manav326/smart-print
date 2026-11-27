@@ -1816,15 +1816,15 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
     <div className="photo-order-receipt">
       <div className="photo-order-receipt-summary">
         <span>{t("Server-calculated amount")}</span><strong>{amount}</strong>
-        <small>{job.photoCount} photos · {job.photoSizeCode} · {job.pageCount} A4 page(s)</small>
+        <small>{t("{count} photos · {size} · {pages} A4 page(s)", {count: formatUiNumber(locale, job.photoCount), size: job.photoSizeCode, pages: formatUiNumber(locale, job.pageCount)})}</small>
       </div>
       {payment.status==="VERIFIED"
         ? <div className="file-review-note"><Check size={16}/><span>{t("Payment is already verified. Continue from the Print Queue to assign a printer and explicitly dispatch the job.")}</span></div>
         : payment.method==="UPI"
           ? <div className="photo-order-upi">
               {upiIntent?<QRCode value={upiIntent} size={184} level="M"/>:<p className="form-error">{t("A UPI QR could not be prepared from the saved shop payment details. Open Payments and check the configured UPI ID.")}</p>}
-              <strong>{payment.payeeNameSnapshot||"Shop payment"}</strong>
-              <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
+              <strong>{payment.payeeNameSnapshot||t("Shop payment")}</strong>
+              <span>{payment.upiIdSnapshot||t("UPI ID not available")}</span>
               <small>{t("Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.")}</small>
             </div>
           : <div className="file-review-note"><Wallet size={16}/><span>{t("Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.", { amount })}</span></div>}
@@ -2195,7 +2195,7 @@ function ReportsPage({ token }: { token: string }) {
           </section>
         </div>
         {summary.outputUnconfirmedJobs > 0 && <div className="report-caution"><ShieldCheck size={16}/><span><strong>{summary.outputUnconfirmedJobs} output-unconfirmed {summary.outputUnconfirmedJobs === 1 ? "job" : "jobs"}.</strong> {t("Check the actual pages before any manual retry. These jobs are not counted as completed.")}</span></div>}
-        <div className="reports-footnote">Report window: {date(summary.fromUtc)} – {date(summary.toUtc)}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.</div>
+        <div className="reports-footnote">{t("Report window: {from} – {to}. Job counts use creation time, gross collections use payment verification time, and refunds use the date the shop recorded sending them. Pages requested are not a claim of pages physically printed. A UPI reference is excluded until the shop verifies the receipt.", {from: date(summary.fromUtc), to: date(summary.toUtc)})}</div>
       </>}
     </section>
   );
