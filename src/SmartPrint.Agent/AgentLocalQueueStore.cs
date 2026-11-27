@@ -366,6 +366,14 @@ public sealed class AgentLocalQueueStore
     public IReadOnlyList<AgentLocalQueueEntry> GetSpoolerTrackingJobs() =>
         ReadEntries().Where(x => (x.State is "SPOOLER_ACCEPTED" or "OUTPUT_UNCONFIRMED") && x.SpoolerJobId is > 0).ToArray();
 
+    public IReadOnlyList<Guid> GetPendingDiagnosticReconciliationJobIds() =>
+        ReadEntries()
+            .Where(entry => entry.Origin == "PRINTER_DIAGNOSTIC" &&
+                entry.State is "ACKNOWLEDGED" or "SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED")
+            .Select(entry => entry.JobId)
+            .Take(100)
+            .ToArray();
+
     public IReadOnlyList<AgentLocalQueueEntry> GetPrivatePurgePendingJobs() =>
         ReadEntries().Where(entry => entry.PrivatePrinting &&
             (entry.State == "PRIVATE_PURGE_PENDING" || entry.PrivatePurgePending)).ToArray();
@@ -1594,7 +1602,8 @@ public sealed class AgentLocalQueueStore
             PrintKind = job.PrintKind,
             PhotoPaperFinish = job.PhotoPaperFinish,
             PhotoOutputLayout = job.PhotoOutputLayout,
-            PhotoSizeCode = job.PhotoSizeCode
+            PhotoSizeCode = job.PhotoSizeCode,
+            Origin = job.Origin
         }, cancellationToken);
     }
 
@@ -1809,7 +1818,12 @@ public sealed class AgentLocalQueueStore
                 await SaveManifestAsync(entry with { CompletedUtc = DateTimeOffset.UtcNow }, ct);
             return;
         }
-        if (entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
+        var confirmedPreSubmissionBlock =
+            entry.State == "ACKNOWLEDGED" &&
+            entry.Origin == "PRINTER_DIAGNOSTIC" &&
+            string.Equals(entry.SpoolerStatus, "BLOCKED_BEFORE_SUBMISSION", StringComparison.OrdinalIgnoreCase);
+        if (!confirmedPreSubmissionBlock &&
+            entry.State is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED"))
             throw new InvalidOperationException($"Cannot confirm local output from state {entry.State}.");
         await SaveManifestAsync(entry with
         {
