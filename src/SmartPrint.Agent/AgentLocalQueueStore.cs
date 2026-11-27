@@ -1256,7 +1256,8 @@ public sealed class AgentLocalQueueStore
             PagesPerSheet: job.PagesPerSheet,
             PhotoPaperFinish: job.PhotoPaperFinish,
             PhotoOutputLayout: job.PhotoOutputLayout,
-            PhotoSizeCode: job.PhotoSizeCode);
+            PhotoSizeCode: job.PhotoSizeCode,
+            Origin: job.Origin);
 
         try
         {
