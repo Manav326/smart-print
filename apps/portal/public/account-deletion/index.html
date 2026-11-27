@@ -1,0 +1,134 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#171d34"><meta name="robots" content="index,follow">
+<meta name="description" content="Request deletion of your SmartPrint customer account from the app or the web.">
+<link rel="canonical" href="https://smartprint.quantaedge.in/account-deletion/">
+<title>Delete SmartPrint Account | SmartPrint by QuantaEdge</title>
+<style>
+:root{color-scheme:light;--ink:#182033;--muted:#647087;--line:#e2e7f0;--surface:#fff;--wash:#f4f6fb;--accent:#6d55e8;--danger:#bd354a}
+*{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 18% 0,#e9e5ff 0,transparent 36%),var(--wash);color:var(--ink);font:16px/1.55 Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif}
+a{color:#5440c8;text-underline-offset:3px}.shell{max-width:780px;margin:0 auto;padding:28px 18px 50px}header{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:24px}header a{font-weight:750;text-decoration:none;color:var(--ink)}.links{display:flex;gap:14px;flex-wrap:wrap;font-size:14px}
+.hero{padding:28px;border-radius:22px;background:linear-gradient(135deg,#171d34,#39306d);color:#fff;box-shadow:0 18px 48px #1d25401c}.hero small{color:#cfcaff;font-weight:800;letter-spacing:.13em}.hero h1{font-size:clamp(28px,5vw,40px);line-height:1.15;margin:9px 0}.hero p{margin:8px 0;color:#e3e3f4}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:18px;padding:24px;margin-top:18px;box-shadow:0 10px 30px #1e28400b}h2{font-size:20px;line-height:1.3;margin:0 0 8px}p{margin:8px 0 14px}.muted{color:var(--muted);font-size:14px}
+label{display:block;font-weight:650;font-size:14px;margin:12px 0 6px}input[type=email],input[type=password],input[type=text]{width:100%;height:46px;padding:0 12px;border:1px solid #cbd2df;border-radius:10px;background:#fff;color:#172033;font:inherit}input:focus{outline:3px solid #6d55e833;border-color:var(--accent)}
+button{border:0;border-radius:11px;min-height:46px;padding:0 18px;background:var(--accent);color:#fff;font:inherit;font-weight:700;font-size:14px;cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}.secondary{background:#f0edff;color:#43339b;border:1px solid #d9d2ff}.danger{background:var(--danger)}.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px}
+.status{min-height:24px;margin:12px 0 0;font-size:14px}.error{color:#a31e35}.google-slot{margin-top:12px;min-height:44px}.divider{text-align:center;color:var(--muted);font-size:12px;margin:16px 0 4px}.warning{border-left:3px solid #b98227;background:#fff8e8;padding:13px 15px;border-radius:10px;font-size:14px}.delete-check{display:flex;gap:10px;align-items:flex-start;margin:16px 0 10px;font-size:14px}.delete-check input{margin-top:4px}
+[hidden]{display:none!important}footer{color:var(--muted);font-size:13px;margin-top:22px;display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap}@media(max-width:560px){.shell{padding:18px 12px 42px}header{align-items:flex-start;flex-direction:column}.hero{padding:23px 20px}.card{padding:19px}.actions button{flex:1}}
+</style>
+</head>
+<body>
+<div class="shell">
+<header><a href="/">SmartPrint <span style="font-weight:450;color:#6d55e8">by QuantaEdge</span></a><nav class="links"><a href="/">Home</a><a href="/privacy-policy/">Privacy policy</a></nav></header>
+<section class="hero"><small>ACCOUNT &amp; PRIVACY</small><h1>Delete your SmartPrint account</h1><p>Sign in with the account you want to remove, review what deletion means, and confirm the request.</p></section>
+<section class="card" id="loginPanel">
+<h2>Verify your account</h2><p class="muted">Use the same email and password you use in SmartPrint, or continue with the Google account linked to your SmartPrint customer profile. Your sign-in token is held in this page's memory only and is not saved in browser storage.</p>
+<form id="passwordForm"><label for="email">Email address</label><input id="email" name="email" type="email" autocomplete="username" required maxlength="256"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required><div class="actions"><button type="submit" id="passwordButton">Sign in to continue</button></div></form>
+<div class="divider">OR</div><div id="googleButton" class="google-slot"></div><div class="actions"><button type="button" class="secondary" id="retryGoogle" hidden>Retry Google sign-in</button></div>
+<p id="loginStatus" class="status" role="status" aria-live="polite"></p>
+</section>
+<section class="card" id="deletePanel" hidden>
+<h2>Confirm account deletion</h2><p id="signedInAs" class="muted"></p>
+<div class="warning"><strong>This action is permanent.</strong> Your customer login, account identity, provider link and refresh tokens will be removed. Your account will be unlinked from shop print jobs and sessions.</div>
+<p class="muted">Shop-side print, payment, refund and reconciliation records may remain without your account link where needed to complete an order, resolve a dispute or meet legal recordkeeping duties. Documents already submitted to a shop follow the retention schedule in the <a href="/privacy-policy/">Privacy Policy</a>. Files saved only on this phone are not deleted by this request.</p>
+<label class="delete-check"><input type="checkbox" id="understand"><span>I understand that local files remain on my device and shop transaction records may be retained where required.</span></label>
+<label for="confirmWord">Type DELETE to confirm</label><input id="confirmWord" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false">
+<div class="actions"><button type="button" class="danger" id="deleteButton" disabled>Delete my account</button><button type="button" class="secondary" id="signOutButton">Cancel and sign out</button></div>
+<p id="deleteStatus" class="status" role="status" aria-live="polite"></p>
+</section>
+<section class="card" id="completePanel" hidden>
+<h2>Account deletion completed</h2><p>Your SmartPrint customer account and sign-in credentials have been deleted. The account reference has been removed from linked print sessions and print jobs. Shop-side transaction records may remain where the Privacy Policy explains they are needed.</p>
+<p class="muted">Your locally stored My Files documents remain on this phone. Open SmartPrint → My Files to remove local documents, or uninstall the app to remove its app-private local storage.</p><div class="actions"><a href="/" style="align-self:center">Return to SmartPrint</a><a href="/privacy-policy/" style="align-self:center">Privacy policy</a></div>
+</section>
+<footer><span>© 2026 SmartPrint by QuantaEdge</span><a href="/privacy-policy/">Privacy policy</a></footer>
+</div>
+<script>
+(() => {
+"use strict";
+let accessToken = null;
+let googleIdentityLoaded = false;
+const byId = id => document.getElementById(id);
+const setStatus = (id, message, kind) => { const node=byId(id); node.textContent=message||""; node.className="status"+(kind?" "+kind:""); };
+const responseBody = async response => {
+ const raw=await response.text(); let body={};
+ if(raw){try{body=JSON.parse(raw);}catch{body={};}}
+ if(!response.ok) throw new Error(body.detail||body.message||body.title||"SmartPrint could not complete the request. Please try again.");
+ return body;
+};
+const api = async (path, options) => {
+ const response=await fetch(path,Object.assign({cache:"no-store",credentials:"same-origin",headers:{"Accept":"application/json"}},options||{}));
+ return responseBody(response);
+};
+function enterDeleteMode(auth){
+ if(!auth||!auth.accessToken) throw new Error("SmartPrint did not return a valid account session.");
+ accessToken=auth.accessToken;
+ byId("signedInAs").textContent="Signed in as "+(auth.email||"your SmartPrint customer account");
+ byId("loginPanel").hidden=true; byId("deletePanel").hidden=false; setStatus("loginStatus","",""); updateDeleteButton();
+}
+function updateDeleteButton(){
+ byId("deleteButton").disabled=!accessToken||!byId("understand").checked||byId("confirmWord").value.trim()!=="DELETE";
+}
+byId("passwordForm").addEventListener("submit",async event=>{
+ event.preventDefault(); byId("passwordButton").disabled=true; setStatus("loginStatus","Checking your SmartPrint account…","");
+ const password=byId("password").value; byId("password").value="";
+ try{
+  const auth=await api("/api/v1/auth/customer-login",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({email:byId("email").value.trim(),password})});
+  enterDeleteMode(auth);
+ }catch(error){setStatus("loginStatus",error instanceof Error?error.message:"Sign-in failed. Please try again.","error");}
+ finally{byId("passwordButton").disabled=false;}
+});
+function loadGoogleScript(){
+ if(window.google&&window.google.accounts&&window.google.accounts.id) return Promise.resolve();
+ if(googleIdentityLoaded) return Promise.reject(new Error("Google sign-in could not initialize. Retry the request."));
+ return new Promise((resolve,reject)=>{
+  const script=document.createElement("script"); script.src="https://accounts.google.com/gsi/client"; script.async=true; script.defer=true; script.referrerPolicy="strict-origin-when-cross-origin";
+  script.onload=()=>{if(window.google&&window.google.accounts&&window.google.accounts.id){googleIdentityLoaded=true;resolve();}else reject(new Error("Google sign-in did not initialize."));};
+  script.onerror=()=>reject(new Error("Google sign-in could not be loaded. Check your connection and retry."));
+  document.head.appendChild(script);
+ });
+}
+async function prepareGoogleSignIn(){
+ setStatus("loginStatus","Preparing Google sign-in…",""); byId("retryGoogle").hidden=true;
+ try{
+  const config=await api("/api/v1/auth/google/config");
+  if(!config.configured||!config.clientId) throw new Error("Google sign-in is not configured for this SmartPrint environment. Use email and password instead.");
+  const challenge=await api("/api/v1/auth/google/challenge",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({surface:"customer"})});
+  await loadGoogleScript(); byId("googleButton").replaceChildren();
+  window.google.accounts.id.initialize({
+   client_id:config.clientId,nonce:challenge.nonce,auto_select:false,
+   callback:async result=>{
+    if(!result||!result.credential){setStatus("loginStatus","Google did not return an account credential.","error");return;}
+    setStatus("loginStatus","Verifying your Google account…","");
+    try{
+     const auth=await api("/api/v1/auth/google/customer",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({credential:result.credential,nonce:challenge.nonce})});
+     enterDeleteMode(auth);
+    }catch(error){setStatus("loginStatus",error instanceof Error?error.message:"Google sign-in failed.","error");byId("retryGoogle").hidden=false;}
+   },
+   error_callback:()=>{setStatus("loginStatus","Google sign-in was cancelled or could not be started.","error");byId("retryGoogle").hidden=false;}
+  });
+  window.google.accounts.id.renderButton(byId("googleButton"),{type:"standard",theme:"outline",size:"large",shape:"pill",text:"continue_with",logo_alignment:"left",width:Math.min(360,Math.max(250,byId("googleButton").clientWidth||320))});
+  setStatus("loginStatus","Use the Google account linked to your SmartPrint customer profile.","");
+ }catch(error){setStatus("loginStatus",error instanceof Error?error.message:"Google sign-in is unavailable.","error");byId("retryGoogle").hidden=false;}
+}
+byId("retryGoogle").addEventListener("click",()=>{void prepareGoogleSignIn();});
+byId("understand").addEventListener("change",updateDeleteButton); byId("confirmWord").addEventListener("input",updateDeleteButton);
+byId("deleteButton").addEventListener("click",async()=>{
+ if(!accessToken||!byId("understand").checked||byId("confirmWord").value.trim()!=="DELETE")return;
+ byId("deleteButton").disabled=true; byId("signOutButton").disabled=true; setStatus("deleteStatus","Deleting your SmartPrint account…","");
+ try{
+  await api("/api/v1/customer/account",{method:"DELETE",headers:{"Authorization":"Bearer "+accessToken,"Accept":"application/json"}});
+  accessToken=null; byId("deletePanel").hidden=true; byId("completePanel").hidden=false;
+ }catch(error){
+  setStatus("deleteStatus",error instanceof Error?error.message:"Account deletion failed. Your account remains unchanged.","error");
+  byId("signOutButton").disabled=false; updateDeleteButton();
+ }
+});
+byId("signOutButton").addEventListener("click",()=>{
+ accessToken=null; byId("deletePanel").hidden=true; byId("loginPanel").hidden=false; byId("password").value=""; byId("confirmWord").value=""; byId("understand").checked=false; updateDeleteButton();
+ setStatus("loginStatus","You have signed out of this deletion session.","");
+});
+void prepareGoogleSignIn();
+})();
+</script>
+</body>
+</html>

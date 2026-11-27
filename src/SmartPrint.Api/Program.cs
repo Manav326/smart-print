@@ -985,6 +985,44 @@ auth.MapPost("/logout", async (RefreshRequest request, SmartPrintDbContext db, C
 
 var customerApi = app.MapGroup("/api/v1/customer").RequireAuthorization();
 
+// Delete only a verified global customer identity. Identity-owned credentials and
+// refresh tokens cascade; print-session and print-job customer references are
+// SET NULL by the schema so shop-side orders and financial records remain intact.
+customerApi.MapDelete("/account", async (
+    ClaimsPrincipal principal,
+    UserManager<AppUser> userManager) =>
+{
+    var customerId = CustomerIdentity.GetCustomerId(principal);
+    if (customerId is null)
+    {
+        return Results.Forbid();
+    }
+
+    var user = await userManager.FindByIdAsync(customerId.Value.ToString());
+    // A repeated request using an already-deleted token is idempotently successful.
+    if (user is null)
+    {
+        return Results.NoContent();
+    }
+
+    var claims = await userManager.GetClaimsAsync(user);
+    if (!CustomerIdentity.IsCustomer(user, claims))
+    {
+        return Results.Forbid();
+    }
+
+    var deleted = await userManager.DeleteAsync(user);
+    if (!deleted.Succeeded)
+    {
+        return Results.Problem(
+            statusCode: StatusCodes.Status500InternalServerError,
+            title: "customer_account_deletion_failed",
+            detail: "SmartPrint could not safely delete this account. Please contact SmartPrint support before trying again.");
+    }
+
+    return Results.NoContent();
+});
+
 customerApi.MapGet("/me", async (
     ClaimsPrincipal principal,
     UserManager<AppUser> userManager) =>

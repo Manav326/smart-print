@@ -27,6 +27,14 @@ Scope: the SmartPrint Android application remains customer-facing. Shop staff co
 - [x] Improve minimum touch targets and small supporting text.
 - [ ] Tighten or explicitly constrain cleartext networking without breaking private-LAN Agent upload.
 
+### Google Play account and privacy readiness
+- [x] Add authenticated customer account deletion inside the Android Account screen and on a public web page supporting email/password and Google sign-in.
+- [x] Publish a product-specific privacy policy and link it from the Android Account screen and public website.
+- [x] Keep account deletion separate from shop fulfilment records: delete the customer identity and auth material, then unlink account references while preserving shop-side job/payment/refund records.
+- [ ] Before public release, verify the legal operator name, monitored privacy/support email, registered contact details, hosting regions and every service provider described in the policy.
+- [ ] Complete the Play Console Data Safety form against the production API, app/WebView behaviour and all SDK/provider disclosures.
+- [ ] Set the Play Console advertising declaration to Yes; the Android app displays SmartPrint-sponsored campaign placements and records campaign impression/click events.
+
 ### Release validation
 - [x] Add unit/instrumented regression coverage for QR origin validation, encrypted per-shop guest-session storage and Account back-navigation.
 - [ ] Add instrumented end-to-end shop-switch/process-death recovery tests and portal batch-status tests.

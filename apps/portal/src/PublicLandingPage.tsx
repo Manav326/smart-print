@@ -195,7 +195,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
       <footer className="sp-public-footer">
         <a className="sp-public-brand" href="/"><BrandLockup className="sp-public-brand-lockup" /></a>
         <span>© {new Date().getFullYear()} SmartPrint by QuantaEdge</span>
-        <div><a href="#how-it-works">{t("How it works")}</a><a href="#downloads">{t("Downloads")}</a><a href="/shop">{t("For print shops")}</a></div>
+        <div><a href="#how-it-works">{t("How it works")}</a><a href="#downloads">{t("Downloads")}</a><a href="/shop">{t("For print shops")}</a><a href="/privacy-policy/">Privacy policy</a><a href="/account-deletion/">Account deletion</a></div>
       <nav className="sp-public-footer-resources" aria-label={t("Print shop resources")}>
           <span>{t("PRINT SHOP RESOURCES")}</span>
           <a href="/features/">{t("All features")}</a>
