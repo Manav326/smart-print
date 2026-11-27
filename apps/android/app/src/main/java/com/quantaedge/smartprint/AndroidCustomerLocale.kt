@@ -50,10 +50,12 @@ internal object AndroidCustomerLocale {
      */
     fun documentStartScript(context: Context): String {
         val locale = current(context)
-        return """(function(){try{var l='$locale';localStorage.setItem('smartprint-ui-locale',l);document.cookie='smartprint-ui-locale='+l+'; Path=/; Max-Age=31536000; SameSite=Lax'+(location.protocol==='https:'?'; Secure':'');}catch(e){}})();"""
+        return """(function(){try{var l='$locale';localStorage.setItem('smartprint-ui-locale',l);document.cookie='smartprint-ui-locale='+l+'; Path=/; Max-Age=31536000; SameSite=Lax'+(location.protocol==='https:'?'; Secure':'');window.dispatchEvent(new StorageEvent('storage',{key:'smartprint-ui-locale',newValue:l}));}catch(e){}})();"""
     }
 
     private val hindiCopy = mapOf(
+        "Language" to "भाषा", "Choose the language for customer-facing app screens." to "ग्राहक को दिखने वाली ऐप स्क्रीन की भाषा चुनें।",
+        "My Files" to "मेरी फ़ाइलें", "Print at a shop" to "शॉप पर प्रिंट करें",
         "Home" to "होम", "Files" to "फ़ाइलें", "Print" to "प्रिंट", "Activity" to "गतिविधि",
         "Account" to "अकाउंट", "Back" to "वापस", "Back to Home" to "होम पर जाएँ",
         "Appearance" to "दिखावट", "Choose how SmartPrint looks on this device. This setting is kept when you sign out." to "इस डिवाइस पर SmartPrint की दिखावट चुनें। साइन आउट करने पर भी यह सेटिंग बनी रहेगी।",
@@ -91,6 +93,8 @@ internal object AndroidCustomerLocale {
     )
 
     private val hinglishCopy = mapOf(
+        "Language" to "Language", "Choose the language for customer-facing app screens." to "Customer app screens ki language choose karein.",
+        "My Files" to "Meri Files", "Print at a shop" to "Shop par print karein",
         "Home" to "Home", "Files" to "Files", "Print" to "Print", "Activity" to "Activity",
         "Account" to "Account", "Back" to "Back", "Back to Home" to "Home par jaayein",
         "Appearance" to "Look & Feel", "Choose how SmartPrint looks on this device. This setting is kept when you sign out." to "Is device par SmartPrint ka look choose karein. Sign out ke baad bhi setting save rahegi.",
