@@ -10,6 +10,7 @@ on:
     paths:
       - ".github/workflows/msix-validation.yml"
       - "scripts/build-msix-package.ps1"
+      - "scripts/publish-microsoft-store.ps1"
       - "scripts/install-agent-service.ps1"
       - "scripts/uninstall-agent-service.ps1"
       - "src/SmartPrint.Agent/**"
@@ -85,6 +86,7 @@ jobs:
         run: |
           $scriptPaths = @(
             "scripts/build-msix-package.ps1",
+            "scripts/publish-microsoft-store.ps1",
             "scripts/validate-msix-wack.ps1"
           )
           foreach ($scriptPath in $scriptPaths) {
