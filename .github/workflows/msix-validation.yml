@@ -226,13 +226,13 @@ jobs:
           Export-Certificate -Cert $certificate -FilePath "artifacts/SmartPrint-MSIX-DevCert.cer" -Type CERT | Out-Null
           Write-Output "::add-mask::$password"
           "pfx_password=$password" >> $env:GITHUB_OUTPUT
-      - name: Import public MSIX certificate into build-user trust stores
+      - name: Trust public MSIX certificate for current-user package deployment
         timeout-minutes: 3
         shell: pwsh
         env:
           CERT_SUBJECT: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
         run: |
-          Write-Host "BEGIN: validate and trust public MSIX certificate"
+          $ErrorActionPreference = "Stop"
           $publicCertificatePath = "artifacts/SmartPrint-MSIX-DevCert.cer"
           if (-not (Test-Path -LiteralPath $publicCertificatePath -PathType Leaf)) {
             throw "The exported public MSIX signing certificate is missing."
@@ -241,11 +241,33 @@ jobs:
           if ($publicCertificate.Subject -ine $env:CERT_SUBJECT) {
             throw "Public certificate subject '$($publicCertificate.Subject)' does not match the requested MSIX Publisher '$env:CERT_SUBJECT'."
           }
-          Write-Host "Importing public certificate into CurrentUser Root."
-          Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\Root" -ErrorAction Stop | Out-Null
-          Write-Host "Importing public certificate into CurrentUser TrustedPeople."
-          Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -ErrorAction Stop | Out-Null
-          Write-Host "END: public certificate trust setup completed. Private-key PFX remains isolated for SignTool."
+          $certutil = (Get-Command certutil.exe -ErrorAction Stop).Source
+          foreach ($store in @("Root", "TrustedPeople")) {
+            Write-Host "Trusting public MSIX certificate in CurrentUser\$store with bounded certutil execution."
+            $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+            $startInfo.FileName = $certutil
+            $startInfo.UseShellExecute = $false
+            $startInfo.RedirectStandardOutput = $true
+            $startInfo.RedirectStandardError = $true
+            foreach ($argument in @("-user", "-addstore", "-f", $store, (Resolve-Path -LiteralPath $publicCertificatePath).Path)) {
+              [void]$startInfo.ArgumentList.Add($argument)
+            }
+            $process = [System.Diagnostics.Process]::new()
+            $process.StartInfo = $startInfo
+            try {
+              if (-not $process.Start()) { throw "Could not start certutil for CurrentUser\\$store." }
+              if (-not $process.WaitForExit(30000)) {
+                $process.Kill($true)
+                throw "certutil timed out while importing the public certificate into CurrentUser\\$store."
+              }
+              $stdout = $process.StandardOutput.ReadToEnd()
+              $stderr = $process.StandardError.ReadToEnd()
+              Write-Host $stdout
+              if ($stderr) { Write-Host $stderr }
+              if ($process.ExitCode -ne 0) { throw "certutil failed for CurrentUser\\$store with exit code $($process.ExitCode)." }
+            } finally { $process.Dispose() }
+          }
+          Write-Host "Public certificate trust completed. Private-key PFX remains isolated for SignTool."
 
       - name: Build, sign and verify MSIX
         timeout-minutes: 45
@@ -273,17 +295,12 @@ jobs:
           if (-not (Test-Path -LiteralPath "artifacts/SmartPrint-Windows-Store.msix" -PathType Leaf)) { throw "MSIX package builder returned without producing the expected package." }
           Write-Host "END: MSIX package builder completed and the package file exists."
 
-      - name: Trust development signing certificate and install MSIX
+      - name: Install signed MSIX
+        timeout-minutes: 5
         shell: pwsh
-        env:
-          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
-          $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" -Password $securePassword
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null
-          if (-not $certificate) { throw "Could not trust the MSIX development signing certificate." }
-          Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix"
+          Write-Host "Installing the already-signed MSIX using the trusted public publisher certificate."
+          Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix" -ErrorAction Stop
           if (-not (Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME)) { throw "Windows did not register SmartPrint MSIX." }
       - name: Verify packaged service, local API, named pipe and printer subsystem
         id: service_validation
