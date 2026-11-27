@@ -63,7 +63,7 @@ The safest next step is to extend the existing Windows queue pathway and its own
 ### Branding and virtual output
 
 - `PdfBrandingOverlay` is an opt-in overlay for eligible customer PDFs, not a dedicated diagnostic template. It only modifies PDFs when the job explicitly enables branding and strict safety checks pass; signatures/forms and unsafe page layouts are preserved unchanged.
-- A diagnostic page must therefore have its own document-generation/template setting. Do not reuse the customer-PDF branding toggle or start branding ordinary customer documents by default.
+- Phase A now provides a dedicated one-page diagnostic generator and stable template version. It does not reuse the customer-PDF branding toggle or brand ordinary customer documents by default.
 - Shop-scoped virtual test grants already bind tenant + printer + Agent + queue/driver/port fingerprint and are checked again at the pre-spooler boundary. Production rejects virtual test output. Preserve these invariants.
 - `PDF_EXPORT` is an Agent-side protected file output, not a generic virtual printer and not a physical-output confirmation.
 - OS-level inbound print capture (for example, a virtual printer that receives print data from other applications) is distinct from SmartPrint's outbound print/export path and is not implemented by the current virtual test-grant feature.
@@ -76,7 +76,7 @@ The safest next step is to extend the existing Windows queue pathway and its own
 | Wi-Fi / LAN physical | Works when Windows has installed a usable queue; port may be classified LAN | Wi-Fi radio/SSID does not define a print protocol; no in-app printer service browse or queue installation |
 | IPP / IPPS | IPP-like Windows queue ports are classified as IPP; print uses the Windows spooler/installed queue | No direct IPP attribute query, format negotiation, TLS policy or driverless adapter contract |
 | Virtual output | Windows queues retain `UNSUPPORTED_VIRTUAL`; non-production shop-scoped grant can exercise the shared spooler path; PDF export is separate | No general production virtual-printer support; no OS inbound print-capture workflow |
-| Diagnostic test | Existing one-copy print executor and brand-overlay primitives are reusable | No dedicated diagnostic job purpose/template/history/owner-verification flow |
+| Diagnostic test | Dedicated one-copy diagnostic job purpose, branded template, attempt history, Agent/spooler reconciliation and owner verification are implemented on installed Windows queues | Real physical paper-output qualification remains device/driver-specific; Bluetooth/BLE and native protocol discovery are out of scope |
 
 ## 4. Architecture decisions
 
@@ -92,6 +92,14 @@ The safest next step is to extend the existing Windows queue pathway and its own
 ## 5. Implementation sequence
 
 ### Phase A — diagnostic vertical slice on installed Windows queues
+
+<badge>Implemented in PR #132; physical hardware qualification remains open</badge>
+
+The Phase A code path is implemented as an owner-initiated, one-copy diagnostic on an already installed Windows queue. It adds a separate `PrinterDiagnosticAttempt` audit record and API start/confirm endpoints; produces a branded, versioned one-page PDF; uses the existing protected Agent queue, isolated Windows worker, and authorization immediately before `StartDoc`; records spooler evidence separately from the owner's physical-output decision; and excludes diagnostics from customer financial fulfilment, charging and monthly print-job usage.
+
+Physical and non-production virtual output stay distinct. A virtual test can establish that its output artifact was received, but is never described as physical paper confirmation. A spooler job disappearing is uncertainty, not proof that nothing was printed. A completed `PRINTED` observation is retained if Windows later stops listing the job, and duplicate starts/confirmations are idempotent.
+
+Focused policy, PDF-renderer and endpoint integration tests cover conservative capabilities, one-copy artifact generation, offline idempotent retry, tenant/owner authorization and concurrent owner confirmation. The Windows CI fixture and these tests validate code and spooler integration; they do not replace a real shop-floor sample from a named physical printer, driver and Windows build.
 
 - Define a durable diagnostic attempt/state contract separate from customer financial orders.
 - Generate a branded one-page diagnostic artifact from the official logo/brand assets, with stable template version and printer/endpoint/capability metadata.
