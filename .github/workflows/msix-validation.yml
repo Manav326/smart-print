@@ -51,7 +51,7 @@ concurrency:
   # Use the same key for push and pull_request events from the same branch.
   group: smartprint-msix-validation-${{ github.head_ref || github.ref_name }}
   # Keep a costly Windows packaging run alive when another commit is pushed.
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   msix-build-install-upgrade:
