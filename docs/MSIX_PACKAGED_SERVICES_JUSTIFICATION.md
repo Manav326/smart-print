@@ -110,6 +110,26 @@ Answer this from the current privacy policy and data-flow inventory at submissio
 
 Describe the final tested package-uninstall behavior. In particular, verify service removal and explain the retention of machine identity or queued data, if any, with the applicable user-facing disclosure. Do not promise data deletion or retention until it is tested.
 
+## Suggested pre-submission question for Microsoft
+
+Use Partner Center support / the Store onboarding channel to request written guidance before submitting a production package. Suggested message:
+
+**Subject:** Pre-submission guidance requested — SmartPrint desktop app with one LocalService printing Agent
+
+SmartPrint is a Windows desktop printing application for print shops. Its existing Windows architecture includes one app-owned background Windows NT service, `QRtoPrintSmartPrintAgent`, running as the built-in `NT AUTHORITY\\LocalService` account. The service maintains accepted print jobs when the desktop window is closed, discovers Windows printers, performs printing, and exposes the existing authenticated/selected-network local endpoint used by paired phones on the shop LAN. It does not install a kernel-mode printer driver and does not run as LocalSystem.
+
+We are evaluating the MSIX Store route using the `packagedServices` restricted capability and, separately, the Store EXE/MSI ingestion route using our signed offline installer. Before submitting, please clarify:
+
+1. Can an individual Partner Center developer account request `packagedServices` for this app-owned LocalService printing Agent, and what evidence should accompany the request?
+2. Is this scenario eligible for any exception under the current policy for non-Microsoft NT-service dependencies, given that the Agent is an application service and not a WHCP-certified kernel driver?
+3. Does Microsoft permit a packaged service to configure its own SCM failure-recovery actions after deployment, or is the lack of a recovery-actions field in the `desktop6:Service` manifest a certification blocker?
+4. If MSIX packaged services are not approvable for this scenario, is the signed offline EXE/MSI submission route eligible for review at all, and what exact disclosure/exception process applies?
+5. Are there additional service, firewall, administrator-installation, privacy-policy or certification-evidence requirements we should meet before uploading a candidate?
+
+We will not remove the background Agent, weaken queue processing, or submit a reduced-functionality printing app merely to bypass a Store restriction. We can provide the manifest, service account details, data-flow description, WACK report and printing/lifecycle test evidence.
+
+**Do not interpret a support response or a successful package upload as certification approval.** Retain the written response with the final submission evidence.
+
 ## Evidence to prepare before submission
 
 - [ ] Exact MSIX manifest showing `runFullTrust` and `packagedServices`; confirm `localSystemServices`, `allowElevation` and unnecessary `internetClient` are absent.
