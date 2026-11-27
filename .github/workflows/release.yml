@@ -353,7 +353,7 @@ jobs:
           ' <<< "$aab_certificate_output")"
           if [[ ! "$aab_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
             echo "::error::Could not extract a valid SHA-256 fingerprint from the signed Android AAB."
-            printf '%s\\n' "$aab_certificate_output"
+            printf '%s\n' "$aab_certificate_output"
             exit 1
           fi
           if [[ "$aab_fingerprint" != "$keystore_fingerprint" ]]; then
