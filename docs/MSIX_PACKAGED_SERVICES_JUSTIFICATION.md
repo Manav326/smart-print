@@ -1,18 +1,25 @@
-# Microsoft Store restricted-capability justification — packagedServices
+# Microsoft Store restricted-capability justifications — SmartPrint MSIX
 
 **Status:** Draft for Partner Center. Not an approval, and not a prediction of the certification outcome.
 
-## Capability requested
+## Restricted capabilities declared
 
-- Restricted capability: `packagedServices`
+- `runFullTrust`: required by the packaged Win32/Tauri desktop application.
+- `packagedServices`: required by the `windows.service` extension for the LocalService Agent.
 - Manifest extension: `windows.service`
 - Service identity: `QRtoPrintSmartPrintAgent`
 - Service account: `NT AUTHORITY\LocalService`
 - Not requested: `localSystemServices`; SmartPrint does not need to run this service as LocalSystem.
 
-## Proposed Partner Center response
+## Proposed Partner Center responses
 
 SmartPrint is a desktop printing application used by shop owners to receive and print documents and photos from their computers and paired devices on the shop's local network.
+
+### `runFullTrust` justification
+
+SmartPrint is a packaged Win32 desktop application built with Tauri. It needs the full-trust desktop execution model to create its native desktop window, communicate with the Windows printing subsystem through the existing Agent, use the existing local named-pipe IPC protocol, and call the local Agent API. The desktop process is not designed to run inside an AppContainer; converting it to an AppContainer application would require a separate architecture and could remove access to the existing native printing and IPC integration. The package does not request elevation through `allowElevation` and does not ask to run the desktop UI as an administrator.
+
+### `packagedServices` justification
 
 The package requests `packagedServices` solely to install and run the SmartPrint Agent as a Windows service under the built-in, least-privileged `LocalService` account. The Agent performs the application's background printing functions: it maintains the durable print queue, communicates with the Windows printing subsystem, exposes the existing loopback API to the desktop application, and provides the existing LAN endpoint used by paired devices for shop printing.
 
@@ -22,7 +29,7 @@ The service runs as LocalService, not LocalSystem. SmartPrint does not request t
 
 The MSIX package contains the same SmartPrint desktop executable and Agent implementation used by the existing Windows desktop distribution. The purpose of this package is distribution through MSIX and the Microsoft Store, not to introduce a reduced-feature printing edition or a separate printing implementation. The existing website installer remains a separate distribution and its service-based behavior is not changed by this package.
 
-We request approval for `packagedServices` because the persistent, independently running printing Agent is a core part of SmartPrint's user-facing functionality. The capability is limited to this one LocalService service. We will provide installation, upgrade, uninstall, IPC, local API, queue-persistence, network-security and physical-printer test evidence as part of certification. We will also disclose and resolve the MSIX crash-recovery difference before release rather than representing an unverified parity claim.
+We request approval for `runFullTrust` because the product is a native Win32/Tauri desktop application and for `packagedServices` because its existing printing Agent must run as a LocalService Windows service. The service-related capability is limited to this one LocalService service; SmartPrint does not request `localSystemServices`. We will provide installation, upgrade, uninstall, IPC, local API, queue-persistence, network-security and physical-printer test evidence as part of certification. We will also disclose and resolve the MSIX crash-recovery difference before release rather than representing an unverified parity claim.
 
 ## Installation privilege and shop-owner experience
 
@@ -51,13 +58,17 @@ Do not provide production customer credentials. Create a dedicated certification
 
 ## Short answers to likely reviewer questions
 
+### Why does the desktop app need `runFullTrust`?
+
+SmartPrint is a native Win32/Tauri desktop app. Its desktop process uses native Windows desktop APIs and the existing local named-pipe/HTTP communication with the Agent. It is not an AppContainer app. The package does not request `allowElevation` and does not run the desktop UI as administrator.
+
 ### Why does the app need a Windows service?
 
 The print Agent must continue processing accepted jobs independently of whether the desktop window is open. The service provides machine startup integration and independent lifecycle for the background print worker. The current MSIX manifest specifies automatic startup; it does not configure the same Service Control Manager failure actions as the EXE installer. That recovery gap remains under investigation and is a release blocker.
 
 ### Why can't this run as a normal desktop process?
 
-A process owned by the desktop UI can exit when the user closes the app and does not receive the same service startup and recovery handling. That would make background queue processing dependent on the UI remaining open and could delay customer print jobs. The service is the existing architecture used to provide this behavior.
+A process owned by the desktop UI can exit when the user closes the app and does not receive the same service startup behavior. That would make background queue processing dependent on the UI remaining open and could delay customer print jobs. The service is the existing architecture used to provide this behavior. The MSIX manifest does not currently configure the same SCM failure actions as the EXE installer; this remains a release blocker.
 
 ### Why LocalService instead of LocalSystem?
 
@@ -81,7 +92,8 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 
 ## Evidence to prepare before submission
 
-- [ ] Exact MSIX manifest showing only `packagedServices` and `LocalService`; confirm `localSystemServices` is absent.
+- [ ] Exact MSIX manifest showing `runFullTrust` and `packagedServices`; confirm `localSystemServices`, `allowElevation` and unnecessary `internetClient` are absent.
+- [ ] Separate Partner Center explanation for each declared restricted capability: `runFullTrust` and `packagedServices`.
 - [ ] Service registration, automatic start, account identity and Service Control Manager recovery evidence.
 - [ ] Named-pipe and loopback API integration tests.
 - [ ] Queue persistence and machine-identity continuity tests across upgrade.
@@ -94,13 +106,14 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 
 ## Important submission notes
 
-Microsoft's current documentation identifies `packagedServices` as a restricted capability. The capability can be declared for a LocalService service, but Store approval is a separate review decision. Microsoft explicitly cautions that this capability is not approved in most Store submissions. Do not describe approval as guaranteed.
+Microsoft's current documentation identifies both `runFullTrust` and `packagedServices` as restricted capabilities. Partner Center requires an explanation for each restricted capability detected in the package. `packagedServices` can be declared for a LocalService service, but Store approval is a separate review decision; Microsoft explicitly cautions that this capability is not approved in most Store submissions. `runFullTrust` is also subject to restricted-capability review. Do not describe approval for either capability as guaranteed.
 
-When the package is uploaded, provide the capability explanation in Partner Center's **Submission options → Restricted capabilities** section. Microsoft says reviewers assess the explanation during certification; approval allows the submission to continue through the remaining certification checks. If denied, use the certification report to understand the reason and decide whether to clarify, revise, or use another distribution route.
+When the package is uploaded, provide a separate explanation for each detected restricted capability in Partner Center's **Submission options → Restricted capabilities** section. Microsoft says reviewers assess the explanations during certification; if a capability is approved, the submission continues through the remaining certification checks. If denied, use the certification report to understand the reason and decide whether to clarify, revise, or use another distribution route.
 
 ## Official Microsoft references
 
 - App capability declarations: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations
 - Manage submission options for MSIX apps: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options
 - MSIX Store readiness checklist: https://learn.microsoft.com/en-us/windows/apps/publish/store-readiness-checklist
+- WebView2 runtime distribution: https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 
