@@ -52,7 +52,6 @@ import {
 } from "./desktop-bridge";
 import { identifyDocumentPreviewMediaType } from "./document-preview";
 import { verifiedPdfExportPath } from "./print-output";
-import { buildPrinterDiagnosticPages } from "./printer-diagnostic-document";
 import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasIncompleteSpoolerPageProgress, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
@@ -2682,7 +2681,6 @@ function PrinterDiagnosticControls({
     colourMode: string;
     isDuplex: boolean;
     idempotencyKey: string;
-    pagesJpegBase64: string[];
   } | null>(null);
   const pendingAttempt = history.find(item => !item.confirmedUtc) ?? null;
   const currentAttempt = pendingAttempt ?? history[0] ?? null;
@@ -2724,7 +2722,6 @@ function PrinterDiagnosticControls({
       let request = preparedRequestRef.current;
       if (!request) {
         const profile = await getPrinterDiagnosticProfile(token, printer.id);
-        const pagesJpegBase64 = await buildPrinterDiagnosticPages(profile);
         const idempotencyKey = idempotencyKeyRef.current ??
           (typeof crypto !== "undefined" && "randomUUID" in crypto
             ? crypto.randomUUID()
@@ -2735,8 +2732,7 @@ function PrinterDiagnosticControls({
           paperSize: profile.paperSize,
           colourMode: profile.colourMode,
           isDuplex: profile.isDuplex,
-          idempotencyKey,
-          pagesJpegBase64
+          idempotencyKey
         };
         preparedRequestRef.current = request;
       }
