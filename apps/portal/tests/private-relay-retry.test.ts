@@ -50,7 +50,8 @@ test("ambiguous relay POST outcomes are reconciled but definitive rejections are
   for(const code of [
     "private_relay_direct_transfer_in_progress",
     "private_relay_state_changed",
-    "private_relay_already_completed"
+    "private_relay_already_completed",
+    "private_relay_upload_in_progress"
   ]) assert.equal(shouldReconcileCustomerPrivateRelayPostError({status:409,code}),true);
   for(const status of [400,401,403,404,413,422])
     assert.equal(shouldReconcileCustomerPrivateRelayPostError({status}),false);
