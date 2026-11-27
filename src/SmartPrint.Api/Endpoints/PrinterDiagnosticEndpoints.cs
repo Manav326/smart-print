@@ -630,3 +630,5 @@ public sealed record PrinterDiagnosticStartRequest(
     IReadOnlyList<string> PagesJpegBase64);
 
 public sealed record PrinterDiagnosticConfirmationRequest(string Decision, string? Notes);
+
+public sealed record AgentPrinterDiagnosticReconciliationRequest(IReadOnlyList<Guid> JobIds);
