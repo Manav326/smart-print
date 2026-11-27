@@ -24,7 +24,7 @@ import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStat
 import { isCustomerBatchFinished } from "./customer-session-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
 import AuthScreen from "./AuthScreen";
-import PublicLandingPage from "./PublicLandingPage";
+import PublicLandingPage, { DownloadAction } from "./PublicLandingPage";
 import QrStationPrintDocument from "./QrStationPrintDocument";
 import { buildQrStationArtworkSvg, createQrStationImageFile, downloadQrStationImage, loadQrStationLogoDataUri, shareQrStationImage, type QrStationArtworkSource, type QrStationImageFormat } from "./qr-station-export";
 import { resolveCustomerUploadStatusMessage } from "./customer-upload-status";
@@ -2893,8 +2893,13 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
 }) {
   const { locale } = useLocale();
   const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
-  const { release, state: releaseState } = usePublicRelease();
-  const windowsInstallerUrl = release?.windowsAvailable ? getPublicDownloadPath("windows") : null;
+  const { release, state: releaseState, refresh } = usePublicRelease();
+  const windowsInstallerUrl = release?.windowsAvailable && release.version
+    ? getPublicDownloadPath("windows", release.version, release.downloadBaseUrl)
+    : null;
+  const windowsInstallerFallbackUrl = release?.windowsAvailable && release.version
+    ? getPublicDownloadPath("windows", release.version)
+    : null;
   const connected = Boolean(localAgentStatus?.paired && agents.some(agent =>
     !agent.revokedUtc && agent.id === localAgentStatus.agentDeviceId
   ));
@@ -2949,9 +2954,17 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </div>}
       <div className="agent-command-panel">
         <div><span>{t("GUIDED WINDOWS INSTALLER")}</span><strong>{t("Download and run SmartPrint Windows Setup on the shop computer.")}</strong><small>{t("Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.")}</small></div>
-        {windowsInstallerUrl
-          ? <a className="secondary-button" href={windowsInstallerUrl}><Monitor size={14}/> {t("Download Windows installer")}</a>
-          : <span className="subtle-button" aria-disabled="true">{releaseState === "loading" ? "Checking installer availability…" : releaseState === "error" ? "Installer availability temporarily unavailable" : "Windows installer not published"}</span>}
+        <div className="agent-installer-download">
+          <DownloadAction
+            platform="windows"
+            label="Download Windows installer"
+            available={Boolean(windowsInstallerUrl)}
+            downloadUrl={windowsInstallerUrl}
+            fallbackDownloadUrl={windowsInstallerFallbackUrl}
+            releaseState={releaseState}
+            onRefresh={refresh}
+          />
+        </div>
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>{t("Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.")}</span></div>
       <div className="agent-generate-row"><span>{t("Pairing codes are single use. Generating a new one does not revoke already paired computers.")}</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> {t("Generate pairing code")}</>}</button></div>

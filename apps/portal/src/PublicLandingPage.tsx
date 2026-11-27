@@ -216,7 +216,7 @@ export default function PublicLandingPage({ dark, onToggleTheme }: { dark: boole
 
 
 
-type DownloadPlatform = "windows" | "android";
+export type DownloadPlatform = "windows" | "android";
 
 function formatDownloadBytes(value: number): string {
   if (!Number.isFinite(value) || value <= 0) return "0 B";
@@ -247,7 +247,7 @@ function formatDownloadRemaining(seconds: number | null): string {
   return remainingSeconds > 0 ? `About ${minutes}m ${remainingSeconds}s remaining` : `About ${minutes}m remaining`;
 }
 
-function DownloadAction({
+export function DownloadAction({
   platform,
   label,
   available,

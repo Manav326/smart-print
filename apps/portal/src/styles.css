@@ -5072,3 +5072,8 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
     min-width: 0;
   }
 }
+
+
+/* Keep the shared release downloader aligned with the shop pairing panel. */
+.agent-installer-download{flex:0 1 300px;min-width:220px;max-width:340px;width:100%}
+@media(max-width:700px){.agent-installer-download{flex:1 1 auto;min-width:0;max-width:none;width:100%}}
