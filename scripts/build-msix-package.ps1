@@ -43,6 +43,7 @@ $apiUri = [Uri]$PublicApiOrigin
 if ($apiUri.Scheme -ne "https" -or $apiUri.AbsolutePath -notin @("", "/") -or $apiUri.Query -or $apiUri.Fragment -or $apiUri.UserInfo) {
     throw "PublicApiOrigin must be a canonical HTTPS origin."
 }
+$portalOrigin = $apiUri.GetLeftPart([UriPartial]::Authority)
 if (-not (Test-Path -LiteralPath (Join-Path $desktopRoot "SmartPrint.Desktop.exe"))) { throw "Native desktop executable is missing." }
 if (-not (Test-Path -LiteralPath (Join-Path $desktopRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"))) { throw "Microsoft-signed Evergreen WebView2 standalone runtime installer is missing." }
 if (-not (Test-Path -LiteralPath (Join-Path $agentRoot "SmartPrint.Agent.exe"))) { throw "Self-contained Agent executable is missing." }
