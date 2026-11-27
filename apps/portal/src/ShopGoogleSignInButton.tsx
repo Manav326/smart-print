@@ -5,6 +5,7 @@ import {
   getGoogleAuthChallenge,
   type AuthTokens
 } from "./api";
+import { translateUiText, useLocale } from "./i18n";
 
 type GoogleCredentialResponse = { credential?: string };
 type GoogleIdentity = {
@@ -83,6 +84,9 @@ export default function ShopGoogleSignInButton({
 }: {
   onAuthenticated: (tokens: AuthTokens) => Promise<void> | void;
 }) {
+  const { locale } = useLocale();
+  const t = (source: string) => translateUiText(locale, source);
+  const googleLocale = locale === "hindi" ? "hi" : "en";
   const target = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -94,7 +98,7 @@ export default function ShopGoogleSignInButton({
   const receiveCredential = useCallback(async (response: GoogleCredentialResponse, nonce: string) => {
     const credential = String(response.credential ?? "").trim();
     if (!credential) {
-      setError("Google did not return a sign-in credential. Please try again.");
+      setError(t("Google did not return a sign-in credential. Please try again."));
       return;
     }
 
@@ -108,7 +112,7 @@ export default function ShopGoogleSignInButton({
     } finally {
       setBusy(false);
     }
-  }, [onAuthenticated]);
+  }, [onAuthenticated, t]);
 
   useEffect(() => {
     let active = true;
@@ -138,7 +142,7 @@ export default function ShopGoogleSignInButton({
         cancel_on_tap_outside: true,
         context: "signin",
         nonce: challenge.nonce,
-        error_callback: () => setError("Google sign-in was cancelled or could not be started.")
+        error_callback: () => setError(t("Google sign-in was cancelled or could not be started."))
       });
       window.google.accounts.id.renderButton(target.current, {
         type: "standard",
@@ -148,27 +152,27 @@ export default function ShopGoogleSignInButton({
         shape: "pill",
         logo_alignment: "left",
         width: Math.min(350, Math.max(240, target.current.clientWidth || 320)),
-        locale: "en"
+        locale: googleLocale
       });
       setReady(true);
       setLoading(false);
     })().catch(reason => {
       if (active) {
-        setError(reason instanceof Error ? reason.message : "Google sign-in could not be loaded.");
+        setError(reason instanceof Error ? t(reason.message) : t("Google sign-in could not be loaded."));
         setLoading(false);
       }
     });
 
     return () => { active = false; };
-  }, [receiveCredential, challengeRevision]);
+  }, [receiveCredential, challengeRevision, locale, t]);
 
   return (
     <div className="auth-google-signin">
-      <div className="auth-google-divider"><span>OR</span></div>
-      <div ref={target} className="auth-google-signin__target" aria-label="Continue with Google" />
-      {busy && <p className="auth-google-signin__status" role="status">Verifying your Google account securely…</p>}
-      {!ready && loading && !error && <p className="auth-google-signin__status" role="status">Preparing Google sign-in…</p>}
-      {unavailable && <p className="auth-google-signin__status" role="status">Google sign-in is not configured for this environment yet.</p>}
+      <div className="auth-google-divider"><span>{t("OR")}</span></div>
+      <div ref={target} className="auth-google-signin__target" aria-label={t("Continue with Google")} />
+      {busy && <p className="auth-google-signin__status" role="status">{t("Verifying your Google account securely…")}</p>}
+      {!ready && loading && !error && <p className="auth-google-signin__status" role="status">{t("Preparing Google sign-in…")}</p>}
+      {unavailable && <p className="auth-google-signin__status" role="status">{t("Google sign-in is not configured for this environment yet.")}</p>}
       {error && (
         <div className="auth-google-signin__retry">
           <p className="auth-google-signin__error" role="alert">{error}</p>
@@ -183,7 +187,7 @@ export default function ShopGoogleSignInButton({
               setChallengeRevision(value => value + 1);
             }}
           >
-            Try Google sign-in again
+            {t("Try Google sign-in again")}
           </button>
         </div>
       )}
