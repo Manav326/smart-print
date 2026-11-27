@@ -85,7 +85,7 @@ export default function ShopGoogleSignInButton({
   onAuthenticated: (tokens: AuthTokens) => Promise<void> | void;
 }) {
   const { locale } = useLocale();
-  const t = (source: string) => translateUiText(locale, source);
+  const t = useCallback((source: string) => translateUiText(locale, source), [locale]);
   const googleLocale = locale === "hindi" ? "hi" : "en";
   const target = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
