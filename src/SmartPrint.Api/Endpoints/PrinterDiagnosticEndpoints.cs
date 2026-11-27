@@ -501,7 +501,7 @@ public static class PrinterDiagnosticEndpoints
             }
 
             if (decision == "NO_OUTPUT_RECEIVED" &&
-                (!virtualOutput || !verifiedSpoolerAbsence))
+                (!virtualOutput || (!blockedBeforeSubmission && !verifiedSpoolerAbsence)))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new { code = "diagnostic_virtual_no_output_not_verified", message = "There is no verified missing-output observation for this virtual test." });
