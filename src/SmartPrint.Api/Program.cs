@@ -2491,6 +2491,22 @@ shop.MapPut("/pricing", async (
         return Results.NotFound();
     }
 
+    // A no-op save must not create a new pricing-card version. Expired
+    // customer quotes are renewed against this version, so only real card edits
+    // should trigger another customer acceptance step.
+    var pricingCardChanged = !pricing.IsConfigured ||
+        pricing.MonoPerSideMinor != request.MonoPerSideMinor ||
+        pricing.ColourPerSideMinor != request.ColourPerSideMinor ||
+        pricing.MonoDuplexPerSheetMinor != request.MonoDuplexPerSheetMinor ||
+        pricing.ColourDuplexPerSheetMinor != request.ColourDuplexPerSheetMinor ||
+        pricing.MinimumChargeMinor != request.MinimumChargeMinor ||
+        pricing.Photo35x45Minor != request.Photo35x45Minor ||
+        pricing.Photo25x35Minor != request.Photo25x35Minor ||
+        pricing.Photo2x2Minor != request.Photo2x2Minor ||
+        pricing.Photo4x6Minor != request.Photo4x6Minor ||
+        (request.IdDocumentPriceMinor is long requestedIdDocumentPrice &&
+            pricing.IdDocumentPriceMinor != requestedIdDocumentPrice);
+
     pricing.MonoPerSideMinor = request.MonoPerSideMinor;
     pricing.ColourPerSideMinor = request.ColourPerSideMinor;
     pricing.MonoDuplexPerSheetMinor = request.MonoDuplexPerSheetMinor;
@@ -2503,7 +2519,7 @@ shop.MapPut("/pricing", async (
     if (request.IdDocumentPriceMinor is long idDocumentPriceMinor)
         pricing.IdDocumentPriceMinor = idDocumentPriceMinor;
     pricing.IsConfigured = true;
-    pricing.Version++;
+    if (pricingCardChanged) pricing.Version++;
     pricing.UpdatedUtc = DateTimeOffset.UtcNow;
     await db.SaveChangesAsync(ct);
 
