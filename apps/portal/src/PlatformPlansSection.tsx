@@ -315,7 +315,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
         <aside className="panel platform-plan-list-panel">
           <div className="platform-plan-list-heading"><strong>{t("Plan catalogue")}</strong><span>{plans.length}</span></div>
           {loading ? (
-            <div className="platform-plan-empty"><LoaderCircle size={17} className="platform-spin"/> Loading plans…</div>
+            <div className="platform-plan-empty"><LoaderCircle size={17} className="platform-spin"/>{t("Loading plans…")}</div>
           ) : plans.length === 0 ? (
             <div className="platform-plan-empty">{t("No plans have been created.")}</div>
           ) : (
@@ -376,9 +376,9 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                   <div>
                     <span className="platform-plan-panel-kicker">{selectedPlan.isSystemPlan ? "PROTECTED SYSTEM PLAN" : "PLAN DETAILS"}</span>
                     <h3>{selectedPlan.name}</h3>
-                    <p>{selectedPlan.code} · created {formatIstDate(selectedPlan.createdUtc)}</p>
+                    <p>{selectedPlan.code} · {t("created {date}", {date: formatIstDate(selectedPlan.createdUtc)})}</p>
                   </div>
-                  {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> Protected</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? t("Active") : t("Inactive")}</span>}
+                  {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> {t("Protected")}</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? t("Active") : t("Inactive")}</span>}
                 </div>
                 <div className="platform-plan-meta-grid">
                   <Field label="Plan name"><input value={name} onChange={event => setName(event.target.value)} disabled={isSystemPlan} maxLength={100}/></Field>
@@ -400,8 +400,8 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
 
               <section className="panel platform-plan-panel">
                 <div className="platform-plan-panel-heading">
-                  <div><span className="platform-plan-panel-kicker">{t("VERSIONED TERMS")}</span><h3>{hasDraft ? t("Edit draft · v{version}").replace("{version}", String(currentDraft?.version ?? "")) : t("Prepare next version · v{version}").replace("{version}", String((latestVersion(selectedPlan)?.version ?? 0) + 1))}</h3><p>Saving creates or updates a draft. Published terms cannot be edited in place.</p></div>
-                  <span className={hasDraft ? "platform-plan-draft-pill" : "platform-plan-protected"}>{hasDraft ? "Unpublished draft" : "New draft"}</span>
+                  <div><span className="platform-plan-panel-kicker">{t("VERSIONED TERMS")}</span><h3>{hasDraft ? t("Edit draft · v{version}").replace("{version}", String(currentDraft?.version ?? "")) : t("Prepare next version · v{version}").replace("{version}", String((latestVersion(selectedPlan)?.version ?? 0) + 1))}</h3><p>{t("Saving creates or updates a draft. Published terms cannot be edited in place.")}</p></div>
+                  <span className={hasDraft ? "platform-plan-draft-pill" : "platform-plan-protected"}>{hasDraft ? t("Unpublished draft") : t("New draft")}</span>
                 </div>
                 {isSystemPlan ? (
                   <div className="platform-plan-system-note"><LockKeyhole size={16}/><div><strong>{t("Trial safeguards")}</strong><span>{t("This system plan preserves existing 14-day trials. Its terms are intentionally not editable from the commercial catalogue.")}</span></div></div>
@@ -493,7 +493,7 @@ function PlanVersionEditor({ form, onChange }: {
         <Field label={t("Annual price ({currency})").replace("{currency}",currencyLabel)}><input type="number" min="0" step={priceStep} value={form.annualPriceMinor} onChange={event => onChange("annualPriceMinor", event.target.value)} placeholder={t("e.g. 1499")}/></Field>
       </div>
 
-      <div className="platform-plan-subheading"><div><h4>{t("Usage limits")}</h4><p>{t("Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.")}</p></div><span className="platform-plan-unlimited">Optional limits</span></div>
+      <div className="platform-plan-subheading"><div><h4>{t("Usage limits")}</h4><p>{t("Blank means no configured cap; positive numbers enforce the configured limit when enforcement is connected.")}</p></div><span className="platform-plan-unlimited">{t("Optional limits")}</span></div>
       <div className="platform-plan-meta-grid platform-plan-limits-grid">
         <Field label={t("Printers")}><input type="number" min="1" step="1" value={form.maxPrinters} onChange={event => onChange("maxPrinters", event.target.value)} placeholder={t("No configured cap")}/></Field>
         <Field label={t("Agent computers")}><input type="number" min="1" step="1" value={form.maxAgentDevices} onChange={event => onChange("maxAgentDevices", event.target.value)} placeholder={t("No configured cap")}/></Field>
