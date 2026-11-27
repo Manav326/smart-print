@@ -105,6 +105,10 @@ function ensureRazorpayCheckout(): Promise<void> {
   return pending;
 }
 
+function formatLocaleNumber(value: number, locale: UiLocale, options?: Intl.NumberFormatOptions): string {
+  return new Intl.NumberFormat(getUiLocaleLanguage(locale), options).format(value);
+}
+
 function formatLocalizedSubscriptionAmount(amountMinor: number, currency: string, locale: UiLocale): string {
   let digits = 2;
   try {
@@ -163,8 +167,8 @@ h1{font-size:22px;margin:5px 0}.eyebrow{font-size:10px;letter-spacing:.12em;font
 .receipt-row span{color:#637085}.receipt-row strong{text-align:right;overflow-wrap:anywhere}
 .note{margin-top:22px;color:#6b7482;font-size:11px}
 @media print{body{padding:0}main{border:0;border-radius:0;width:100%;padding:18px}}
-</style></head><body><main><header><div><div class="eyebrow">SMARTPRINT BY QUANTAEDGE</div><h1>Subscription payment receipt</h1><div>Thank you for choosing SmartPrint.</div></div><div class="eyebrow">PAYMENT VERIFIED</div></header>
-<div class="amount">${escapeHtml(formatSubscriptionAmount(payment.amountMinor, payment.currency))}</div>
+</style></head><body><main><header><div><div class="eyebrow">SMARTPRINT BY QUANTAEDGE</div><h1>${escapeHtml(t("Subscription payment receipt"))}</h1><div>${escapeHtml(t("Thank you for choosing SmartPrint."))}</div></div><div class="eyebrow">${escapeHtml(t("PAYMENT VERIFIED"))}</div></header>
+<div class="amount">${escapeHtml(amount)}</div>
 ${details}
 <p class="note">${escapeHtml(t("This is a payment receipt for your records, not a GST tax invoice. It confirms the payment recorded by SmartPrint; it does not replace any applicable tax invoice issued by the legal seller."))}</p>
 </main></body></html>`);
@@ -640,7 +644,7 @@ export default function ShopSubscriptionCheckout({
               </div>
               <span className={"subscription-payment-history-status " + payment.status.toLowerCase()}>{t(subscriptionPaymentStatusLabel(payment.status))}</span>
               <div className="subscription-payment-history-amount">
-                <strong>{formatSubscriptionAmount(payment.amountMinor, payment.currency)}</strong>
+                <strong>{amount(payment.amountMinor, payment.currency)}</strong>
                 {payment.status === "CAPTURED" && payment.razorpayPaymentId && (
                   <button type="button" className="secondary-button small" onClick={() => printReceipt(payment)}>{t("Print receipt")}</button>
                 )}
