@@ -469,37 +469,115 @@ mod msix_webview2 {
         }
     }
 
-    fn parse_registry_output(output: &str) -> bool {
-        output.lines().any(|line| {
-            let mut fields = line.split_whitespace();
-            let name = fields.next().unwrap_or_default();
-            let kind = fields.next().unwrap_or_default();
-            let value = fields.next().unwrap_or_default();
-            name.eq_ignore_ascii_case("pv")
-                && kind.eq_ignore_ascii_case("REG_SZ")
-                && !value.is_empty()
-                && value != "0.0.0.0"
-        })
+    const HKEY_LOCAL_MACHINE: isize = -2_147_483_646;
+    const HKEY_CURRENT_USER: isize = -2_147_483_647;
+    const KEY_QUERY_VALUE: u32 = 0x0001;
+    const REG_SZ: u32 = 1;
+    const ERROR_SUCCESS: i32 = 0;
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        #[link_name = "RegOpenKeyExW"]
+        fn reg_open_key_ex_w(
+            key: *mut std::ffi::c_void,
+            sub_key: *const u16,
+            options: u32,
+            desired_access: u32,
+            result: *mut *mut std::ffi::c_void,
+        ) -> i32;
+
+        #[link_name = "RegQueryValueExW"]
+        fn reg_query_value_ex_w(
+            key: *mut std::ffi::c_void,
+            value_name: *const u16,
+            reserved: *mut u32,
+            value_type: *mut u32,
+            data: *mut u8,
+            data_size: *mut u32,
+        ) -> i32;
+
+        #[link_name = "RegCloseKey"]
+        fn reg_close_key(key: *mut std::ffi::c_void) -> i32;
     }
 
-    fn registry_key_has_runtime(key: &str) -> bool {
-        Command::new("reg.exe")
-            .args(["query", key, "/v", "pv"])
-            .output()
-            .map(|output| output.status.success() && parse_registry_output(&String::from_utf8_lossy(&output.stdout)))
-            .unwrap_or(false)
+    fn parse_registry_runtime_version(value: &str) -> bool {
+        let parts: Vec<&str> = value.trim_matches('\0').trim().split('.').collect();
+        parts.len() == 4
+            && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+            && parts[0].parse::<u32>().map(|major| major > 0).unwrap_or(false)
+    }
+
+    fn registry_key_has_runtime(root_key: isize, sub_key: &str) -> bool {
+        let sub_key: Vec<u16> = sub_key.encode_utf16().chain(std::iter::once(0)).collect();
+        let value_name: Vec<u16> = "pv".encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let mut key = std::ptr::null_mut();
+            if reg_open_key_ex_w(
+                root_key as *mut std::ffi::c_void,
+                sub_key.as_ptr(),
+                0,
+                KEY_QUERY_VALUE,
+                &mut key,
+            ) != ERROR_SUCCESS {
+                return false;
+            }
+
+            let mut value_type = 0u32;
+            let mut data_size = 0u32;
+            let size_status = reg_query_value_ex_w(
+                key,
+                value_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                std::ptr::null_mut(),
+                &mut data_size,
+            );
+
+            if size_status != ERROR_SUCCESS || value_type != REG_SZ || data_size < 2 || data_size > 1024 {
+                reg_close_key(key);
+                return false;
+            }
+
+            let mut data = vec![0u16; (data_size as usize + 1) / 2];
+            let mut actual_size = data_size;
+            let read_status = reg_query_value_ex_w(
+                key,
+                value_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                data.as_mut_ptr().cast::<u8>(),
+                &mut actual_size,
+            );
+            reg_close_key(key);
+
+            if read_status != ERROR_SUCCESS
+                || value_type != REG_SZ
+                || actual_size > data_size
+                || actual_size % 2 != 0
+            {
+                return false;
+            }
+
+            let units = &data[..(actual_size as usize / 2)];
+            let value_length = units.iter().position(|unit| *unit == 0).unwrap_or(units.len());
+            String::from_utf16(&units[..value_length])
+                .map(|version| parse_registry_runtime_version(&version))
+                .unwrap_or(false)
+        }
     }
 
     fn webview2_runtime_installed() -> bool {
         let machine_key = format!(
-            r"HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{}",
+            r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{}",
             WEBVIEW2_CLIENT_ID
         );
         let user_key = format!(
-            r"HKCU\Software\Microsoft\EdgeUpdate\Clients\{}",
+            r"Software\Microsoft\EdgeUpdate\Clients\{}",
             WEBVIEW2_CLIENT_ID
         );
-        registry_key_has_runtime(&machine_key) || registry_key_has_runtime(&user_key)
+        registry_key_has_runtime(HKEY_LOCAL_MACHINE, &machine_key)
+            || registry_key_has_runtime(HKEY_CURRENT_USER, &user_key)
     }
 
     pub fn ensure_runtime_for_msix() -> bool {
@@ -573,18 +651,19 @@ mod msix_webview2 {
 
     #[cfg(test)]
     mod tests {
-        use super::parse_registry_output;
+        use super::parse_registry_runtime_version;
 
         #[test]
         fn accepts_a_real_webview2_runtime_version() {
-            assert!(parse_registry_output("pv    REG_SZ    140.0.3485.54"));
+            assert!(parse_registry_runtime_version("140.0.3485.54"));
         }
 
         #[test]
-        fn rejects_empty_or_zero_webview2_runtime_versions() {
-            assert!(!parse_registry_output("pv    REG_SZ    0.0.0.0"));
-            assert!(!parse_registry_output("pv    REG_SZ"));
-            assert!(!parse_registry_output("ERROR: The system was unable to find the specified registry key or value."));
+        fn rejects_empty_zero_and_malformed_webview2_runtime_versions() {
+            assert!(!parse_registry_runtime_version("0.0.0.0"));
+            assert!(!parse_registry_runtime_version(""));
+            assert!(!parse_registry_runtime_version("not-a-version"));
+            assert!(!parse_registry_runtime_version("140.0"));
         }
     }
 }
