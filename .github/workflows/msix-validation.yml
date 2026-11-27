@@ -334,6 +334,30 @@ jobs:
           "recovery_ready=$($recoveryReady.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
           if (-not $recoveryReady) { Write-Warning "Packaged Agent crash-recovery parity is not proven. Release remains blocked." }
 
+          # Verify that the service recovered its actual local interfaces and queue after restart.
+          $postCrashApiReady = $false
+          $postCrashDeadline = (Get-Date).AddSeconds(60)
+          do {
+            try {
+              $postCrashStatus = Invoke-WebRequest -Uri "http://127.0.0.1:17842/api/v1/local/status" -TimeoutSec 10 -SkipHttpErrorCheck
+              $postCrashBody = $postCrashStatus.Content | ConvertFrom-Json
+              $postCrashApiReady = ($postCrashStatus.StatusCode -in @(200, 503) -and $postCrashBody.readiness.queueInitialized -eq $true)
+            } catch { $postCrashApiReady = $false }
+            if (-not $postCrashApiReady) { Start-Sleep -Seconds 2 }
+          } while (-not $postCrashApiReady -and (Get-Date) -lt $postCrashDeadline)
+          if (-not $postCrashApiReady) { throw "Agent process restart did not restore the local API and initialized print queue." }
+
+          $postCrashPipe = [System.IO.Pipes.NamedPipeClientStream]::new(".", "QRtoPrint.SmartPrint.Agent.Control", [System.IO.Pipes.PipeDirection]::InOut)
+          try {
+            $postCrashPipe.Connect(10000)
+            $postCrashWriter = [System.IO.StreamWriter]::new($postCrashPipe, [System.Text.UTF8Encoding]::new($false), 1024, $true)
+            $postCrashReader = [System.IO.StreamReader]::new($postCrashPipe, [System.Text.UTF8Encoding]::new($false), $false, 1024, $true)
+            $postCrashWriter.AutoFlush = $true
+            $postCrashWriter.WriteLine('{"operation":"status"}')
+            $postCrashResponse = $postCrashReader.ReadLine() | ConvertFrom-Json
+            if ($postCrashResponse.serviceReachable -ne $true) { throw "Named-pipe control did not recover after Agent process restart." }
+          } finally { $postCrashPipe.Dispose() }
+
           $package = Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME
           $agentPath = Join-Path $package.InstallLocation "Agent\SmartPrint.Agent.exe"
           $firewallMatches = foreach ($rule in Get-NetFirewallRule -Direction Inbound -Enabled True) {
