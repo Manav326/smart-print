@@ -340,7 +340,7 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
         .CountAsync(agent => agent.RevokedUtc == null && agent.Status != "Revoked" &&
                              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter, ct);
     var jobsLast30Days = await db.PrintJobs.AsNoTracking()
-        .CountAsync(job => job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
+        .CountAsync(job => job.Origin != "PRINTER_DIAGNOSTIC" && job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
 
     var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
         .GroupBy(subscription =>
@@ -494,7 +494,7 @@ platform.MapGet("/tenants", async (
                 .Where(agent => agent.TenantId == tenant.Id && agent.RevokedUtc == null && agent.Status != "Revoked")
                 .Max(agent => agent.LastSeenUtc),
             JobsLast30Days = db.PrintJobs.AsNoTracking()
-                .Count(job => job.TenantId == tenant.Id && job.CreatedUtc >= recentStart && job.CreatedUtc < recentEnd)
+                .Count(job => job.TenantId == tenant.Id && job.Origin != "PRINTER_DIAGNOSTIC" && job.CreatedUtc >= recentStart && job.CreatedUtc < recentEnd)
         })
         .Skip((pageNumber - 1) * boundedPageSize)
         .Take(boundedPageSize)
@@ -562,6 +562,7 @@ platform.MapPatch("/tenants/{tenantId:guid}/status", async (
     {
         var unresolvedJobs = await db.PrintJobs.LongCountAsync(job =>
             job.TenantId == tenant.Id &&
+            job.Origin != "PRINTER_DIAGNOSTIC" &&
             job.Status != "COMPLETED" &&
             job.Status != "REJECTED" &&
             job.Status != "PAYMENT_REJECTED" &&
@@ -1469,6 +1470,7 @@ var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
 shop.MapShopSubscriptionPaymentEndpoints();
+shop.MapPrinterDiagnosticEndpoints();
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
@@ -2796,7 +2798,7 @@ shop.MapGet("/print-jobs", async (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId
+        where job.TenantId == tenantId && job.Origin != "PRINTER_DIAGNOSTIC"
         orderby job.CreatedUtc descending
         select new
         {
@@ -3450,6 +3452,7 @@ shop.MapGet("/reports/summary", async (
     var fromUtc = toUtc.AddDays(-periodDays);
     var jobs = db.PrintJobs.AsNoTracking().Where(job =>
         job.TenantId == tenantId &&
+        job.Origin != "PRINTER_DIAGNOSTIC" &&
         job.CreatedUtc >= fromUtc &&
         job.CreatedUtc < toUtc);
 
