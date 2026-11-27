@@ -113,46 +113,32 @@ jobs:
         run: |
           dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
           if ($LASTEXITCODE -ne 0) { throw "SmartPrint Agent tests failed." }
-      - name: Prepare production signing certificate for Partner Center package
-        if: github.event_name == 'workflow_dispatch'
-        shell: pwsh
-        env:
-          PFX_BASE64: ${{ secrets.WINDOWS_CODESIGN_PFX_BASE64 }}
-          PFX_PASSWORD: ${{ secrets.WINDOWS_CODESIGN_PFX_PASSWORD }}
-        run: |
-          if ([string]::IsNullOrWhiteSpace($env:PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:PFX_PASSWORD)) { throw "Production MSIX build requires WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD repository secrets." }
-          if ($env:SMARTPRINT_PUBLIC_BASE_URL -eq "https://example.invalid") { throw "Production MSIX build requires the SMARTPRINT_PUBLIC_BASE_URL repository variable." }
-          if ([string]::IsNullOrWhiteSpace($env:MSIX_PACKAGE_NAME) -or [string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER) -or [string]::IsNullOrWhiteSpace($env:MSIX_APP_DISPLAY_NAME) -or [string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER_DISPLAY_NAME)) { throw "Production MSIX build requires the exact Partner Center package identity, app display name, Publisher and publisher display name." }
-          if ($env:MSIX_VERSION -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Production MSIX version must contain four numeric parts, e.g. 0.1.97.0." }
-          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
-          [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_BASE64))
-          if (-not (Test-Path -LiteralPath $pfxPath)) { throw "Could not materialize production code-signing PFX." }
-      - name: Create ephemeral CI-only package certificate
-        if: github.event_name != 'workflow_dispatch'
+      - name: Create publisher-matched MSIX signing certificate
         id: certificate
         shell: pwsh
+        env:
+          CERT_SUBJECT: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
         run: |
+          if ([string]::IsNullOrWhiteSpace($env:CERT_SUBJECT)) { throw "MSIX Publisher identity is required." }
           $password = [Guid]::NewGuid().ToString("N") + "Aa1!"
           $securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
-          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=SmartPrint MSIX CI" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(7)
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:CERT_SUBJECT -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(7)
+          if ($certificate.Subject -ine $env:CERT_SUBJECT) { throw "Generated certificate subject '$($certificate.Subject)' does not exactly match requested Publisher '$env:CERT_SUBJECT'." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
+          New-Item -ItemType Directory -Force -Path artifacts | Out-Null
+          Export-Certificate -Cert $certificate -FilePath "artifacts/SmartPrint-MSIX-DevCert.cer" -Type CERT | Out-Null
           Write-Output "::add-mask::$password"
           "pfx_password=$password" >> $env:GITHUB_OUTPUT
       - name: Build, sign and verify MSIX
         shell: pwsh
         env:
-          PFX_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && secrets.WINDOWS_CODESIGN_PFX_PASSWORD || steps.certificate.outputs.pfx_password }}
-          IS_PRODUCTION: ${{ github.event_name == 'workflow_dispatch' }}
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          if ($env:IS_PRODUCTION -eq "true") {
-            Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword | Out-Null
-          } else {
-            Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword | Out-Null
-            Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword | Out-Null
-          }
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword | Out-Null
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword | Out-Null
           $arguments = @{
             DesktopDirectory = "artifacts/desktop"
             AgentDirectory = "artifacts/agent"
@@ -168,17 +154,16 @@ jobs:
             PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME
           }
           ./scripts/build-msix-package.ps1 @arguments
-      - name: Trust signing certificate and install MSIX
+      - name: Trust development signing certificate and install MSIX
         shell: pwsh
         env:
-          PFX_PASSWORD: ${{ github.event_name == 'workflow_dispatch' && secrets.WINDOWS_CODESIGN_PFX_PASSWORD || steps.certificate.outputs.pfx_password }}
-          IS_PRODUCTION: ${{ github.event_name == 'workflow_dispatch' }}
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
           $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" -Password $securePassword
-          if ($env:IS_PRODUCTION -ne "true") { Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null }
-          if (-not $certificate) { throw "Could not trust the MSIX signing certificate." }
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null
+          if (-not $certificate) { throw "Could not trust the MSIX development signing certificate." }
           Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix"
           if (-not (Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME)) { throw "Windows did not register SmartPrint MSIX." }
       - name: Verify packaged service, local API, named pipe and printer subsystem
@@ -299,7 +284,9 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: smartprint-msix-${{ inputs.version }}
-          path: artifacts/SmartPrint-Windows-Store.msix
+          path: |
+            artifacts/SmartPrint-Windows-Store.msix
+            artifacts/SmartPrint-MSIX-DevCert.cer
           if-no-files-found: error
           retention-days: 30
       - name: Verify uninstall removes service but preserves machine data
