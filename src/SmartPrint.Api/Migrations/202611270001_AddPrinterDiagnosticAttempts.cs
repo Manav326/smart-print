@@ -92,6 +92,15 @@ public sealed class AddPrinterDiagnosticAttempts : Migration
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.Sql("""
+            DO $printer_diagnostic_downgrade$
+            BEGIN
+                IF EXISTS (SELECT 1 FROM "PrintJobs" WHERE "Origin" = 'PRINTER_DIAGNOSTIC') THEN
+                    RAISE EXCEPTION 'Cannot downgrade while printer diagnostic execution records remain. Retain the diagnostic audit table or remove diagnostic jobs through the supported retention process first.';
+                END IF;
+            END;
+            $printer_diagnostic_downgrade$;
+            """);
         migrationBuilder.DropTable(name: "PrinterDiagnosticAttempts");
         migrationBuilder.Sql("""
             ALTER TABLE "PrintJobs"
