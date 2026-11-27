@@ -40,6 +40,12 @@ Microsoft's MSIX documentation states that a package containing a Windows servic
 
 Record the exact Store/App Installer prompt and outcome. Do not promise that every standard user can install the package without administrator involvement. The Store listing and customer instructions must accurately state any administrator requirement that remains in the final supported installation flow.
 
+## Privacy policy requirement
+
+Microsoft's current MSIX Store readiness checklist says Win32 and Desktop Bridge apps need a public privacy policy URL even when they do not collect personal information. SmartPrint's Windows Agent and cloud-connected printing flow do process operational and customer data, so the submitted policy must accurately describe the current Windows app, paired-device upload, cloud/API processing, local encrypted queue, machine identity, retention/deletion, and relevant service providers. Do not reuse a policy for a different product or claim zero data collection/retention unless the current implementation and server-side behavior support that statement.
+
+The canonical public privacy-policy URL has not been confirmed from this repository. Supply and verify the exact URL in Partner Center before submission.
+
 ## Draft notes for certification testers
 
 SmartPrint is a Windows desktop printing application. The packaged background service is required for the print Agent to remain available independently of the desktop window.
@@ -101,7 +107,8 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] Firewall behavior on Private, Public and Domain network profiles; confirm only the intended shop LAN clients can reach the Agent.
 - [ ] Physical print tests with USB and network printers, PDF and photo jobs, cancellation, printer offline/reconnect, sleep/resume and queue recovery.
 - [ ] Phone-to-printer test from a paired device on the selected shop LAN.
-- [ ] Current privacy policy and data-flow explanation consistent with actual app behavior.
+- [ ] Canonical public privacy policy URL for this exact SmartPrint product; Microsoft requires one for Win32/Desktop Bridge apps even when no personal information is collected.
+- [ ] Current data-flow and retention explanation consistent with actual desktop, Agent, cloud and paired-device behavior.
 - [ ] Certification notes with simple tester steps and a test account if login is required.
 
 ## Important submission notes
