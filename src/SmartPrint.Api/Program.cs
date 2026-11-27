@@ -12069,6 +12069,33 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
     if (!CryptographicOperations.FixedTimeEquals(suppliedHash, expectedHash))
         return Results.Unauthorized();
 
+    // Report the actual cross-replica upload lease, not just a potentially stale
+    // RECEIVING stage timestamp. The try-lock is acquired and released in one query.
+    var statusConnection = db.Database.GetDbConnection();
+    var closeStatusConnection = statusConnection.State != System.Data.ConnectionState.Open;
+    if (closeStatusConnection) await db.Database.OpenConnectionAsync(ct);
+    bool relayUploadInProgress;
+    try
+    {
+        await using var statusCommand = statusConnection.CreateCommand();
+        statusCommand.CommandText = """
+            SELECT CASE
+                WHEN pg_try_advisory_lock(hashtextextended(@ticket_id, 0))
+                    THEN NOT pg_advisory_unlock(hashtextextended(@ticket_id, 0))
+                ELSE TRUE
+            END
+            """;
+        var statusTicketParameter = statusCommand.CreateParameter();
+        statusTicketParameter.ParameterName = "@ticket_id";
+        statusTicketParameter.Value = ticketId.ToString("N");
+        statusCommand.Parameters.Add(statusTicketParameter);
+        relayUploadInProgress = await statusCommand.ExecuteScalarAsync(ct) is true;
+    }
+    finally
+    {
+        if (closeStatusConnection) await db.Database.CloseConnectionAsync();
+    }
+
     var transferPath = ticket.PrivateRelayUploadedUtc is not null
         ? "CLOUD_RELAY"
         : ticket.ClaimedUtc is not null &&
@@ -12143,6 +12170,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
         StageMessage = PrivateRelayProgressRules.CustomerMessage(stage),
         StageUpdatedUtc = ticket.PrivateRelayStageUpdatedUtc,
         TransferPath = transferPath,
+        UploadInProgress = relayUploadInProgress,
         Message = PrivateRelayProgressRules.CustomerMessage(stage)
     });
 }).RequireRateLimiting("public-api");
