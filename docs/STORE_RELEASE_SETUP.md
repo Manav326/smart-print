@@ -162,6 +162,8 @@ Create/associate a Microsoft Entra ID app with the Partner Center account and gr
 
 The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission. Before it changes the package, it also verifies that Partner Center declares `dependsOnDriversOrNT=true` and has a required public HTTPS privacy-policy URL. It stops without changing the package if either declaration is missing.
 
+**Configuration audit (27 November 2026):** the latest published release, `v0.1.102`, contains `SmartPrint-Windows-Setup.exe` but not `SmartPrint-Windows-Store-Setup.exe`. The release run skipped the signed Store installer because these were empty: `WINDOWS_CODESIGN_PFX_BASE64`, `WINDOWS_CODESIGN_PFX_PASSWORD`, `WEBVIEW2_STANDALONE_X64_URL`, and `SMARTPRINT_WINDOWS_PUBLISHER`. The release log also showed `PUBLIC_DOWNLOAD_BASE_URL`, `CLOUDFLARE_R2_ACCOUNT_ID`, and `CLOUDFLARE_R2_BUCKET` unset. The Store publication workflow additionally requires R2 credentials and the Partner Center product, seller, Entra tenant/client IDs and client secret. Until these are configured in GitHub Actions/Environment settings, the existing service-preserving Store EXE route cannot produce or submit its signed installer. Never paste the PFX or Entra client secret into chat.
+
 ### G. Google Play Console (one-time manual setup)
 
 1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
