@@ -7,13 +7,25 @@
 #ifndef SmartPrintBuildId
   #define SmartPrintBuildId "local"
 #endif
+#ifndef SmartPrintAgentSourceDir
+  #define SmartPrintAgentSourceDir "artifacts\agent"
+#endif
+#ifndef SmartPrintDesktopSourceDir
+  #define SmartPrintDesktopSourceDir "artifacts\desktop"
+#endif
+#ifndef SmartPrintOutputBaseFilename
+  #define SmartPrintOutputBaseFilename "SmartPrint-Windows-Setup"
+#endif
+#ifndef SmartPrintPublisher
+  #define SmartPrintPublisher "QuantaEdge"
+#endif
 
 [Setup]
 SourceDir=..\
 AppId={{A7F2E9CA-2C3A-4E58-AE63-26E6B7B0DDF1}
 AppName=Smart Print
 AppVersion={#SmartPrintVersion}
-AppPublisher=QuantaEdge
+AppPublisher={#SmartPrintPublisher}
 DefaultDirName={autopf}\SmartPrint
 DefaultGroupName=Smart Print
 DisableProgramGroupPage=yes
@@ -21,7 +33,11 @@ PrivilegesRequired=admin
 ArchitecturesAllowed=x64
 ArchitecturesInstallIn64BitMode=x64
 OutputDir=artifacts\agent-installer
-OutputBaseFilename=SmartPrint-Windows-Setup
+OutputBaseFilename={#SmartPrintOutputBaseFilename}
+#ifdef SmartPrintSignToolName
+SignTool={#SmartPrintSignToolName}
+SignedUninstaller=yes
+#endif
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -36,9 +52,9 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Additional shortcuts:"; Flags: unchecked
 
 [Files]
-Source: "artifacts\agent\*"; DestDir: "{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md,agent-service-lifecycle.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: "artifacts\desktop\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
-Source: "artifacts\desktop\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SmartPrintAgentSourceDir}\*"; DestDir: "{app}\agent\{#SmartPrintVersion}-{#SmartPrintBuildId}"; Excludes: "pair-agent.ps1,appsettings.example.json,README.md,agent-service-lifecycle.ps1"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#SmartPrintDesktopSourceDir}\MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+Source: "{#SmartPrintDesktopSourceDir}\*"; DestDir: "{app}"; Excludes: "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\SmartPrint"; Filename: "{app}\SmartPrint.Desktop.exe"; WorkingDir: "{app}"
