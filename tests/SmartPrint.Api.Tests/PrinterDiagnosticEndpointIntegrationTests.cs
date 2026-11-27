@@ -1,6 +1,7 @@
 using System.IdentityModel.Tokens.Jwt;
 using System.Security.Claims;
 using System.Text.Json;
+using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
@@ -96,6 +97,31 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
         public bool CanHaveBody => true;
     }
 
+    private sealed class TestAuthenticationService : IAuthenticationService
+    {
+        public Task<AuthenticateResult> AuthenticateAsync(HttpContext context, string? scheme) =>
+            Task.FromResult(AuthenticateResult.NoResult());
+
+        public Task ChallengeAsync(HttpContext context, string? scheme, AuthenticationProperties? properties)
+        {
+            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+            return Task.CompletedTask;
+        }
+
+        public Task ForbidAsync(HttpContext context, string? scheme, AuthenticationProperties? properties)
+        {
+            context.Response.StatusCode = StatusCodes.Status403Forbidden;
+            return Task.CompletedTask;
+        }
+
+        public Task SignInAsync(
+            HttpContext context, string? scheme, ClaimsPrincipal principal, AuthenticationProperties? properties) =>
+            throw new NotSupportedException("The diagnostic endpoint test does not sign users in.");
+
+        public Task SignOutAsync(HttpContext context, string? scheme, AuthenticationProperties? properties) =>
+            throw new NotSupportedException("The diagnostic endpoint test does not sign users out.");
+    }
+
     private sealed class TestFixture : IAsyncDisposable
     {
         private readonly string rootConnectionString;
@@ -158,6 +184,7 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
                     typeof(InitialPlatform).Assembly.GetName().Name))
                     .ReplaceService<IMigrationsIdGenerator, LegacyCompatibleMigrationsIdGenerator>());
             builder.Services.AddSingleton<DocumentStorage>();
+            builder.Services.AddSingleton<IAuthenticationService, TestAuthenticationService>();
 
             var app = builder.Build();
             app.MapGroup("/api/v1/shop").MapPrinterDiagnosticEndpoints();
