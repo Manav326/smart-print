@@ -1261,8 +1261,8 @@ class MainActivity : AppCompatActivity() {
                 orientation = LinearLayout.VERTICAL
                 setPadding(dp(12), 0, 0, 0)
             }
-            details.addView(text(auth.displayName.ifBlank { "Smart Print customer" }, 16, R.color.qp_text, true))
-            details.addView(text(auth.email, 12, R.color.qp_muted, false).apply {
+            details.addView(text(auth.displayName.ifBlank { "Smart Print customer" }, 16, R.color.qp_text, true, translate = auth.displayName.isBlank()))
+            details.addView(text(auth.email, 12, R.color.qp_muted, false, translate = false).apply {
                 setPadding(0, dp(3), 0, 0)
             })
             profile.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
@@ -2004,7 +2004,7 @@ class MainActivity : AppCompatActivity() {
                 setOnClickListener { showProfile() }
             }, linearParams())
         } else {
-            column.addView(text(auth.email, 11, R.color.qp_muted, false)
+            column.addView(text(auth.email, 11, R.color.qp_muted, false, translate = false)
                 .apply { setPadding(0, dp(3), 0, dp(12)) })
             val history = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL }
             column.addView(history, linearParams())
@@ -2059,7 +2059,7 @@ class MainActivity : AppCompatActivity() {
                 .apply { setPadding(0, 0, 0, dp(8)) })
         }
         if (refreshError != null) {
-            container.addView(text(refreshError, 11, R.color.qp_danger, false)
+            container.addView(text(refreshError, 11, R.color.qp_danger, false, translate = false)
                 .apply { setPadding(0, 0, 0, dp(8)) })
         }
         if (groups.isEmpty()) {
@@ -2181,7 +2181,7 @@ class MainActivity : AppCompatActivity() {
                         gravity = Gravity.CENTER_VERTICAL
                         setPadding(dp(2), dp(8), dp(2), dp(6))
                     }
-                    monthHeader.addView(text(monthLabel, 15, R.color.qp_text, true),
+                    monthHeader.addView(text(monthLabel, 15, R.color.qp_text, true, translate = false),
                         LinearLayout.LayoutParams(0, -2, 1f))
                     monthHeader.addView(text("${monthBatches.size} orders", 10, R.color.qp_muted, true))
                     results.addView(monthHeader, linearParams())
@@ -2218,7 +2218,7 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                         }
-                        top.addView(text(title, 13, R.color.qp_text, true),
+                        top.addView(text(title, 13, R.color.qp_text, true, translate = false),
                             LinearLayout.LayoutParams(0, -2, 1f))
                         top.addView(text(activityStatusLabel(status), 9, R.color.qp_primary, true).apply {
                             setPadding(dp(8), dp(5), dp(8), dp(5))
@@ -2573,7 +2573,7 @@ class MainActivity : AppCompatActivity() {
                         setPadding(dp(16), dp(12), dp(16), dp(18))
                     }
 
-                    detailColumn.addView(text(headline, 18, R.color.qp_text, true)
+                    detailColumn.addView(text(headline, 18, R.color.qp_text, true, translate = false)
                         .apply { setPadding(0, 0, 0, dp(5)) })
                     val orderName = order.optString("batchName").takeIf(String::isNotBlank)
                         ?: order.optString("batchGroupName").takeIf(String::isNotBlank)
@@ -2650,7 +2650,7 @@ class MainActivity : AppCompatActivity() {
                             orientation = LinearLayout.HORIZONTAL
                             gravity = Gravity.CENTER_VERTICAL
                         }
-                        fileHeader.addView(text(fileName, 12, R.color.qp_text, true),
+                        fileHeader.addView(text(fileName, 12, R.color.qp_text, true, translate = false),
                             LinearLayout.LayoutParams(0, -2, 1f))
                         fileHeader.addView(text(
                             activityStatusLabel(job.optString("status")),
@@ -3421,7 +3421,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(10), 0, dp(4), 0)
         }
-        details.addView(text(file.name, 13, R.color.qp_text, true).apply {
+        details.addView(text(file.name, 13, R.color.qp_text, true, translate = false).apply {
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
         })
@@ -3429,7 +3429,7 @@ class MainActivity : AppCompatActivity() {
             val count = runCatching { store.list(file).size }.getOrDefault(0)
             "$count items"
         } else android.text.format.Formatter.formatShortFileSize(this@MainActivity, file.length())
-        details.addView(text(info, 10, R.color.qp_muted, false).apply { setPadding(0, dp(2), 0, 0) })
+        details.addView(text(info, 10, R.color.qp_muted, false, translate = false).apply { setPadding(0, dp(2), 0, 0) })
         row.addView(details, LinearLayout.LayoutParams(0, -2, 1f))
 
         if (file.isDirectory) {
@@ -3774,7 +3774,7 @@ class MainActivity : AppCompatActivity() {
         }
         scroll.addView(column)
 
-        column.addView(text(file.name, 15, R.color.qp_text, true))
+        column.addView(text(file.name, 15, R.color.qp_text, true, translate = false))
         column.addView(text(
             "Rasterized copy · Original kept.",
             11, R.color.qp_muted, false
@@ -5033,14 +5033,14 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(11), 0, dp(5), 0)
                 }
-                copy.addView(text("SPONSORED · " + advertiser, 8, R.color.qp_muted, true))
-                copy.addView(text(headline, 12, R.color.qp_text, true).apply {
+                copy.addView(text("SPONSORED · ", 8, R.color.qp_muted, true))
+                copy.addView(text(headline, 12, R.color.qp_text, true, translate = false).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                     setPadding(0, dp(3), 0, 0)
                 })
                 if (body.isNotBlank()) {
-                    copy.addView(text(body, 10, R.color.qp_muted, false).apply {
+                    copy.addView(text(body, 10, R.color.qp_muted, false, translate = false).apply {
                         maxLines = 2
                         ellipsize = android.text.TextUtils.TruncateAt.END
                         setPadding(0, dp(3), 0, 0)
@@ -5456,7 +5456,7 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(10), 0, dp(6), 0)
                 }
-                details.addView(text(displayName, 13, R.color.qp_text, true).apply {
+                details.addView(text(displayName, 13, R.color.qp_text, true, translate = false).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
                 })
@@ -5880,7 +5880,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(9), dp(9), dp(9), dp(9))
             }
             row.addView(icon, LinearLayout.LayoutParams(dp(42), dp(42)))
-            row.addView(text(photo.name, 12, R.color.qp_text, true).apply {
+            row.addView(text(photo.name, 12, R.color.qp_text, true, translate = false).apply {
                 maxLines = 2
                 ellipsize = android.text.TextUtils.TruncateAt.END
                 setPadding(dp(9), 0, dp(6), 0)
@@ -7798,8 +7798,14 @@ class MainActivity : AppCompatActivity() {
         setCardBackgroundColor(getColor(R.color.qp_glass_card))
         useCompatPadding = false
     }
-    private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
-        text = AndroidCustomerLocale.translate(this@MainActivity, value)
+    private fun text(
+        value: String,
+        size: Int,
+        color: Int,
+        bold: Boolean,
+        translate: Boolean = true
+    ) = TextView(this).apply {
+        text = if (translate) AndroidCustomerLocale.translate(this@MainActivity, value) else value
         textSize = maxOf(size, 11).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
