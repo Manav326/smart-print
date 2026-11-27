@@ -201,6 +201,13 @@ test("advertising lookup labels and asset guidance are localized", () => {
   );
 });
 
+test("public privacy and account-deletion links are localized", () => {
+  assert.equal(translateUiText("hindi", "Privacy policy"), "गोपनीयता नीति");
+  assert.equal(translateUiText("hindi", "Account deletion"), "अकाउंट हटाना");
+  assert.equal(translateUiText("hinglish", "Privacy policy"), "Privacy policy");
+  assert.equal(translateUiText("hinglish", "Account deletion"), "Account deletion");
+});
+
 test("shop-owner account menu labels are localized", () => {
   assert.equal(translateUiText("hindi", "Shop owner"), "शॉप मालिक");
   assert.equal(translateUiText("hinglish", "Shop owner"), "Shop ke malik");
