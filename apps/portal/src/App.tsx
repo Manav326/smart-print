@@ -602,8 +602,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       setToast(replacedPrinter
         ? `${printer.displayName} selected instead of ${replacedPrinter.displayName}. QR station defaults were updated; review pending orders for reassignment.`
         : printer.isActive
-          ? "Printer deselected. Existing files and Windows output were not deleted."
-          : "Printer selected for new assignments.");
+          ? t("Printer deselected. Existing files and Windows output were not deleted.")
+          : t("Printer selected for new assignments."));
       await reload();
       return true;
     } catch (exception) {
@@ -628,7 +628,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try {
       const updated = await updateStationEnabled(tokens.accessToken, station.id, !station.isEnabled);
       setStations(current => current.map(item => item.id === station.id ? { ...item, isEnabled: updated.isEnabled } : item));
-      setToast(updated.isEnabled ? "QR station enabled." : "QR station disabled. Existing customer sessions are unchanged.");
+      setToast(updated.isEnabled ? t("QR station enabled.") : t("QR station disabled. Existing customer sessions are unchanged."));
     } catch (exception) {
       setError(exception instanceof Error ? t(exception.message) : t("Could not update QR station."));
     } finally {
@@ -1050,9 +1050,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     try {
       await dispatchShopPrintJob(tokens.accessToken, job.id);
       setToast(virtualTestOutput
-        ? "Virtual printer test authorised. The existing Windows spooler pipeline will run; no physical fulfilment will be recorded."
+        ? t("Virtual printer test authorised. The existing Windows spooler pipeline will run; no physical fulfilment will be recorded.")
         : privateTestOutput
-          ? "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded."
+          ? t("Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded.")
           : pdfExport
             ? "PDF export authorised. The Windows Agent will create the PDF in the shop's export folder."
             : "Print authorised. Waiting for the shop computer to receive this job; SmartPrint will update the order automatically.");
@@ -1102,7 +1102,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       : `Have you physically checked all requested pages for ${job.jobNumber}? Only confirm after checking the actual paper output.`;
     const ok = await confirmInApp(
       queueCheck,
-      manualQueueReconciliation ? "Manually reconcile print output" : "Confirm paper output",
+      manualQueueReconciliation ? t("Manually reconcile print output") : t("Confirm paper output"),
       manualQueueReconciliation ? "I checked the queue and paper" : "Confirm output"
     );
     if (!ok) return;
@@ -1264,8 +1264,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
       } : current);
       setOwnerAccountOpen(false);
       setToast(updated.emailChanged
-        ? "Personal details saved. Your new email is now your sign-in address."
-        : "Personal details updated.");
+        ? t("Personal details saved. Your new email is now your sign-in address.")
+        : t("Personal details updated."));
     } finally {
       setBusy(false);
     }
@@ -1416,8 +1416,8 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
     if(!editor||sheets.length!==1)throw new Error("Prepare one multi-page A4 photo PDF before saving this job.");
     if(editor.job.privatePrinting || !editor.job.photoSourceAvailable){
       const message=editor.job.privatePrinting
-        ? "Private Printing keeps the original photo and editor settings on the customer's device. Shop-side revisions are disabled."
-        : "The original photo is no longer available for editing. Refresh the queue before trying again.";
+        ? t("Private Printing keeps the original photo and editor settings on the customer's device. Shop-side revisions are disabled.")
+        : t("The original photo is no longer available for editing. Refresh the queue before trying again.");
       setError(message);
       throw new Error(message);
     }
@@ -1827,7 +1827,7 @@ function ShopPhotoOrderReceipt({receipt,onClose,onOpenPayments}:{
               <span>{payment.upiIdSnapshot||"UPI ID not available"}</span>
               <small>{t("Payment pending · Ask the customer to scan and pay the exact amount. Verify the actual credit in your UPI/bank app; this QR does not confirm payment.")}</small>
             </div>
-          : <div className="file-review-note"><Wallet size={16}/><span>Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.</span></div>}
+          : <div className="file-review-note"><Wallet size={16}/><span>{t("Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.", { amount })}</span></div>}
       <div className="form-hint">{t("The job is already in your Print Queue. It cannot be dispatched until payment has been manually verified. Printing must then be started explicitly.")}</div>
       <div className="modal-actions">
         <button type="button" className="secondary-button" onClick={onClose}>{t("Done")}</button>
@@ -2344,7 +2344,7 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
   const statusIssue=status.includes("offline")||status.includes("stale")||status.includes("revoked")||
     status.includes("paused")||status.includes("error")||status==="unknown";
   const diagnostic=status.includes("revoked")
-    ?"The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue."
+    ?t("The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue.")
     :status.includes("offline")
       ?"The Print Agent is offline. Check that the shop computer is powered on, connected to the internet and running SmartPrint Agent."
       :status.includes("stale")
@@ -3147,7 +3147,7 @@ function PricingPage({ pricing, onSave, busy }: {
   const valid=[mono,colour,monoDuplex,colourDuplex,minimum,photo35x45,photo25x35,photo2x2,photo4x6,idDocumentPrice].every(value=>value.trim()!==""&&Number.isFinite(Number(value))&&Number(value)>=0);
   return <section className="panel settings-panel pricing-page">
     <div className="settings-intro"><div className="settings-icon"><Wallet size={20}/></div><div><h2>{t("Print rate card")}</h2><p>{t("Set the prices your customers see before they authorise a job.")}</p></div><span className={pricing.isConfigured?"pricing-status configured":"pricing-status"}>{pricing.isConfigured?"Active rate card":"Not configured"}</span></div>
-    <div className="pricing-disclaimer"><ShieldCheck size={16}/><span>Prices are stored in paise and calculated by the server. Updating this rate card affects new quotes; existing quotes retain their saved price and pricing version.</span></div>
+    <div className="pricing-disclaimer"><ShieldCheck size={16}/><span>{t("Prices are stored in paise and calculated by the server. Updating this rate card affects new quotes; existing quotes retain their saved price and pricing version.")}</span></div>
     <form className="settings-form" onSubmit={event=>{
       event.preventDefault();
       if(!valid||toMinor(mono)<=0||toMinor(colour)<=0)return;
@@ -3325,7 +3325,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
     <div className="queue-refresh-controls">
       <label className="queue-auto-toggle"><input type="checkbox" checked={autoRefresh} onChange={event=>setAutoRefresh(event.target.checked)}/><span className="queue-toggle-track"/><strong>{t("Auto refresh")}</strong><small>{autoRefresh?"On":"Off"}</small></label>
       <label className="queue-refresh-interval">{t("Refresh every")} <input type="number" min={5} max={3600} step={1} value={refreshSeconds} onChange={event=>setRefreshSeconds(Math.max(5,Math.min(3600,Number(event.target.value)||5)))}/> {t("seconds")}</label>
-      <span className="queue-refresh-note">{autoRefresh?"Queue refreshes automatically while this page is open.":"Automatic refresh is off. Use Refresh queue whenever needed."}</span>
+      <span className="queue-refresh-note">{autoRefresh?t("Queue refreshes automatically while this page is open."):t("Automatic refresh is off. Use Refresh queue whenever needed.")}</span>
     </div>
     {reviewBatches.length>0&&<div className="batch-review-strip"><div><strong>{reviewBatches.length} {reviewBatches.length===1?"batch":"batches"} need review</strong><span>{t("Review includes every file in the batch. New files start accepted; rejected files stay excluded until restored.")}</span></div>{reviewBatches.map(batchId=><button key={batchId} className="secondary-button" disabled={loadingBatchId===batchId||!!loadingBatchId} onClick={()=>onReviewBatch(batchId)}>{loadingBatchId===batchId?<><span className="button-spinner"/>{t("Loading full batch…")}</>:<>Review batch · {jobs.filter(job=>job.batchId===batchId&&reviewableBatchFileStatuses.has(job.status)).length} shown</>}</button>)}</div>}
     {jobs.length===0 ? <EmptyModule icon={<FileText size={24}/>} title={t("Your queue is clear")} text={t("When a customer uploads a document through one of your QR stations, the job and its current state will appear here.")}/> :
@@ -3461,7 +3461,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                     orientation:(["AUTO","PORTRAIT","LANDSCAPE"].includes(job.orientation??"AUTO")?job.orientation??"AUTO":"AUTO") as CustomerPrintRequestSettings["orientation"]
                   });
                 }}>{t("Adjust options")}</button>}
-                <button className="subtle-button" disabled={busyJobId===job.id||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?"Private source · preview disabled":"Preview original"}</button>
+                <button className="subtle-button" disabled={busyJobId===job.id||job.privatePrinting} onClick={()=>onPreview(job)}>{job.privatePrinting?t("Private source · preview disabled"):t("Preview original")}</button>
                 {job.status==="COMPLETED"&&job.outputType==="PDF_EXPORT"&&verifiedPdfExportPath(job)&&job.outputFileName&&job.outputSha256?.length===64&&(job.outputSizeBytes??0)>0&&(job.outputSizeBytes??0)<=100*1024*1024&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onPreviewOutput(job)}>{t("Preview saved PDF")}</button>}
                 <button className="subtle-button" disabled={busyJobId===job.id} onClick={()=>onHistory(job)}>{t("History")}</button>
                 {job.status==="AWAITING_SHOP_APPROVAL"&&<button className="subtle-button approve-action" disabled={busyJobId===job.id} onClick={()=>onApprove(job)}>{t("Accept")}</button>}
@@ -4022,7 +4022,7 @@ function SubscriptionPage({ summary, token, onUpdated }: { summary: ShopSubscrip
             <div><span>{t("Annual plan price")}</span><strong>{price(plan?.annualPriceMinor, plan?.currency ?? "INR")}</strong></div>
           </div>
           {!entitlements.isAccessActive && (
-            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>{status === "expired" ? "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available." : "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."}</span></div>
+            <div className="subscription-legacy-note subscription-expired-note"><ShieldCheck size={15}/><span>{status === "expired" ? t("Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available.") : t("Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance.")}</span></div>
           )}
           {entitlements.isLegacyUnconfigured && entitlements.isAccessActive && (
             <div className="subscription-legacy-note"><ShieldCheck size={15}/><span>{t("This subscription predates plan assignment. Existing shop access is being preserved until its terms are explicitly assigned.")}</span></div>
