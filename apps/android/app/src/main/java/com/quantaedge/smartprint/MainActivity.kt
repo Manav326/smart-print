@@ -2935,8 +2935,6 @@ class MainActivity : AppCompatActivity() {
         updateBottomNavigationSelection(SCAN_PRINT)
         content.removeAllViews()
         val view = ensureWebView()
-        // Capture the Activity context before entering WebViewClient callbacks.
-        val customerLocaleContext = applicationContext
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
@@ -4315,6 +4313,8 @@ class MainActivity : AppCompatActivity() {
     private fun ensureWebView(): WebView {
         webView?.let { return it }
         val view = WebView(this).apply {
+        // Capture the Activity context before entering WebViewClient callbacks.
+        val customerLocaleContext = applicationContext
             setBackgroundColor(getColor(R.color.qp_surface))
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
