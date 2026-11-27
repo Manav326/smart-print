@@ -2254,6 +2254,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Payment order is ready. Continue checkout to activate the subscription.": "भुगतान ऑर्डर तैयार है। सब्सक्रिप्शन चालू करने के लिए चेकआउट जारी रखें।",
     "SmartPrint is confirming the existing Razorpay order. Do not start another payment.": "SmartPrint मौजूदा Razorpay ऑर्डर की पुष्टि कर रहा है। दूसरा भुगतान शुरू न करें।",
     "Payment status is being checked. Refresh this page to see the latest update.": "भुगतान की स्थिति जाँची जा रही है। नवीनतम अपडेट देखने के लिए यह पेज रिफ्रेश करें।",
+    "Google sign-in could not be completed.": "Google साइन-इन पूरा नहीं हो सका।",
+    "Switch to light theme": "लाइट थीम पर जाएँ",
+    "Switch to dark theme": "डार्क थीम पर जाएँ",
+    "Light mode": "लाइट मोड",
+    "Dark mode": "डार्क मोड",
   },  hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
     "Your print shop": "Aapki print shop",
@@ -4134,6 +4139,11 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Payment order is ready. Continue checkout to activate the subscription.": "Payment order ready hai. Subscription activate karne ke liye checkout continue karein.",
     "SmartPrint is confirming the existing Razorpay order. Do not start another payment.": "SmartPrint existing Razorpay order confirm kar raha hai. Doosra payment start na karein.",
     "Payment status is being checked. Refresh this page to see the latest update.": "Payment status check ho raha hai. Latest update dekhne ke liye page refresh karein.",
+    "Google sign-in could not be completed.": "Google sign-in complete nahi ho paya.",
+    "Switch to light theme": "Light theme par switch karein",
+    "Switch to dark theme": "Dark theme par switch karein",
+    "Light mode": "Light mode",
+    "Dark mode": "Dark mode",
   },
 };
 
