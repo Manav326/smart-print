@@ -243,8 +243,12 @@ for (const [file, keys] of Object.entries(requiredScreenCoverage)) {
     if (!screenSource.includes(key)) {
       throw new Error(file + " no longer references expected localized copy: " + key);
     }
+    const dynamicLookup = file === "PlatformDataNetworkSection.tsx" &&
+      ["Customer → Cloud", "Cloud → Shop Agent", "Phone → Shop Agent"].includes(key) &&
+      screenSource.includes("t(channelLabel(channel.channel))");
     if (file !== "ShopGoogleSignInButton.tsx" &&
         !(file === "PlatformPlansSection.tsx" && key === "Enter a three-letter currency code.") &&
+        !dynamicLookup &&
         !screenSource.includes("t(" + JSON.stringify(key))) {
       throw new Error(file + " has dictionary coverage but does not route this message through the locale lookup: " + key);
     }
