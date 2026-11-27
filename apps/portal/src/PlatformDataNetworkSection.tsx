@@ -141,33 +141,33 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             />
             <MetricCard
               icon={<ArrowUpFromLine size={18}/>}
-              label="Cloud ingress"
+              label={t("Cloud ingress")}
               value={formatGb(report.summary.cloudIngressBytes)}
-              note="Customer document payload received by the cloud API; accepted, in-progress and failed attempts are separated by status"
+              note={t("Customer document payload received by the cloud API; accepted, in-progress and failed attempts are separated by status")}
             />
             <MetricCard
               icon={<ArrowDownToLine size={18}/>}
-              label="Cloud egress"
+              label={t("Cloud egress")}
               value={formatGb(report.summary.cloudEgressBytes)}
-              note="Bytes written to the Agent download HTTP response; receiver-side delivery is not confirmed"
+              note={t("Bytes written to the Agent download HTTP response; receiver-side delivery is not confirmed")}
             />
             <MetricCard
               icon={<Wifi size={18}/>}
-              label="Shop Wi-Fi / LAN"
+              label={t("Shop Wi-Fi / LAN")}
               value={formatGb(report.summary.shopLanBytes)}
-              note="Customer phone upload payload received by shop Agent"
+              note={t("Customer phone upload payload received by shop Agent")}
             />
             <MetricCard
               icon={<Activity size={18}/>}
-              label="Measured payload movement"
+              label={t("Measured payload movement")}
               value={formatGb(report.summary.measuredPayloadBytes)}
-              note="Sum of recorded transfer legs; cloud upload and download count twice"
+              note={t("Sum of recorded transfer legs; cloud upload and download count twice")}
             />
             <MetricCard
               icon={<Router size={18}/>}
-              label="Recorded transfer legs"
+              label={t("Recorded transfer legs")}
               value={formatCount(report.summary.transferAttemptCount)}
-              note={`${formatCount(report.summary.startedTransferCount)} in progress · ${formatCount(report.summary.partialTransferCount)} partial · ${formatCount(report.summary.failedTransferCount)} failed`}
+              note={t("{started} in progress · {partial} partial · {failed} failed").replace("{started}", formatCount(report.summary.startedTransferCount)).replace("{partial}", formatCount(report.summary.partialTransferCount)).replace("{failed}", formatCount(report.summary.failedTransferCount))}
             />
           </div>
 
@@ -232,7 +232,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                 <div className="platform-data-empty">{t("No transfer events have been recorded yet.")}</div>
               ) : report.channels.map((channel, index) => (
                 <div className="platform-data-channel-row" key={`${channel.channel}-${channel.direction}-${channel.status}-${index}`}>
-                  <div><strong>{channelLabel(channel.channel)}</strong><small>{channel.direction} · {channel.status}</small></div>
+                  <div><strong>{t(channelLabel(channel.channel))}</strong><small>{channel.direction} · {channel.status}</small></div>
                   <strong>{formatGb(channel.payloadBytes)}</strong>
                   <span>{formatCount(channel.transferCount)} events</span>
                   <small>{channel.durationSampleCount > 0
@@ -247,7 +247,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
             <div className="platform-data-note-icon"><Activity size={17}/></div>
             <div>
               <strong>{t("Payload measurement, not wire billing")}</strong>
-              <p>GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {report.retention.rawEventRetentionDays} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.</p>
+              <p>{t("GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {days} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.").replace("{days}", formatCount(report.retention.rawEventRetentionDays))}</p>
               <div className="platform-data-unmeasured">
                 <span>{t("Not yet measured:")}</span>
                 {report.measurementScope.unmeasuredPaths.map(item => <small key={item}>{item}</small>)}
