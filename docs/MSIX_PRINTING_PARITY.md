@@ -28,7 +28,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its service in
 Tauri v2's supported Windows bundle targets are NSIS and MSI, not MSIX. The MSIX is therefore assembled separately from the same SmartPrint.Desktop.exe and the same Agent publish output. The Tauri bundle configuration and existing Inno Setup website installer are not modified.
 
 The package manifest declares:
-- `windows.service` for QRtoPrintSmartPrintAgent, running as `localService`;
+- `windows.service` for `QRtoPrint Smart Print Agent`, running as `localService` (matching `WindowsServiceLifetimeOptions.ServiceName` in the Agent binary);
 - `packagedServices` as a restricted capability required by the service extension;
 - `runFullTrust` as a restricted capability required by the full-trust Win32/Tauri desktop application;
 - `privateNetworkClientServer` for the selected shop LAN;
@@ -43,9 +43,9 @@ The Agent appsettings.json is generated before packaging because MSIX contents a
 
 ## Website EXE and Store MSIX coexistence/migration
 
-The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They intentionally use the same Windows service name (`QRtoPrintSmartPrintAgent`), TCP port 17842, named pipe and machine-wide `%ProgramData%\QRtoPrint` data. Installing both at once risks a service-registration collision and competing Agent instances.
+The website EXE and Store MSIX are alternative distributions, not side-by-side installations. They share TCP port 17842, the named pipe and machine-wide `%ProgramData%\QRtoPrint` data. The existing website EXE installer registers the SCM key `QRtoPrintSmartPrintAgent`; the Agent binary currently configures `WindowsServiceLifetimeOptions.ServiceName` as `QRtoPrint Smart Print Agent`. To avoid changing the existing website EXE installer or Agent configuration, the MSIX manifest uses the latter name so the packaged service matches the binary. This is a pre-existing difference in service registration between the two distribution paths, and both packages must not be installed side by side because they would compete for the same local API, pipe and machine data.
 
-Switching distribution must be performed in this order:
+Switching distribution must be performed in this order; verify removal of the old distribution's own service key before installing the new one:
 1. Uninstall the currently installed Windows distribution first.
 2. Confirm its uninstaller removed the Agent service but retained `%ProgramData%\QRtoPrint`.
 3. Install the other distribution.
