@@ -1145,6 +1145,25 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun refreshCustomerNavigationLabels() {
+        navigation.menu.findItem(HOME)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Home")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Home"))
+        }
+        navigation.menu.findItem(FILES)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Files")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "My Files"))
+        }
+        navigation.menu.findItem(SCAN_PRINT)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Print")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Print at a shop"))
+        }
+        navigation.menu.findItem(ACTIVITY)?.apply {
+            title = AndroidCustomerLocale.translate(this@MainActivity, "Activity")
+            setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Activity"))
+        }
+    }
+
     private fun chooseCustomerLanguage() {
         val locales = arrayOf(AndroidCustomerLocale.ENGLISH, AndroidCustomerLocale.HINDI, AndroidCustomerLocale.HINGLISH)
         val labels = arrayOf("English", "हिन्दी", "Hinglish")
@@ -1153,6 +1172,7 @@ class MainActivity : AppCompatActivity() {
             .setTitle(AndroidCustomerLocale.translate(this@MainActivity, "Language / भाषा"))
             .setSingleChoiceItems(labels, selected) { dialog, which ->
                 AndroidCustomerLocale.save(this, locales[which])
+                refreshCustomerNavigationLabels()
                 dialog.dismiss()
                 if (profileVisible) showProfile() else when (navigation.selectedItemId) {
                     FILES -> showFiles()
