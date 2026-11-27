@@ -2682,6 +2682,8 @@ export interface PrinterDiagnosticAttempt {
     outputType: string;
     copies: number;
     pageCount: number;
+    localQueueReceivedUtc: string | null;
+    printDispatchAttempts: number;
   } | null;
 }
 
