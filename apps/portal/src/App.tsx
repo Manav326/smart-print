@@ -6619,20 +6619,20 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               ? <div className="customer-folder-defaults">
                 <div><span>{t("ID sheet")}</span><strong className="customer-paper-default">{t("A4 portrait · 1 copy · Single-sided")}</strong></div>
                 <div><span>{t("Print mode")}</span><div className="customer-choice-row">
-                  <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                  <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
                 </div></div>
               </div>
               : <div className="customer-folder-defaults">
               <div><span>{t("Colour")}</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
               </div></div>
               <div><span>{t("Sides")}</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
-                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>{t("Double")}</button>
+                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
+                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>{t("Double")}</button>
               </div></div>
-              <label className="customer-folder-copies"><span>{t("Copies · all files")}</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
+              <label className="customer-folder-copies"><span>{t("Copies · all files")}</span><input type="text" disabled={busy} inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
                  onChange={event=>{
                    const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
@@ -6642,19 +6642,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
                  }}/></label>
               <div><span>{t("Paper")}</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
-              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>{
+              <label className="customer-advanced-toggle"><input type="checkbox" disabled={busy} checked={defaults.advancedEnabled} onChange={event=>{
                  const advancedEnabled=event.currentTarget.checked;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
                }}/><span>{t("Advanced settings")}</span></label>
             </div>}
             {!isIdStudioGroup&&defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-              <label><span>{t("Paper size")}</span><select value={defaults.paperSize} onChange={event=>{
+              <label><span>{t("Paper size")}</span><select disabled={busy} value={defaults.paperSize} onChange={event=>{
                  const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
                }}>
                 <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
               </select></label>
-              <label><span>{t("Orientation")}</span><select value={defaults.orientation} onChange={event=>{
+              <label><span>{t("Orientation")}</span><select disabled={busy} value={defaults.orientation} onChange={event=>{
                  const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),orientation}}));
                }}>
@@ -6662,7 +6662,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               </select></label>
               {nupOptions.length>0&&group.files.some(candidate=>
                 isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
-              )&&<label><span>{t("Pages per sheet")}</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+              )&&<label><span>{t("Pages per sheet")}</span><select disabled={busy} value={defaults.pagesPerSheet??1} onChange={event=>{
                  const pagesPerSheet=Number(event.currentTarget.value)||1;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
                }}>
@@ -6680,11 +6680,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
-              <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={t("Use {setting} settings for {name}",{setting:own.custom?"folder":"custom",name:selected.name})} className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?t("Custom"):t("Folder")}</button>}
+              <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" disabled={busy} onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
+              {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={t("Use {setting} settings for {name}",{setting:own.custom?"folder":"custom",name:selected.name})} className={own.custom?"customer-file-custom active":"customer-file-custom"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?t("Custom"):t("Folder")}</button>}
               <button type="button" className="customer-file-remove" aria-label={t("Remove {name} from this selection",{name:selected.name})} title={t("Remove from this selection")} disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>{t("Remove")}</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
-                <label className="customer-folder-copies"><span>{t("Copies")}</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
+                <label className="customer-folder-copies"><span>{t("Copies")}</span><input type="text" disabled={busy} inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
                      const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
@@ -6694,32 +6694,32 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
                    }}/></label>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>{t("Colour")}</button>
                 </div>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
-                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>{t("Double")}</button>
+                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
+                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>{t("Double")}</button>
                 </div>
                 <div><span>{t("Paper")}</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
-                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
+                <label className="customer-advanced-toggle"><input type="checkbox" disabled={busy} checked={own.advancedEnabled} onChange={event=>{
                    const advancedEnabled=event.currentTarget.checked;
                    setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,advancedEnabled}}));
                  }}/><span>{t("Advanced settings")}</span></label>
                 {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-                  <label><span>{t("Paper size")}</span><select value={own.paperSize} onChange={event=>{
+                  <label><span>{t("Paper size")}</span><select disabled={busy} value={own.paperSize} onChange={event=>{
                      const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
                    }}>
                     <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
                   </select></label>
-                  <label><span>{t("Orientation")}</span><select value={own.orientation} onChange={event=>{
+                  <label><span>{t("Orientation")}</span><select disabled={busy} value={own.orientation} onChange={event=>{
                      const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,orientation}}));
                    }}>
                     <option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option>
                   </select></label>
-                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>{t("Pages per sheet")}</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>{t("Pages per sheet")}</span><select disabled={busy} value={own.pagesPerSheet??1} onChange={event=>{
                      const pagesPerSheet=Number(event.currentTarget.value)||1;
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
                    }}>
