@@ -223,6 +223,7 @@ class MainActivity : AppCompatActivity() {
     private var pendingScanDestinationPath = ""
     private var profileVisible = false
     private var profileReturnDestination = HOME
+    private var customerAccountDeletionInProgress = false
     private var librarySearchQuery = ""
     private var librarySelectionMode = false
     private var bottomNavigationVisible = true
@@ -1240,6 +1241,9 @@ class MainActivity : AppCompatActivity() {
             if (auth == null) "Guest access is ready" else "Smart Print customer",
             12, R.color.qp_muted, false
         ).apply { setPadding(0, dp(4), 0, dp(16)) })
+        column.addView(button("Privacy policy", false).apply {
+            setOnClickListener { openPrivacyPolicy() }
+        }, linearParams().apply { bottomMargin = dp(12) })
 
         if (auth != null) {
             val profileCard = card()
@@ -1276,6 +1280,22 @@ class MainActivity : AppCompatActivity() {
                     showConfirmSheet("Sign out?", "Local files stay on this phone.", "Sign out") {
                         signOutCustomer()
                     }
+                }
+            }, linearParams().apply { topMargin = dp(8) })
+            column.addView(button(
+                if (customerAccountDeletionInProgress) "Deleting account…" else "Delete account",
+                false
+            ).apply {
+                isEnabled = !customerAccountDeletionInProgress
+                backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_danger))
+                setTextColor(getColor(R.color.qp_danger_content))
+                setOnClickListener {
+                    showConfirmSheet(
+                        "Delete your account?",
+                        "Your account and sign-in details will be permanently deleted. Shop order and payment records may remain without an account link where required. Local files on this phone will remain unchanged.",
+                        "Delete account",
+                        destructive = true
+                    ) { deleteCustomerAccount() }
                 }
             }, linearParams().apply { topMargin = dp(8) })
             return scroll
@@ -1498,6 +1518,55 @@ class MainActivity : AppCompatActivity() {
             } finally {
                 googleSignInInProgress = false
                 if (profileVisible && customerAccountStore.read() == null) showProfile()
+            }
+        }
+    }
+
+    private fun openPrivacyPolicy() {
+        val policyUrl = accountServiceUrl().trimEnd('/') + "/privacy-policy/"
+        runCatching {
+            startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(policyUrl)))
+        }.onFailure {
+            toast("Could not open the privacy policy page.")
+        }
+    }
+
+    private fun deleteCustomerAccount() {
+        if (customerAccountDeletionInProgress) return
+        val originalAuth = customerAccountStore.read()
+        if (originalAuth == null) {
+            showProfile()
+            return
+        }
+
+        customerAccountDeletionInProgress = true
+        showProfile()
+        lifecycleScope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val currentAuth = if (CustomerAccountClient.accessTokenIsExpired(originalAuth)) {
+                        CustomerAccountClient.refresh(accountServiceUrl(), originalAuth)
+                    } else {
+                        originalAuth
+                    }
+                    CustomerAccountClient.deleteAccount(accountServiceUrl(), currentAuth)
+                }
+
+                // Clear account-linked local history only after the server confirms deletion.
+                // My Files and shop-scoped guest sessions remain independent of the account.
+                CustomerHistoryStore(this@MainActivity).clear(originalAuth.email)
+                customerAccountStore.clear()
+                accountCreateMode = false
+                runCatching {
+                    CredentialManager.create(this@MainActivity)
+                        .clearCredentialState(ClearCredentialStateRequest())
+                }
+                toast("Your SmartPrint account has been deleted. Local files remain on this phone.")
+            } catch (exception: Exception) {
+                toast("Account deletion failed: ${message(exception)}")
+            } finally {
+                customerAccountDeletionInProgress = false
+                if (profileVisible) showProfile()
             }
         }
     }

@@ -9,6 +9,9 @@ class AndroidCustomerLocaleCopyTest {
         assertEquals("होम", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINDI, "Home"))
         assertEquals("फ़ाइलें", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINDI, "Files"))
         assertEquals("Document scan karein", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINGLISH, "Scan document"))
+        assertEquals("गोपनीयता नीति", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINDI, "Privacy policy"))
+        assertEquals("अकाउंट हटाएँ", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINDI, "Delete account"))
+        assertEquals("Account delete karein", AndroidCustomerLocale.translate(AndroidCustomerLocale.HINGLISH, "Delete account"))
     }
 
     @Test

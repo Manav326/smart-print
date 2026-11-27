@@ -240,6 +240,16 @@ object CustomerAccountClient {
         )
     }
 
+    fun deleteAccount(baseUrl: String, auth: CustomerAuth) {
+        request(
+            baseUrl,
+            "/api/v1/customer/account",
+            null,
+            auth.accessToken,
+            "DELETE"
+        )
+    }
+
     fun profile(baseUrl: String, accessToken: String): JSONObject =
         request(baseUrl, "/api/v1/customer/me", null, accessToken)
 
@@ -394,7 +404,8 @@ object CustomerAccountClient {
         baseUrl: String,
         path: String,
         body: JSONObject?,
-        accessToken: String? = null
+        accessToken: String? = null,
+        method: String? = null
     ): JSONObject {
         val origin = baseUrl.trim().trimEnd('/')
         val parsed = URL(origin)
@@ -404,7 +415,7 @@ object CustomerAccountClient {
             "SmartPrint account connections require HTTPS."
         }
         val connection = (URL(origin + path).openConnection() as HttpURLConnection).apply {
-            requestMethod = if (body == null) "GET" else "POST"
+            requestMethod = method ?: (if (body == null) "GET" else "POST")
             connectTimeout = 12_000
             readTimeout = 20_000
             instanceFollowRedirects = false
