@@ -24,6 +24,31 @@ The MSIX package contains the same SmartPrint desktop executable and Agent imple
 
 We request approval for `packagedServices` because the persistent, independently running printing Agent is a core part of SmartPrint's user-facing functionality. The capability is limited to this one LocalService service. We will provide installation, upgrade, uninstall, IPC, local API, queue-persistence, network-security and physical-printer test evidence as part of certification. We will also disclose and resolve the MSIX crash-recovery difference before release rather than representing an unverified parity claim.
 
+## Installation privilege and shop-owner experience
+
+Microsoft's MSIX documentation states that a package containing a Windows service requires administrator privileges to install. This is a documented platform requirement, not something SmartPrint can assume away. Before release, test installation and update from:
+- an administrator account;
+- a standard (non-administrator) shop-owner account;
+- a managed/restricted Windows device, if that is within the supported customer environment.
+
+Record the exact Store/App Installer prompt and outcome. Do not promise that every standard user can install the package without administrator involvement. The Store listing and customer instructions must accurately state any administrator requirement that remains in the final supported installation flow.
+
+## Draft notes for certification testers
+
+SmartPrint is a Windows desktop printing application. The packaged background service is required for the print Agent to remain available independently of the desktop window.
+
+Suggested test sequence:
+1. Install the package on a supported Windows desktop using an account permitted to install packages containing a Windows service.
+2. Launch SmartPrint and complete sign-in/pairing using the test credentials supplied privately in Partner Center, if sign-in is required.
+3. Confirm the Agent service is registered and running as NT AUTHORITY\\LocalService.
+4. Confirm the desktop reports printer discovery status. If no physical printer is attached to the test machine, use an available Windows virtual printer only to verify that the Windows print subsystem is reachable; this does not establish physical-print parity.
+5. For LAN testing, connect the PC and a paired phone to the same selected shop network, complete the in-app phone connection test, and submit a small test document.
+6. Close the desktop window and confirm the Agent remains running.
+7. Upgrade the package and confirm the service and machine data remain intact.
+8. Uninstall the package and verify the documented machine-data retention behavior.
+
+Do not provide production customer credentials. Create a dedicated certification account with minimum required permissions and provide its credentials only in Partner Center's private certification notes.
+
 ## Short answers to likely reviewer questions
 
 ### Why does the app need a Windows service?
