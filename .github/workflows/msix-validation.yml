@@ -146,6 +146,44 @@ jobs:
             $apiReady = $localStatus.StatusCode -in @(200, 503)
           } catch { $apiReady = $false }
           if (-not $apiReady) { throw "Agent did not expose its existing local API on TCP 17842." }
+          $localStatusBody = $localStatus.Content | ConvertFrom-Json
+          $queueDeadline = (Get-Date).AddSeconds(60)
+          while ($localStatusBody.readiness.queueInitialized -ne $true -and (Get-Date) -lt $queueDeadline) {
+            Start-Sleep -Seconds 3
+            $localStatus = Invoke-WebRequest -Uri "http://127.0.0.1:17842/api/v1/local/status" -TimeoutSec 10 -SkipHttpErrorCheck
+            $localStatusBody = $localStatus.Content | ConvertFrom-Json
+          }
+          if ($localStatusBody.readiness.queueInitialized -ne $true) { throw "The LocalService Agent could not initialize its protected machine-wide print queue." }
+          $queueRoot = Join-Path $env:ProgramData "QRtoPrint\\LocalQueue"
+          if (-not (Test-Path -LiteralPath $queueRoot -PathType Container)) { throw "The protected LocalService print queue directory was not created." }
+          $queueAcl = Get-Acl -LiteralPath $queueRoot
+          $localServiceAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "LOCAL SERVICE" -and $_.FileSystemRights.ToString() -match "FullControl" })
+          $systemAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "SYSTEM" -and $_.FileSystemRights.ToString() -match "FullControl" })
+          if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0) { throw "The protected queue ACL does not grant FullControl only to its required service/system principals." }
+
+          $package = Get-AppxPackage -Name "SmartPrint.Test"
+          $agentPath = Join-Path $package.InstallLocation "Agent\\SmartPrint.Agent.exe"
+          $firewallMatches = foreach ($rule in Get-NetFirewallRule -Direction Inbound -Enabled True) {
+            $appFilter = Get-NetFirewallApplicationFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+            $portFilter = Get-NetFirewallPortFilter -AssociatedNetFirewallRule $rule -ErrorAction SilentlyContinue
+            if ($appFilter.Program -eq $agentPath -and $portFilter.Protocol -eq "TCP" -and $portFilter.LocalPort -eq "17842") { $rule }
+          }
+          if (-not $firewallMatches) { throw "MSIX did not register an inbound firewall rule for the Agent TCP 17842 endpoint." }
+          if (@($firewallMatches | Where-Object { $_.Profile -notcontains "Any" }).Count -gt 0) { throw "MSIX Agent firewall rule does not cover all Windows network profiles." }
+
+          $webView2Guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
+          $webView2Paths = @(
+            "HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\EdgeUpdate\\Clients\\$webView2Guid",
+            "HKCU:\\Software\\Microsoft\\EdgeUpdate\\Clients\\$webView2Guid"
+          )
+          $webView2Versions = foreach ($path in $webView2Paths) {
+            try { (Get-ItemProperty -LiteralPath $path -Name "pv" -ErrorAction Stop).pv } catch { }
+          }
+          $validWebView2 = @($webView2Versions | Where-Object {
+            try { [version]$_ -gt [version]"0.0.0.0" } catch { $false }
+          })
+          if ($validWebView2.Count -eq 0) { throw "The Windows runner has no registered Evergreen WebView2 Runtime; MSIX desktop startup cannot be validated." }
+          Write-Host "Verified Evergreen WebView2 Runtime: $($validWebView2[0])"
           $printers = Get-CimInstance -ClassName Win32_Printer -ErrorAction Stop
           Write-Host "Windows printer subsystem query succeeded; installed printer count: $(@($printers).Count)"
           if (-not (Test-Path -LiteralPath "$env:ProgramData\QRtoPrint")) { throw "Agent did not initialize persistent machine data." }
