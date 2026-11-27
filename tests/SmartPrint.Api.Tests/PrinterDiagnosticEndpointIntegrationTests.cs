@@ -50,6 +50,11 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
         {
             Assert.True(retryJson.RootElement.GetProperty("duplicateRequest").GetBoolean());
             Assert.Equal(seeded.AttemptId, retryJson.RootElement.GetProperty("id").GetGuid());
+            Assert.Equal(1, retryJson.RootElement.GetProperty("copies").GetInt32());
+            Assert.Equal(1, retryJson.RootElement.GetProperty("pageCount").GetInt32());
+            Assert.Equal("A4", retryJson.RootElement.GetProperty("paperSize").GetString());
+            Assert.Equal("Mono", retryJson.RootElement.GetProperty("colourMode").GetString());
+            Assert.Equal("PHYSICAL", retryJson.RootElement.GetProperty("outputType").GetString());
         }
 
         // Put the same attempt into a terminal, fully printed state. Two separate
