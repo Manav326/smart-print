@@ -202,7 +202,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
           <span className="platform-status-filter"><ShieldCheck size={14}/> {t("Platform-only controls")}</span>
         </div>
 
-        {loading && !page ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading subscriptions…</div> : null}
+        {loading && !page ? <div className="platform-loading-inline"><span className="button-spinner"/>{t("Loading subscriptions…")}</div> : null}
         {!loading && page && page.items.length === 0 ? <div className="platform-empty">{t("No shops match this search.")}</div> : null}
         {page && page.items.length > 0 && (
           <div className="platform-table-scroll">
@@ -242,7 +242,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
       {historyTenant && (
         <section className="panel platform-tenants-panel platform-subscription-history">
           <div className="platform-tenants-heading"><div><h2>{t("Assignment history")}</h2><p>{t("Append-only platform audit events for {shop}.").replace("{shop}", page?.items.find(item => item.id === historyTenant)?.businessName ?? t("this shop"))}</p></div><button className="icon-button" onClick={() => setHistoryTenant(null)} aria-label={t("Close history")}><X size={15}/></button></div>
-          {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/> Loading history…</div> :
+          {historyLoading ? <div className="platform-loading-inline"><span className="button-spinner"/>{t("Loading history…")}</div> :
             history.length === 0 ? <div className="platform-empty">{t("No platform assignment events have been recorded for this shop yet.")}</div> :
             <div className="platform-table-scroll"><table className="platform-tenant-table platform-history-table">
               <thead><tr><th>{t("EVENT")}</th><th>{t("PLAN")}</th><th>{t("STATUS")}</th><th>{t("PREVIOUS STATUS")}</th><th>{t("PERIOD")}</th><th>{t("REASON")}</th><th>{t("RECORDED")}</th></tr></thead>
