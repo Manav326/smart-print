@@ -214,8 +214,8 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
                     <td><div className="platform-shop-cell"><div className="platform-shop-icon"><CreditCard size={15}/></div><div><strong>{tenant.businessName}</strong><small>{tenant.slug}</small></div></div></td>
                     <td>
                       <div className="platform-subs-copy">
-                        <strong>{tenant.plan?.name ?? tenant.subscription?.planCode ?? "No plan assigned"}</strong>
-                        <small>{tenant.subscription ? `${tenant.subscription.billingInterval} · ${tenant.plan ? `v${tenant.plan.version}` : "legacy"}` : "No subscription record"}</small>
+                        <strong>{tenant.plan?.name ?? tenant.subscription?.planCode ?? t("No plan assigned")}</strong>
+                        <small>{tenant.subscription ? `${tenant.subscription.billingInterval} · ${tenant.plan ? `v${tenant.plan.version}` : t("legacy")}` : t("No subscription record")}</small>
                       </div>
                     </td>
                     <td><span className={`platform-subscription-state ${(tenant.subscription?.status ?? "unassigned").toLowerCase()}`}>{tenant.subscription?.status ?? "Unassigned"}</span></td>
@@ -292,7 +292,7 @@ export default function PlatformSubscriptionsSection({ tokens }: { tokens: AuthT
             <div className="platform-assignment-guard"><ShieldCheck size={15}/><span>{selectedAssignment?.requiresPayment ? "Access is granted as soon as you confirm the payment was received and enter its transaction reference. The amount and granting operator are retained in the audit history." : "Trial and explicitly free plans can be granted without payment. Every assignment is recorded in the audit history."}</span></div>
             <div className="platform-assignment-actions">
               <button className="secondary-button" onClick={() => setAssignTenant(null)} disabled={busy}>{t("Cancel")}</button>
-              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? "Granting…" : "Grant access"}</button>
+              <button className="primary-button" onClick={() => void submitAssignment()} disabled={busy || !selectedOption || reason.trim().length < 10 || Boolean(selectedAssignment?.requiresPayment && (!paymentConfirmed || !/^[A-Za-z0-9_-]{4,100}$/.test(paymentReference.trim())))}>{busy ? t("Granting…") : t("Grant access")}</button>
             </div>
           </section>
         </div>
