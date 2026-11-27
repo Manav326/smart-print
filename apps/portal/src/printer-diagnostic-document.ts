@@ -291,16 +291,37 @@ export async function buildPrinterDiagnosticPages(
   }
 
   const logo = await loadOfficialLogo();
+  const mediaSize = ({
+    A4: [1240, 1754],
+    A3: [1754, 2480],
+    A5: [877, 1240],
+    LETTER: [1275, 1650],
+    LEGAL: [1275, 2100]
+  } as Record<string, [number, number]>)[profile.paperSize.toUpperCase()];
+  if (!mediaSize) throw new Error("The selected diagnostic paper size is not supported.");
+
   const canvas = document.createElement("canvas");
-  canvas.width = PAGE_WIDTH;
-  canvas.height = PAGE_HEIGHT;
+  canvas.width = mediaSize[0];
+  canvas.height = mediaSize[1];
   const context = canvas.getContext("2d", { alpha: false });
   if (!context) throw new Error("This browser cannot create the printer diagnostic image.");
 
-  drawFirstPage(context, profile, logo);
+  const scale = Math.min(canvas.width / PAGE_WIDTH, canvas.height / PAGE_HEIGHT);
+  const offsetX = (canvas.width - PAGE_WIDTH * scale) / 2;
+  const offsetY = (canvas.height - PAGE_HEIGHT * scale) / 2;
+  const renderPage = (draw: () => void) => {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.fillStyle = "#FFFFFF";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.setTransform(scale, 0, 0, scale, offsetX, offsetY);
+    draw();
+    context.setTransform(1, 0, 0, 1, 0, 0);
+  };
+
+  renderPage(() => drawFirstPage(context, profile, logo));
   const pages = [canvasToJpegBase64(canvas)];
   if (profile.isDuplex) {
-    drawSecondPage(context, profile, logo);
+    renderPage(() => drawSecondPage(context, profile, logo));
     pages.push(canvasToJpegBase64(canvas));
   }
   canvas.width = 0;
