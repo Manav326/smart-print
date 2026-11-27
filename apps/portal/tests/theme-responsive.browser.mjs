@@ -1530,14 +1530,25 @@ try {
         await waitForRoute(page, ".app-shell");
         await page.locator(".sp-language-switcher select").first().selectOption(locale.id);
         await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
-        const subscriptionNav = page.locator(".sidebar .nav-item").filter({ hasText: /Subscription|सदस्यता/ }).first();
-        if (viewport.width <= 760) await page.locator(".mobile-menu").click();
-        await subscriptionNav.waitFor({ state: "visible" });
-        await subscriptionNav.click();
+        const accountTrigger = page.locator(".account-menu-trigger");
+        await accountTrigger.waitFor({ state: "visible" });
+        await accountTrigger.click();
+        const accountMenu = page.locator("#shop-account-menu");
+        await accountMenu.waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const subscriptionItem = accountMenu.locator(".account-menu-item").nth(2);
+        await subscriptionItem.waitFor({ state: "visible" });
+        const accountSubscriptionLabel = (await subscriptionItem.innerText()).trim();
+        assert.notEqual(accountSubscriptionLabel, "Trial & subscription",
+          "The shop owner's account-menu subscription entry must be localized.");
+        if (locale.id === "hindi") assert.equal(accountSubscriptionLabel, "ट्रायल और सब्सक्रिप्शन");
+        if (locale.id === "hinglish") assert.equal(accountSubscriptionLabel, "Trial aur subscription");
+        await subscriptionItem.click();
         await page.locator(".subscription-payment-panel").waitFor({ state: "visible" });
         await assertNoHorizontalOverflow(page, route, viewport);
         const heading = await page.locator(".subscription-payment-panel h2").textContent();
-        assert.notEqual(heading?.trim(), "Choose or renew a plan", "The subscription heading must not remain English after selecting Hindi or Hinglish.");
+        assert.notEqual(heading?.trim(), "Choose or renew a plan",
+          "The subscription heading must not remain English after selecting Hindi or Hinglish.");
         await context.close();
       }
       {
