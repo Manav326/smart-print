@@ -1961,8 +1961,13 @@ async function uploadCustomerPrivateRelay(
           relayPostRetryCount+=1;
           ambiguousRelayPost=false;
           unclaimedPendingChecks=0;
+          let retryAttempt:PrivateQsp2UploadAttempt;
           try {
-            const retryAttempt=await privateUpload.createAttempt();
+            retryAttempt=await privateUpload.createAttempt();
+          }catch {
+            throw new LocalUploadOutcomeUnknownError("The original Private Printing ticket is preserved, but a fresh encrypted retry could not be prepared. Retry this same file to reconcile the existing request; no cloud or plaintext fallback will be used.");
+          }
+          try {
             await postPrivateRelayAttempt(retryAttempt);
           }catch(postException){
             if(!shouldReconcileCustomerPrivateRelayPostError(postException))throw postException;
