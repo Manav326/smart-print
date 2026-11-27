@@ -426,3 +426,30 @@ html[data-theme="dark"] .sp-public .sp-download-card h3 {
 .sp-public-footer-resources a{font-size:11px;font-weight:650;color:#6d7890}
 .sp-public-footer-resources a:hover{color:#755be8}
 @media(max-width:760px){.sp-public-footer-resources{justify-content:flex-start;margin-top:12px}.sp-public-footer-resources span{flex-basis:100%}}
+
+
+/* Tablet headers give navigation its own row so long Hindi/Hinglish shop CTAs
+   never push the final action outside the viewport. */
+@media (min-width:761px) and (max-width:900px) {
+  .sp-public-header {
+    height:auto;
+    min-height:78px;
+    padding-top:11px;
+    padding-bottom:9px;
+    flex-wrap:wrap;
+    gap:12px 16px;
+  }
+  .sp-public-brand { order:1; }
+  .sp-theme-toggle,
+  .sp-language-switcher,
+  .sp-shop-entry { order:2; }
+  .sp-theme-toggle { margin-left:auto; }
+  .sp-public-nav {
+    order:3;
+    flex:0 0 100%;
+    justify-content:center;
+    margin:0;
+    gap:clamp(16px,3vw,28px);
+    padding:3px 0 2px;
+  }
+}
