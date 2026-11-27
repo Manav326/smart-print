@@ -6845,11 +6845,11 @@ agentApi.MapPost("/jobs/claim", async (
             equals new { printer.TenantId, PrinterId = printer.Id }
         where job.TenantId == device.TenantId &&
               (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
-              db.PrintPayments.Any(payment =>
+              (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(payment =>
                   payment.TenantId == job.TenantId &&
                   payment.PrintJobId == job.Id &&
                   (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value)))) &&
               availablePrinterIds.Contains(printer.Id) &&
               (!job.PrivatePrinting || (document.StorageMode == "LOCAL_AGENT" && document.AgentDeviceId == device.Id)) &&
               (job.BatchId == null || !db.PrintJobs.Any(other =>
@@ -6859,13 +6859,15 @@ agentApi.MapPost("/jobs/claim", async (
                   other.Status != "REJECTED" &&
                   other.Status != "REFUNDED" &&
                   other.PrinterDeviceId != job.PrinterDeviceId)) &&
-              (job.Status == "PAID_AUTHORISED" ||
+              (job.Status == "DIAGNOSTIC_QUEUED" ||
+               job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                 (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now)))
         orderby job.CreatedUtc
         select new
         {
             job.Id,
+            job.Origin,
             job.Status,
             job.JobNumber,
             job.PageCount,
@@ -6923,12 +6925,12 @@ agentApi.MapPost("/jobs/claim", async (
                               agent.TenantId == device.TenantId &&
                               agent.RevokedUtc == null && agent.Status != "Revoked" &&
                               agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-                          db.PrintPayments.Any(payment =>
+                          (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
                               (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
-                          (job.Status == "PAID_AUTHORISED" ||
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value)))) &&
+                          (job.Status == "DIAGNOSTIC_QUEUED" || job.Status == "PAID_AUTHORISED" ||
                            (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                             (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now))))
             .ExecuteUpdateAsync(update => update
@@ -6952,7 +6954,9 @@ agentApi.MapPost("/jobs/claim", async (
             NewStatus = "LOCAL_QUEUE_CLAIMED",
             ActorType = "PrintAgent",
             ActorId = device.Id,
-            ReasonCode = "AGENT_CLAIMED_PAID_JOB",
+            ReasonCode = candidate.Origin == "PRINTER_DIAGNOSTIC"
+                ? "AGENT_CLAIMED_PRINTER_DIAGNOSTIC"
+                : "AGENT_CLAIMED_PAID_JOB",
             CreatedUtc = now
         });
 
@@ -7204,6 +7208,11 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
         });
     }
 
+    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
+        job.LocalQueueReceivedUtc is not null &&
+        job.ClaimedByAgentDeviceId == device.Id)
+        return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.LocalQueueReceivedUtc, DuplicateRequest = true });
+
     if (job.Status == "LOCAL_QUEUE_READY" && job.ClaimedByAgentDeviceId == device.Id)
     {
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.LocalQueueReceivedUtc, DuplicateRequest = true });
@@ -7223,7 +7232,16 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
     }
 
     var previousStatus = job.Status;
-    job.Status = "LOCAL_QUEUE_READY";
+    var isDiagnostic = job.Origin == "PRINTER_DIAGNOSTIC";
+    job.Status = isDiagnostic ? "PRINT_AUTHORISED" : "LOCAL_QUEUE_READY";
+    if (isDiagnostic)
+    {
+        var prefix = job.OutputType == PrivatePrintingOutputPolicy.TestVirtual
+            ? "VIRTUAL-TEST-DIAG-"
+            : "SmartPrint-DIAG-";
+        job.SpoolerJobName = prefix + job.JobNumber + "-" + job.Id.ToString("N")[..8];
+        job.SpoolerStatus = "AWAITING_AGENT";
+    }
     job.LocalQueueReceivedUtc = now;
     job.AgentLeaseExpiresUtc = null;
     job.UpdatedUtc = now;
@@ -7235,7 +7253,9 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
         NewStatus = job.Status,
         ActorType = "PrintAgent",
         ActorId = device.Id,
-        ReasonCode = "AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT",
+        ReasonCode = isDiagnostic
+            ? "AGENT_STAGED_PRINTER_DIAGNOSTIC_FOR_OUTPUT"
+            : "AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT",
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
