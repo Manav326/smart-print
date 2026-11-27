@@ -1594,6 +1594,59 @@ try {
     console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | Windows Desktop minimum viewport`);
   }
 
+  // The native Windows shell has its own entry point; verify locale persistence and layout there too.
+  for (const locale of localizedLocales) {
+    const caseName = `Windows desktop localized shell / ${locale.id} / 1000x680 / light + dark`;
+    const caseStartedAt = Date.now();
+    const context = await browser.newContext({ viewport: { width: 1000, height: 680 } });
+    const desktopRoute = { label: "windows-desktop-localized", auth: "shop" };
+    const page = await preparePage(context, desktopRoute);
+    await page.addInitScript(({ shopSession, localeId }) => {
+      localStorage.setItem("smartprint-ui-locale", localeId);
+      window.__TAURI_INTERNALS__ = {
+        invoke: async command => {
+          if (command === "read_secure_session") return JSON.stringify(shopSession);
+          if (command === "write_secure_session") return null;
+          if (command === "get_local_agent_status") {
+            return { serviceReachable: false, localApiReachable: false, paired: false, agentDeviceId: null, status: "Not paired", apiBaseUrl: null };
+          }
+          return null;
+        }
+      };
+    }, {
+      localeId: locale.id,
+      shopSession: {
+        tokenType: "Bearer",
+        accessToken: shopToken,
+        refreshToken: "visual-qa-refresh-token",
+        accessTokenExpiresUtc: "2099-01-01T00:00:00.000Z"
+      }
+    });
+    await page.goto(desktopUrl, { waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("body").getAttribute("data-app-shell"), "desktop");
+    assert.equal(await page.locator("html").getAttribute("lang"), locale.htmlLang);
+    assert.equal(await page.locator(".sp-language-switcher select").first().inputValue(), locale.id);
+    const lightLayout = await assertNoHorizontalOverflow(page, desktopRoute, { width: 1000, height: 680 });
+    await assertRouteContrast(page, desktopRoute);
+    await page.locator(".theme-toggle-button").first().click();
+    await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+    const darkLayout = await assertNoHorizontalOverflow(page, desktopRoute, { width: 1000, height: 680 });
+    await assertRouteContrast(page, desktopRoute);
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await waitForRoute(page, ".app-shell");
+    assert.equal(await page.locator("html").getAttribute("lang"), locale.htmlLang, "The native desktop shell must retain the selected language after reload.");
+    assert.equal(await page.locator("html").getAttribute("data-theme"), "dark");
+    results.push({
+      check: caseName,
+      lightDocumentWidth: lightLayout.rootWidth,
+      darkDocumentWidth: darkLayout.rootWidth,
+      passed: true
+    });
+    await context.close();
+    console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
+  }
+
   // Exercise the actual shop and admin sign-out controls after changing theme.
   for (const [index, route] of routes.filter(item => item.auth).entries()) {
     const caseName = `${route.label} sign-out/sign-in and theme persistence`;
