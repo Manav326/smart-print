@@ -297,10 +297,12 @@ jobs:
             Write-Host "Verified: machine data survives MSIX uninstall."
             Remove-Item -LiteralPath $marker -Force
           }
+          if ("${{ steps.service_validation.outcome }}" -eq "success") {
           $uninstallMarker = Join-Path $env:ProgramData "QRtoPrint\msix-uninstall-preservation-test.txt"
           if (-not (Test-Path -LiteralPath $uninstallMarker)) { throw "MSIX uninstall did not preserve the machine data directory." }
           if ((Get-Content -LiteralPath $uninstallMarker -Raw).Trim() -ne "preserve-across-msix-uninstall") { throw "MSIX uninstall modified the machine data marker." }
           Remove-Item -LiteralPath $uninstallMarker -Force
+          }
       - name: Enforce service recovery release gate
         if: success()
         shell: pwsh
