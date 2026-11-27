@@ -11872,7 +11872,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         await using var lockCommand = relayConnection.CreateCommand();
         lockCommand.CommandText = "SELECT pg_try_advisory_lock(hashtextextended(@ticket_id, 0))";
         var ticketParameter = lockCommand.CreateParameter();
-        ticketParameter.ParameterName = "@ticket_id";
+        ticketParameter.ParameterName = "ticket_id";
         ticketParameter.Value = ticketId.ToString("N");
         lockCommand.Parameters.Add(ticketParameter);
         relayLockAcquired = await lockCommand.ExecuteScalarAsync(ct) is true;
@@ -12017,7 +12017,7 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
             await using var unlockCommand = relayConnection.CreateCommand();
             unlockCommand.CommandText = "SELECT pg_advisory_unlock(hashtextextended(@ticket_id, 0))";
             var unlockParameter = unlockCommand.CreateParameter();
-            unlockParameter.ParameterName = "@ticket_id";
+            unlockParameter.ParameterName = "ticket_id";
             unlockParameter.Value = ticketId.ToString("N");
             unlockCommand.Parameters.Add(unlockParameter);
             await unlockCommand.ExecuteScalarAsync(CancellationToken.None);
@@ -12102,7 +12102,7 @@ publicApi.MapGet("/sessions/current/local-upload-tickets/{ticketId:guid}/private
             END
             """;
         var statusTicketParameter = statusCommand.CreateParameter();
-        statusTicketParameter.ParameterName = "@ticket_id";
+        statusTicketParameter.ParameterName = "ticket_id";
         statusTicketParameter.Value = ticketId.ToString("N");
         statusCommand.Parameters.Add(statusTicketParameter);
         relayUploadInProgress = await statusCommand.ExecuteScalarAsync(ct) is true;
