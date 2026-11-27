@@ -9,7 +9,8 @@ import { authStorageKey } from "./portal-routing";
 import {
   customerPrivateRelayPollDelay,
   shouldReconcileCustomerPrivateRelayPostError,
-  shouldRetryCustomerPrivateRelayStatusError
+  shouldRetryCustomerPrivateRelayStatusError,
+  hasReachedCustomerPrivateRelayStatusErrorLimit
 } from "./private-relay-retry";
 export interface AuthTokens {
   tokenType: string;
@@ -303,6 +304,12 @@ export class LocalUploadOutcomeUnknownError extends Error {
     super(message);
     this.name = "LocalUploadOutcomeUnknownError";
   }
+}
+
+function privateRelayStatusUnavailableError():LocalUploadOutcomeUnknownError {
+  return new LocalUploadOutcomeUnknownError(
+    "The shop's status service is temporarily unavailable after eight consecutive checks. Your original Private Printing ticket is preserved. Reconnect and retry this same file to continue; no new print request, cloud storage or plaintext fallback was created."
+  );
 }
 
 function validateUploadFileSize(file: File): void {
@@ -1769,9 +1776,11 @@ async function pollCustomerPrivateRelayStages(
         status.stageUpdatedUtc
       );
       if(status.state!=="PENDING")return;
-    } catch {
+    } catch(exception) {
       if(signal.aborted)return;
+      if(!shouldRetryCustomerPrivateRelayStatusError(exception))return;
       consecutiveErrors+=1;
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))return;
     }
     await waitForCustomerStagePoll(
       customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,stageChanged),
@@ -1801,7 +1810,9 @@ async function uploadCustomerPrivateRelay(
     } catch(exception) {
       if(!shouldRetryCustomerPrivateRelayStatusError(exception))throw exception;
       initialStatusErrors+=1;
-            await new Promise(resolve=>window.setTimeout(resolve,
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(initialStatusErrors))
+        throw privateRelayStatusUnavailableError();
+      await new Promise(resolve=>window.setTimeout(resolve,
         customerPrivateRelayPollDelay(0,initialStatusErrors,false)));
     }
   }
@@ -1852,7 +1863,9 @@ async function uploadCustomerPrivateRelay(
       } catch (exception) {
         if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
         consecutiveErrors += 1;
-                continue;
+        if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))
+          throw privateRelayStatusUnavailableError();
+        continue;
       }
       const currentStage = status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state);
       const stageChanged = currentStage !== lastStage;
@@ -1937,7 +1950,9 @@ async function uploadCustomerPrivateRelay(
     } catch (exception) {
       if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
       consecutiveErrors+=1;
-            await new Promise(resolve => window.setTimeout(resolve,
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))
+        throw privateRelayStatusUnavailableError();
+      await new Promise(resolve => window.setTimeout(resolve,
         customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
       continue;
     }
