@@ -1760,19 +1760,32 @@ async function pollCustomerPrivateRelayStages(
   signal?:AbortSignal
 ):Promise<void> {
   if(!signal)return;
+  let lastStage:string|null=null;
+  let pendingChecks=0;
+  let consecutiveErrors=0;
   while(!signal.aborted){
+    let stageChanged=false;
     try {
       const status=await getCustomerPrivateRelayStatus(sessionToken,ticket,grantToken,signal);
+      consecutiveErrors=0;
+      const currentStage=status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state);
+      stageChanged=currentStage!==lastStage;
+      lastStage=currentStage;
+      pendingChecks=stageChanged?0:pendingChecks+1;
       onStage?.(
-        status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state),
+        currentStage,
         status.stageMessage??status.message??"Checking the secure shop handoff",
         status.stageUpdatedUtc
       );
       if(status.state!=="PENDING")return;
     } catch {
       if(signal.aborted)return;
+      consecutiveErrors+=1;
     }
-    await waitForCustomerStagePoll(1200,signal);
+    await waitForCustomerStagePoll(
+      customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,stageChanged),
+      signal
+    );
   }
 }
 
