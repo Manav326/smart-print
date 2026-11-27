@@ -56,7 +56,7 @@ Do not mark unrelated categories (for example precise location, contacts, microp
 
 ## Required owner actions before submission
 
-1. Confirm the legal publisher/controller name, registered business/contact details and monitored privacy/support email. The public policy currently directs non-deletion privacy requests to the developer contact email shown in the Play listing; make sure that address exists, is monitored and belongs to the correct legal operator.
+1. The public privacy contact is set to **manaviitp123@gmail.com**. Confirm that this mailbox is active, monitored and controlled by the legal publisher before publishing the policy. Confirm the legal publisher/controller name and registered business/contact details as well.
 2. Confirm actual hosting, database, document-storage, CDN/security and support providers and their processing regions. Update the policy if production infrastructure differs from what is described.
 3. Review the final AAB's Android manifest, dependency/SBOM list, Google Play services SDK disclosures, embedded WebView network traffic, backend event logging and production advertising configuration.
 4. Complete the Data Safety questionnaire in Play Console, including collection/sharing status, purpose, optionality, retention, encryption and deletion answers. Keep a dated copy of the submitted answers with the release record.
