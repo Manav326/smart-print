@@ -1691,9 +1691,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
               {accountMenuOpen && (
                 <div className="account-menu-popover" id="shop-account-menu" aria-label={t("Account options")}>
                   <div className="account-menu-heading">
-                    <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
+                    <span className="account-avatar">{initials(profile?.ownerName || t("Shop owner"))}</span>
                     <div>
-                      <strong>{profile?.ownerName || "Shop owner"}</strong>
+                      <strong>{profile?.ownerName || t("Shop owner")}</strong>
                       <span>{profile?.businessName || t("Your shop")}</span>
                     </div>
                   </div>
