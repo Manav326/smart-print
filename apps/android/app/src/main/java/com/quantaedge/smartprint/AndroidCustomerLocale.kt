@@ -38,9 +38,38 @@ internal object AndroidCustomerLocale {
     /** Pure translation lookup, also used by JVM regression tests. */
     fun translate(locale: String, source: String): String {
         if (locale == ENGLISH) return source
+        val exact = when (locale) {
+            HINDI -> hindiCopy[source]
+            HINGLISH -> hinglishCopy[source]
+            else -> null
+        }
+        if (exact != null) return exact
+
+        // Preserve customer data and interpolated values while translating
+        // the surrounding UI labels and count/status wording.
         return when (locale) {
-            HINDI -> hindiCopy[source] ?: source
-            HINGLISH -> hinglishCopy[source] ?: source
+            HINDI -> when {
+                source.startsWith("Folder  ·  ") -> "फ़ोल्डर  ·  " + source.removePrefix("Folder  ·  ")
+                source.startsWith("Folder · ") -> "फ़ोल्डर · " + source.removePrefix("Folder · ")
+                source.startsWith("Page ") -> "पेज " + source.removePrefix("Page ")
+                source.endsWith(" folders selected") -> source.removeSuffix(" folders selected") + " फ़ोल्डर चुने गए"
+                source.endsWith(" selected") -> source.removeSuffix(" selected") + " चुने गए"
+                source.endsWith(" orders") -> source.removeSuffix(" orders") + " ऑर्डर"
+                source.endsWith(" used on this device") -> source.removeSuffix(" used on this device") + " डिवाइस पर इस्तेमाल"
+                source.startsWith("Photo layout · ") -> "फोटो लेआउट · " + source.removePrefix("Photo layout · ")
+                else -> source
+            }
+            HINGLISH -> when {
+                source.startsWith("Folder  ·  ") -> "Folder  ·  " + source.removePrefix("Folder  ·  ")
+                source.startsWith("Folder · ") -> "Folder · " + source.removePrefix("Folder · ")
+                source.startsWith("Page ") -> "Page " + source.removePrefix("Page ")
+                source.endsWith(" folders selected") -> source.removeSuffix(" folders selected") + " folders selected"
+                source.endsWith(" selected") -> source.removeSuffix(" selected") + " selected"
+                source.endsWith(" orders") -> source.removeSuffix(" orders") + " orders"
+                source.endsWith(" used on this device") -> source.removeSuffix(" used on this device") + " device par used"
+                source.startsWith("Photo layout · ") -> "Photo layout · " + source.removePrefix("Photo layout · ")
+                else -> source
+            }
             else -> source
         }
     }
