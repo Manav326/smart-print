@@ -1472,11 +1472,11 @@ try {
 
         const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
         await assertRouteContrast(page, route);
-        await page.getByRole("button", { name: "Switch to dark theme" }).click();
+        await page.locator(".theme-toggle-button").first().click();
         await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
         const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
         await assertRouteContrast(page, route);
-        await page.getByRole("button", { name: "Switch to light theme" }).click();
+        await page.locator(".theme-toggle-button").first().click();
         await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
 
         results.push({
