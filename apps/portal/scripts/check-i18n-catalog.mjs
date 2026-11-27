@@ -215,6 +215,11 @@ for (const [file, keys] of Object.entries(requiredScreenCoverage)) {
     if (!screenSource.includes(key)) {
       throw new Error(file + " no longer references expected localized copy: " + key);
     }
+    if (file !== "ShopGoogleSignInButton.tsx" &&
+        !(file === "PlatformPlansSection.tsx" && key === "Enter a three-letter currency code.") &&
+        !screenSource.includes("t(" + JSON.stringify(key))) {
+      throw new Error(file + " has dictionary coverage but does not route this message through the locale lookup: " + key);
+    }
   }
 }
 
