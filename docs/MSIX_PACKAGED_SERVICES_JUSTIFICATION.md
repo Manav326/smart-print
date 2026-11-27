@@ -7,7 +7,7 @@
 - `runFullTrust`: required by the packaged Win32/Tauri desktop application.
 - `packagedServices`: required by the `windows.service` extension for the LocalService Agent.
 - Manifest extension: `windows.service`
-- Service identity in the MSIX: `QRtoPrint Smart Print Agent` (matches the Agent binary's `WindowsServiceLifetimeOptions.ServiceName`).
+- Service identity in the MSIX: `QRtoPrintSmartPrintAgent` (the canonical SCM service key used by both installers and the Agent binary; the display name remains `QRtoPrint Smart Print Agent`).
 - Service account: `NT AUTHORITY\LocalService`
 - Not requested: `localSystemServices`; SmartPrint does not need to run this service as LocalSystem.
 
@@ -122,7 +122,7 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 
 ## Distribution-specific service registration
 
-The existing website EXE installer registers the service key `QRtoPrintSmartPrintAgent`. The Agent binary currently configures `WindowsServiceLifetimeOptions.ServiceName` as `QRtoPrint Smart Print Agent`. The MSIX manifest uses the name configured by the binary so its packaged service can start without changing the existing website EXE installer or its service behavior. The two distributions are alternatives and must not be installed side by side: they share the local API port, named pipe and machine-wide queue/identity data. Test both directions of migration before promising customers a seamless switch.
+The existing website EXE installer and uninstaller use the SCM key `QRtoPrintSmartPrintAgent`. The Agent binary and MSIX manifest now use that exact same service key; the human-readable display name remains `QRtoPrint Smart Print Agent`. This removes the prior service-name mismatch and gives both distribution paths one canonical SCM identity. The two distributions are alternatives and must not be installed side by side: they share the local API port, named pipe and machine-wide queue/identity data. Test both directions of migration before promising customers a seamless switch.
 
 ## MSIX package signing for Store submission
 
