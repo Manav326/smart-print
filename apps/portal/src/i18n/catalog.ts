@@ -163,6 +163,8 @@ const english = {
   "Nothing printed": "Nothing printed",
   "Printed correctly": "Printed correctly",
   "No output received": "No output received",
+  "This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.": "This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.",
+  "Open Print Agent": "Open Print Agent",
 } as const;
 
 const hindi: Record<keyof typeof english, string> = {
@@ -329,6 +331,8 @@ const hindi: Record<keyof typeof english, string> = {
   "Nothing printed": "कुछ भी प्रिंट नहीं हुआ",
   "Printed correctly": "सही प्रिंट हुआ",
   "No output received": "कोई आउटपुट नहीं मिला",
+  "This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.": "इस टेस्ट में अपेक्षा से अधिक समय लग रहा है। दूसरा टेस्ट शुरू करने से पहले Windows कंप्यूटर फिर से जोड़ें ताकि SmartPrint सुरक्षित रूप से इसकी स्थिति जाँच सके।",
+  "Open Print Agent": "Print Agent खोलें",
 };
 
 const hinglish: Record<keyof typeof english, string> = {
@@ -495,6 +499,8 @@ const hinglish: Record<keyof typeof english, string> = {
   "Nothing printed": "Kuch print nahi hua",
   "Printed correctly": "Sahi print hua",
   "No output received": "Koi output receive nahi hua",
+  "This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.": "Test mein zyada time lag raha hai. Dusra test shuru karne se pehle Windows computer reconnect karein taaki SmartPrint ise safely reconcile kar sake.",
+  "Open Print Agent": "Print Agent kholein",
 };
 
  
