@@ -161,6 +161,63 @@ for (const file of localizedScreens) {
     throw new Error(file + " references untranslated screen copy: " + missing.join(", "));
   }
 }
+
+const requiredScreenCoverage = {
+  "App.tsx": [
+    "Printer deselected. Existing files and Windows output were not deleted.",
+    "Printer selected for new assignments.",
+    "QR station enabled.",
+    "QR station disabled. Existing customer sessions are unchanged.",
+    "Virtual printer test authorised. The existing Windows spooler pipeline will run; no physical fulfilment will be recorded.",
+    "Private test PDF authorised. The Agent will save a protected local test artifact; no physical print is recorded.",
+    "Manually reconcile print output",
+    "Confirm paper output",
+    "Personal details saved. Your new email is now your sign-in address.",
+    "Personal details updated.",
+    "Private Printing keeps the original photo and editor settings on the customer's device. Shop-side revisions are disabled.",
+    "The original photo is no longer available for editing. Refresh the queue before trying again.",
+    "The paired Print Agent has been revoked. Re-enrol the shop computer before using this queue.",
+    "Cash payment pending. Collect {amount} at the counter and mark it received only after the cash is physically in the shop.",
+    "Shop payment",
+    "UPI ID not available",
+    "{count} photos · {size} · {pages} A4 page(s)",
+    "Prices are stored in paise and calculated by the server. Updating this rate card affects new quotes; existing quotes retain their saved price and pricing version.",
+    "Queue refreshes automatically while this page is open.",
+    "Automatic refresh is off. Use Refresh queue whenever needed.",
+    "Private source · preview disabled",
+    "Preview original",
+    "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available.",
+    "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."
+  ],
+  "PlatformPlansSection.tsx": [
+    "Enter a three-letter currency code.",
+    "Plan code must contain 2–40 letters, digits or underscores and start with a letter."
+  ],
+  "PlatformDataNetworkSection.tsx": [
+    "Unique documents",
+    "original file volume counted once",
+    "Agent values are reported file lengths, not filesystem-allocated cluster usage; exact physical disk occupancy is not measured."
+  ],
+  "PlatformSubscriptionsSection.tsx": [
+    "No plan assigned", "legacy", "No subscription record", "Granting…", "Grant access"
+  ],
+  "ShopGoogleSignInButton.tsx": [
+    "Google sign-in did not initialize. Please reload and try again.",
+    "Google sign-in could not be loaded. Check your connection and try again."
+  ]
+};
+for (const [file, keys] of Object.entries(requiredScreenCoverage)) {
+  const screenSource = readFileSync(resolve(root, "src", file), "utf8");
+  for (const key of keys) {
+    if (!screenHindi.has(key) || !screenHinglish.has(key)) {
+      throw new Error(file + " is missing Hindi/Hinglish coverage for: " + key);
+    }
+    if (!screenSource.includes(key)) {
+      throw new Error(file + " no longer references expected localized copy: " + key);
+    }
+  }
+}
+
 if (!source.includes("screenTextCatalogs[locale][sourceText] ?? sourceText")) {
   throw new Error("Screen copy must fall back to its English source text without runtime translation");
 }
