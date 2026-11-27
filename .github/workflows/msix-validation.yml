@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 45
     env:
       SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://example.invalid' }}
-      WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL }}
+      WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL || 'https://go.microsoft.com/fwlink/p/?LinkId=2124704' }}
       MSIX_PACKAGE_NAME: ${{ inputs.package_name || 'SmartPrint.Test' }}
       MSIX_PUBLISHER: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
       MSIX_APP_DISPLAY_NAME: ${{ inputs.app_display_name || 'Smart Print' }}
