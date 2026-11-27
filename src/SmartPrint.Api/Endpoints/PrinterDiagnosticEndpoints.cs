@@ -93,7 +93,9 @@ public static class PrinterDiagnosticEndpoints
                             job.FailureCode,
                             job.OutputType,
                             job.Copies,
-                            job.PageCount
+                            job.PageCount,
+                            job.LocalQueueReceivedUtc,
+                            job.PrintDispatchAttempts
                         })
                         .SingleOrDefault()
                 })
