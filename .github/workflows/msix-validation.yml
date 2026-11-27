@@ -77,6 +77,24 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw "Workspace dependency installation failed." }
+      - name: Validate MSIX PowerShell tooling syntax
+        shell: pwsh
+        run: |
+          $scriptPaths = @(
+            "scripts/build-msix-package.ps1",
+            "scripts/validate-msix-wack.ps1"
+          )
+          foreach ($scriptPath in $scriptPaths) {
+            $tokens = $null
+            $parseErrors = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path -LiteralPath $scriptPath).Path, [ref]$tokens, [ref]$parseErrors) | Out-Null
+            if ($parseErrors.Count -gt 0) {
+              $parseErrors | ForEach-Object { Write-Error $_.Message }
+              throw "PowerShell syntax validation failed for $scriptPath."
+            }
+            Write-Host "PowerShell syntax passed: $scriptPath"
+          }
+
       - name: Align desktop binary version with MSIX package version
         shell: pwsh
         run: |
