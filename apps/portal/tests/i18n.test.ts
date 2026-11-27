@@ -171,7 +171,7 @@ test("subscription billing, Google sign-in, campaign administration and theme co
   assert.equal(translateUiText("hindi", "Continue with Google"), "Google से जारी रखें");
   assert.equal(translateUiText("hinglish", "Continue with Google"), "Google ke saath continue karein");
   assert.equal(translateUiText("hindi", "Advertising campaigns"), "विज्ञापन कैंपेन");
-  assert.equal(translateUiText("hinglish", "Advertising campaigns"), "Advertising campaigns");
+  assert.equal(translateUiText("hinglish", "Advertising campaigns"), "Ads campaigns ka management");
   assert.equal(translateUiText("hindi", "Switch to dark theme"), "डार्क थीम पर जाएँ");
   assert.equal(translateUiText("hinglish", "Switch to dark theme"), "Dark theme par switch karein");
   assert.equal(
