@@ -235,7 +235,7 @@ jobs:
         run: |
           $deadline = (Get-Date).AddSeconds(90)
           do {
-            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrint Smart Print Agent'" -ErrorAction SilentlyContinue
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
             if ($service -and $service.State -eq "Running") { break }
             Start-Sleep -Seconds 3
           } while ((Get-Date) -lt $deadline)
