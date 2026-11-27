@@ -10,7 +10,7 @@ param(
     [Parameter(Mandatory=$true)][string]$IconPath,
     [Parameter(Mandatory=$true)][string]$SigningCertificatePath,
     [Parameter(Mandatory=$true)][string]$SigningCertificatePassword,
-    [string]$PublisherDisplayName="SmartPrint"
+    [Parameter(Mandatory=$true)][ValidateNotNullOrEmpty()][string]$PublisherDisplayName
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference="Stop"
@@ -107,7 +107,7 @@ $manifest=@"
   <Extensions><desktop6:Extension Category="windows.service" Executable="Agent\SmartPrint.Agent.exe"><desktop6:Service Name="QRtoPrintSmartPrintAgent" StartupType="auto" StartAccount="localService" /></desktop6:Extension></Extensions>
  </Application></Applications>
  <Extensions><desktop2:Extension Category="windows.firewallRules"><desktop2:FirewallRules Executable="Agent\SmartPrint.Agent.exe"><desktop2:Rule Direction="in" IPProtocol="TCP" LocalPortMin="17842" LocalPortMax="17842" Profile="all" /></desktop2:FirewallRules></desktop2:Extension></Extensions>
- <Capabilities><uap:Capability Name="internetClient" /><uap:Capability Name="privateNetworkClientServer" /><rescap:Capability Name="runFullTrust" /><rescap:Capability Name="packagedServices" /></Capabilities>
+ <Capabilities><uap:Capability Name="privateNetworkClientServer" /><rescap:Capability Name="runFullTrust" /><rescap:Capability Name="packagedServices" /></Capabilities>
 </Package>
 "@
 $manifestPath=Join-Path $stage "AppxManifest.xml"
@@ -130,9 +130,14 @@ $n=[System.Xml.XmlNamespaceManager]::new($m.NameTable)
 $n.AddNamespace("d6","http://schemas.microsoft.com/appx/manifest/desktop/windows10/6")
 $n.AddNamespace("d2","http://schemas.microsoft.com/appx/manifest/desktop/windows10/2")
 $n.AddNamespace("rc","http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
+$n.AddNamespace("uap","http://schemas.microsoft.com/appx/manifest/uap/windows10")
 if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrintSmartPrintAgent' and @StartAccount='localService' and @StartupType='auto']",$n)) {throw "Packaged LocalService Agent declaration is missing."}
 if (-not $m.SelectSingleNode("//d2:FirewallRules[@Executable='Agent\SmartPrint.Agent.exe']/d2:Rule[@Direction='in' and @IPProtocol='TCP' and @LocalPortMin='17842' and @LocalPortMax='17842' and @Profile='all']",$n)) {throw "All-profile LAN firewall rule for Agent TCP 17842 is missing."}
 if (-not $m.SelectSingleNode("//rc:Capability[@Name='packagedServices']",$n)) {throw "packagedServices restricted capability is missing."}
+if (-not $m.SelectSingleNode("//rc:Capability[@Name='runFullTrust']",$n)) {throw "runFullTrust restricted capability is missing."}
+if (-not $m.SelectSingleNode("//uap:Capability[@Name='privateNetworkClientServer']",$n)) {throw "Private network capability is missing."}
+if ($m.SelectSingleNode("//rc:Capability[@Name='localSystemServices']",$n)) {throw "MSIX must not request localSystemServices; the Agent must run as LocalService."}
+if ($m.SelectSingleNode("//uap:Capability[@Name='internetClient']",$n)) {throw "Unnecessary internetClient capability must not be declared for this full-trust desktop package."}
 Write-Host "SmartPrint MSIX created and signature/manifest verified: $out"
 Write-Host "SHA-256: $((Get-FileHash $out -Algorithm SHA256).Hash.ToLowerInvariant())"
 Write-Host "Microsoft Store approval for packagedServices remains a separate release gate."
