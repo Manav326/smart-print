@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
@@ -88,6 +89,11 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
             savedJob.Status);
         Assert.Equal(1, await verification.PrintJobEvents.CountAsync(
             item => item.PrintJobId == seeded.JobId));
+    }
+
+    private sealed class TestRequestBodyDetectionFeature : IHttpRequestBodyDetectionFeature
+    {
+        public bool CanHaveBody => true;
     }
 
     private sealed class TestFixture : IAsyncDisposable
@@ -305,6 +311,7 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
                 routeValues.ToDictionary(pair => pair.Key, pair => (object?)pair.Value));
             context.Request.Body = new MemoryStream(JsonSerializer.SerializeToUtf8Bytes(body));
             context.Request.ContentLength = context.Request.Body.Length;
+            context.Features.Set<IHttpRequestBodyDetectionFeature>(new TestRequestBodyDetectionFeature());
             context.Response.Body = new MemoryStream();
             context.User = new ClaimsPrincipal(new ClaimsIdentity(
             [
