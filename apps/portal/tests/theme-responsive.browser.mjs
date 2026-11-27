@@ -788,8 +788,9 @@ async function exercisePhotoStudioBrowser() {
     await page.waitForFunction(() => document.querySelector("#photo-studio-result")?.getAttribute("data-ready") === "true");
 
     await openButton.click();
-    const dialog = page.getByRole("dialog", { name: "Photo Studio" });
+    const dialog = page.locator('[role="dialog"][aria-labelledby="photo-studio-title"]');
     await dialog.waitFor({ state: "visible" });
+    assert.ok((await dialog.locator("#photo-studio-title").textContent())?.trim(), "Photo Studio must expose a localized accessible title.");
     assert.equal(await dialog.getAttribute("aria-busy"), "false");
 
     const measurements = await page.evaluate(() => {
