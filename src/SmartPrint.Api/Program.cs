@@ -8856,7 +8856,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     {
         if (PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(job.OutputType, request.SpoolerStatus))
         {
-            var previous = job.Status;
+            var previousVirtualStatus = job.Status;
             job.Status = "TEST_OUTPUT_READY";
             job.OutputCompletedUtc = now;
             job.OutputConfirmedUtc = null;
@@ -8864,7 +8864,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
                 job.PrivateDocumentPurgeRequestedUtc ??= now;
             db.PrintJobEvents.Add(new PrintJobEvent
             {
-                TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previous,
+                TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previousVirtualStatus,
                 NewStatus = job.Status, ActorType = "PrintAgent", ActorId = device.Id,
                 ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
             });
