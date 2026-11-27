@@ -8238,8 +8238,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
                       a.RevokedUtc == null && a.Status != "Revoked" &&
                       a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
-                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))
+                  (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
             select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.PrintDispatchAttempts, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
@@ -8295,8 +8295,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
                 agent.RevokedUtc == null && agent.Status != "Revoked" &&
                 agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
+            (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
                 .SetProperty(job => job.SpoolerJobName, attemptSpoolerJobName)
@@ -8735,7 +8735,11 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.Status == "COMPLETED")
+    if (job.Status == "COMPLETED" ||
+        (job.Origin == "PRINTER_DIAGNOSTIC" &&
+         await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
+             attempt => attempt.TenantId == device.TenantId &&
+                 attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct)))
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED") ||
         job.ClaimedByAgentDeviceId != device.Id || job.SpoolerJobId != request.SpoolerJobId)
