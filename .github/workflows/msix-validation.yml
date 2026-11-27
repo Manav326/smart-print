@@ -167,6 +167,7 @@ jobs:
           Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix"
           if (-not (Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME)) { throw "Windows did not register SmartPrint MSIX." }
       - name: Verify packaged service, local API, named pipe and printer subsystem
+        id: service_validation
         shell: pwsh
         run: |
           $deadline = (Get-Date).AddSeconds(90)
@@ -179,14 +180,16 @@ jobs:
           if ($service.StartName -notmatch "LocalService$") { throw "MSIX Agent is not running as NT AUTHORITY\LocalService." }
           if ($service.State -ne "Running") { throw "MSIX Agent did not start automatically." }
 
-          # Packaged-service registration must preserve the existing EXE's
-          # crash-recovery contract. Do not silently accept SCM's default
-          # no-action policy for a production print queue.
+          # Record SCM crash-recovery parity without stopping the remaining
+          # install/queue/network/uninstall tests. A missing restart action is
+          # enforced as a final release gate after all other evidence is collected.
           $failureActions = (& sc.exe qfailure QRtoPrintSmartPrintAgent 2>&1 | Out-String)
-          if ($LASTEXITCODE -ne 0) { throw "Could not query packaged Agent Service Control Manager recovery actions: $failureActions" }
-          if ($failureActions -notmatch "RESTART") { throw "Packaged Agent has no SCM restart recovery action. This is a printing reliability release blocker." }
+          $failureActionsExit = $LASTEXITCODE
           $failureFlag = (& sc.exe qfailureflag QRtoPrintSmartPrintAgent 2>&1 | Out-String)
-          if ($LASTEXITCODE -ne 0 -or $failureFlag -notmatch "1") { throw "Packaged Agent does not enable recovery for non-crash service failures: $failureFlag" }
+          $failureFlagExit = $LASTEXITCODE
+          $recoveryReady = ($failureActionsExit -eq 0 -and $failureActions -match "RESTART" -and $failureFlagExit -eq 0 -and $failureFlag -match "1")
+          "recovery_ready=$($recoveryReady.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $recoveryReady) { Write-Warning "Packaged Agent does not yet demonstrate the EXE's SCM crash-recovery configuration. Release remains blocked." }
 
           $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(".", "QRtoPrint.SmartPrint.Agent.Control", [System.IO.Pipes.PipeDirection]::InOut)
           try {
@@ -246,6 +249,8 @@ jobs:
           $printers = Get-CimInstance -ClassName Win32_Printer -ErrorAction Stop
           Write-Host "Windows printer subsystem query succeeded; installed printer count: $(@($printers).Count)"
           if (-not (Test-Path -LiteralPath "$env:ProgramData\QRtoPrint")) { throw "Agent did not initialize persistent machine data." }
+          $uninstallMarker = Join-Path $env:ProgramData "QRtoPrint\msix-uninstall-preservation-test.txt"
+          Set-Content -LiteralPath $uninstallMarker -Value "preserve-across-msix-uninstall" -Encoding utf8
       - name: Verify upgrade preserves machine data and LocalService Agent
         if: github.event_name != 'workflow_dispatch'
         shell: pwsh
@@ -279,16 +284,6 @@ jobs:
           } while ((Get-Date) -lt $deadline)
           if (-not $service -or $service.State -ne "Running" -or $service.StartName -notmatch "LocalService$") { throw "MSIX upgrade did not retain a running LocalService Agent." }
           if ((Get-Content -LiteralPath $marker -Raw).Trim() -ne "preserve-across-msix-upgrade") { throw "MSIX upgrade modified persistent machine data." }
-      - name: Upload production-signed MSIX for Partner Center
-        if: success() && github.event_name == 'workflow_dispatch'
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
-        with:
-          name: smartprint-msix-${{ inputs.version }}
-          path: |
-            artifacts/SmartPrint-Windows-Store.msix
-            artifacts/SmartPrint-MSIX-DevCert.cer
-          if-no-files-found: error
-          retention-days: 30
       - name: Verify uninstall removes service but preserves machine data
         if: always()
         shell: pwsh
@@ -302,3 +297,24 @@ jobs:
             Write-Host "Verified: machine data survives MSIX uninstall."
             Remove-Item -LiteralPath $marker -Force
           }
+          $uninstallMarker = Join-Path $env:ProgramData "QRtoPrint\msix-uninstall-preservation-test.txt"
+          if (-not (Test-Path -LiteralPath $uninstallMarker)) { throw "MSIX uninstall did not preserve the machine data directory." }
+          if ((Get-Content -LiteralPath $uninstallMarker -Raw).Trim() -ne "preserve-across-msix-uninstall") { throw "MSIX uninstall modified the machine data marker." }
+          Remove-Item -LiteralPath $uninstallMarker -Force
+      - name: Enforce service recovery release gate
+        if: success()
+        shell: pwsh
+        run: |
+          if ("${ steps.service_validation.outputs.recovery_ready }" -ne "true") {
+            throw "MSIX service crash-recovery parity is not proven. Do not release or submit this package."
+          }
+      - name: Upload Store-submission MSIX and public test certificate
+        if: success() && github.event_name == 'workflow_dispatch'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: smartprint-msix-${{ inputs.version }}
+          path: |
+            artifacts/SmartPrint-Windows-Store.msix
+            artifacts/SmartPrint-MSIX-DevCert.cer
+          if-no-files-found: error
+          retention-days: 30
