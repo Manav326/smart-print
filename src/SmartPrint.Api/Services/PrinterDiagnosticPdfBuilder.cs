@@ -77,6 +77,8 @@ public static class PrinterDiagnosticPdfBuilder
         DrawText(sb, SafeLabel(metadata.PrinterName, 46), 66, 194, 12, bold: true, Ink);
         DrawText(sb, "WINDOWS QUEUE", 66, 216, 7, bold: true, Muted);
         DrawText(sb, SafeLabel(metadata.QueueName, 54), 66, 234, 9, bold: false, Ink);
+        DrawText(sb, "CAPABILITY BASIS", 66, 248, 6, bold: true, Muted);
+        DrawText(sb, SafeLabel(metadata.CapabilityEvidence, 62), 148, 248, 6, bold: false, Muted);
         DrawText(sb, "CONNECTION", 371, 174, 7, bold: true, Muted);
         DrawText(sb, SafeLabel(metadata.ConnectionType, 20), 371, 194, 10, bold: true, Ink);
         DrawText(sb, "OUTPUT PROFILE", 371, 216, 7, bold: true, Muted);
