@@ -86,7 +86,7 @@ public static class PrinterDiagnosticPdfBuilder
         DrawText(sb, "ABCDEFGHIJKLMNOPQRSTUVWXYZ", 60, 316, 14, bold: true, Ink);
         DrawText(sb, "abcdefghijklmnopqrstuvwxyz  0123456789", 60, 340, 12, bold: false, Ink);
         DrawText(sb, "Aa  Bb  Cc  Oo  00  Il  11  @  #  %  &  *  +  =  /", 60, 364, 11, bold: false, Ink);
-        DrawText(sb, "PUNCTUATION: . , : ; ! ? ( ) [ ] { } - _ ' """, 60, 388, 10, bold: false, Ink);
+        DrawText(sb, "PUNCTUATION: . , : ; ! ? ( ) [ ] { } - _ apostrophe", 60, 388, 10, bold: false, Ink);
 
         DrawText(sb, "PAGE GEOMETRY / ALIGNMENT / MARGINS", 52, 430, 9, bold: true, Ink);
         DrawGeometryTest(sb);
@@ -223,8 +223,22 @@ public static class PrinterDiagnosticPdfBuilder
     private static void DrawRegistrationTarget(StringBuilder sb, double x, double top)
     {
         var y = DesignHeight - top;
+        const double radius = 17;
+        const double k = 0.55228475 * radius;
         sb.Append("q\n0.08 0.09 0.12 RG\n1.2 w\n")
-            .Append(F(x)).Append(' ').Append(F(y)).Append(" 17 0 360 arc S\n")
+            .Append(F(x + radius)).Append(' ').Append(F(y)).Append(" m ")
+            .Append(F(x + radius)).Append(' ').Append(F(y + k)).Append(' ')
+            .Append(F(x + k)).Append(' ').Append(F(y + radius)).Append(' ')
+            .Append(F(x)).Append(' ').Append(F(y + radius)).Append(" c ")
+            .Append(F(x - k)).Append(' ').Append(F(y + radius)).Append(' ')
+            .Append(F(x - radius)).Append(' ').Append(F(y + k)).Append(' ')
+            .Append(F(x - radius)).Append(' ').Append(F(y)).Append(" c ")
+            .Append(F(x - radius)).Append(' ').Append(F(y - k)).Append(' ')
+            .Append(F(x - k)).Append(' ').Append(F(y - radius)).Append(' ')
+            .Append(F(x)).Append(' ').Append(F(y - radius)).Append(" c ")
+            .Append(F(x + k)).Append(' ').Append(F(y - radius)).Append(' ')
+            .Append(F(x + radius)).Append(' ').Append(F(y - k)).Append(' ')
+            .Append(F(x + radius)).Append(' ').Append(F(y)).Append(" c S\n")
             .Append(F(x - 25)).Append(' ').Append(F(y)).Append(" m ")
             .Append(F(x + 25)).Append(' ').Append(F(y)).Append(" l S\n")
             .Append(F(x)).Append(' ').Append(F(y - 25)).Append(" m ")
