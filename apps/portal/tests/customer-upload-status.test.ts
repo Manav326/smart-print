@@ -34,7 +34,7 @@ test("authoritative order status takes precedence over the upload empty state", 
   assert.equal(resolveCustomerUploadStatusMessage({ jobStatus: "AWAITING_PAYMENT" }),
     "Your files are accepted. Complete payment to continue.");
   assert.equal(resolveCustomerUploadStatusMessage({ jobStatus: "QUOTE_EXPIRED" }),
-    "Your quote has expired · Request a new quote.");
+    "We are checking the current price. Review any change before continuing.");
 });
 
 test("the latest known payment state remains visible without a job status payload", () => {
