@@ -5888,6 +5888,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   }
 
   function selectUploadedFile(item:UploadedPrintJob) {
+    if(busy)return;
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
@@ -6200,6 +6201,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
+    if(busy)return;
     setNotices([]);
     if(batchLockedForPayment){
       setError(t("This batch already has a payment attempt. Start a new batch for additional files."));
@@ -6577,24 +6579,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       : <div className="customer-upload-modes">
       <div className="customer-upload-mode-heading"><strong>{t("How your files reach the shop")}</strong><small>{t("Choose a connection method. Your privacy setting above stays the same.")}</small></div>
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Direct transfer over shop Wi-Fi")}</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} disabled={busy} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Direct transfer over shop Wi-Fi")}</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Unavailable")}</small></button>}
-      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>{t("Encrypted online transfer · print when ready")}</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} disabled={busy} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>{t("Encrypted online transfer · print when ready")}</small></button>}
     </div>}
     {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title={t("Secure upload unavailable")}>{t("No file was uploaded. Ask the shop to reconnect its print service, then retry.")}</CustomerInlineNotice>}
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title={t("Encrypted online relay")}>{t("No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.")}</CustomerInlineNotice>}
     {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title={t("This batch is locked")}>{t("Payment has started. Add more documents in a new batch.")}</CustomerInlineNotice>}
     <div className="customer-upload-picker-grid" aria-label={t("Choose documents or folders")}
-      onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
-      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
+      onDragOver={event=>{if(!busy&&!batchLockedForPayment)event.preventDefault();}}
+      onDrop={event=>{event.preventDefault();if(busy||batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={busy||batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?t("Select files"):t("Select documents or images")}</strong>
         <small>{t("PDF, JPG or PNG")}</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={busy||batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?t("Choose folders"):t("Add a folder")}</strong>
         <small>{nativeAppMode?t("Select multiple folders"):t("One folder at a time")}</small>
@@ -6813,7 +6815,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
-          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
+          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} disabled={busy} onClick={()=>selectUploadedFile(item)}>
             <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?money(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
