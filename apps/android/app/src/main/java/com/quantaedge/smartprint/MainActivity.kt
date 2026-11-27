@@ -843,7 +843,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             accountAction = ImageView(this@MainActivity).apply {
-                contentDescription = "Account"
+                contentDescription = AndroidCustomerLocale.translate(this@MainActivity, "Account")
                 setImageResource(R.drawable.ic_account)
                 imageTintList = ColorStateList.valueOf(this@MainActivity.getColor(R.color.qp_text))
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -905,7 +905,7 @@ class MainActivity : AppCompatActivity() {
         created.apply {
             menu.add(Menu.NONE, HOME, 0, AndroidCustomerLocale.translate(this@MainActivity, "Home")).apply {
                 setIcon(R.drawable.ic_nav_home)
-                setContentDescription("Home")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Home"))
             }
             menu.add(Menu.NONE, FILES, 1, AndroidCustomerLocale.translate(this@MainActivity, "Files")).apply {
                 setIcon(R.drawable.ic_nav_files)
@@ -917,7 +917,7 @@ class MainActivity : AppCompatActivity() {
             }
             menu.add(Menu.NONE, ACTIVITY, 3, AndroidCustomerLocale.translate(this@MainActivity, "Activity")).apply {
                 setIcon(R.drawable.ic_nav_activity)
-                setContentDescription("Activity")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Activity"))
             }
             labelVisibilityMode = if (
                 useRail || ResponsiveLayoutPolicy.showLabelsOnAllBottomItems(configuration.screenWidthDp)
@@ -1085,7 +1085,7 @@ class MainActivity : AppCompatActivity() {
     private fun setToolbarBackAction(description: String, action: () -> Unit) {
         toolbar.navigationIcon = getDrawable(R.drawable.ic_arrow_back)
         toolbar.setNavigationIconTint(getColor(R.color.qp_text))
-        toolbar.navigationContentDescription = description
+        toolbar.navigationContentDescription = AndroidCustomerLocale.translate(this, description)
         toolbar.setNavigationOnClickListener { action() }
     }
 
