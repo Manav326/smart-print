@@ -71,6 +71,20 @@ jobs:
         run: |
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw "Workspace dependency installation failed." }
+      - name: Align desktop binary version with MSIX package version
+        shell: pwsh
+        run: |
+          $msixVersion = [version]$env:MSIX_VERSION
+          $desktopVersion = "$($msixVersion.Major).$($msixVersion.Minor).$($msixVersion.Build)"
+          $configPath = "apps/desktop/src-tauri/tauri.conf.json"
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $config.version = $desktopVersion
+          $config | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $configPath -Encoding utf8
+          $packagePath = "apps/desktop/package.json"
+          $package = Get-Content -LiteralPath $packagePath -Raw | ConvertFrom-Json
+          $package.version = $desktopVersion
+          $package | ConvertTo-Json -Depth 100 | Set-Content -LiteralPath $packagePath -Encoding utf8
+          Write-Host "Desktop application version aligned to $desktopVersion (MSIX package $env:MSIX_VERSION)."
       - name: Build existing desktop frontend and native executable
         shell: pwsh
         run: |
