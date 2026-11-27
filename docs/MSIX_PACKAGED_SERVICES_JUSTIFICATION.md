@@ -15,7 +15,7 @@ The MSIX route remains a separate, conditional submission candidate. It requests
 - `runFullTrust`: required by the packaged Win32/Tauri desktop application.
 - `packagedServices`: required by the `windows.service` extension for the LocalService Agent.
 - Manifest extension: `windows.service`
-- Service identity in the MSIX: `QRtoPrintSmartPrintAgent` (the canonical SCM service key used by both installers and the Agent binary; the display name remains `QRtoPrint Smart Print Agent`).
+- Service identity in the MSIX: `QRtoPrintSmartPrintAgent` (the canonical SCM service key used by both installers and the Agent binary). The EXE installer sets the friendly display name `QRtoPrint Smart Print Agent`; the `desktop6:Service` MSIX schema exposes no separate display-name attribute, so the MSIX package does not claim to preserve that Services.msc label.
 - Service account: `NT AUTHORITY\LocalService`
 - Not requested: `localSystemServices`; SmartPrint does not need to run this service as LocalSystem.
 
@@ -130,7 +130,7 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 
 ## Distribution-specific service registration
 
-The existing website EXE installer and uninstaller use the SCM key `QRtoPrintSmartPrintAgent`. The Agent binary and MSIX manifest now use that exact same service key; the human-readable display name remains `QRtoPrint Smart Print Agent`. This removes the prior service-name mismatch and gives both distribution paths one canonical SCM identity. The two distributions are alternatives and must not be installed side by side: they share the local API port, named pipe and machine-wide queue/identity data. Test both directions of migration before promising customers a seamless switch.
+The existing website EXE installer and uninstaller use the SCM key `QRtoPrintSmartPrintAgent`. The Agent binary and MSIX manifest now use that exact same service key. The EXE installer sets the friendly display name `QRtoPrint Smart Print Agent`; the `desktop6:Service` MSIX schema exposes no separate display-name attribute, so we do not claim the MSIX Services.msc label is identical. This removes the prior service-name mismatch and gives both distribution paths one canonical SCM identity. The two distributions are alternatives and must not be installed side by side: they share the local API port, named pipe and machine-wide queue/identity data. Test both directions of migration before promising customers a seamless switch.
 
 ## MSIX package signing for Store submission
 
