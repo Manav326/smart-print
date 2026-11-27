@@ -227,7 +227,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="platform-plan-success" role="status"><ShieldCheck size={15}/>{success}</div>}
       {loading && !draft ? (
-        <div className="panel platform-loading"><LoaderCircle size={17} className="platform-spin"/> Loading platform settings…</div>
+        <div className="panel platform-loading"><LoaderCircle size={17} className="platform-spin"/>{t("Loading platform settings…")}</div>
       ) : draft ? (
         <>
           <section className="panel platform-ops-panel">
