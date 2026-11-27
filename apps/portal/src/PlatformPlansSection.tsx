@@ -98,7 +98,7 @@ function optionalInteger(value: string, label: string, allowZero: boolean): numb
 
 function toVersionInput(form: PlanForm): PlatformPlanVersionInput {
   const currency = form.currency.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Enter a three-letter currency code.");
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error(t("Enter a three-letter currency code."));
   return {
     currency,
     monthlyPriceMinor: optionalMoneyMinor(form.monthlyPriceMinor, "Monthly price", currency),
@@ -227,7 +227,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
       const version = toVersionInput(form);
       if (creating) {
         if (!/^[A-Za-z][A-Za-z0-9_]{1,39}$/.test(code.trim())) {
-          throw new Error("Plan code must contain 2–40 letters, digits or underscores and start with a letter.");
+          throw new Error(t("Plan code must contain 2–40 letters, digits or underscores and start with a letter."));
         }
         if (!name.trim()) throw new Error("Plan name is required.");
         const result = await createPlatformPlan(tokens.accessToken, {
