@@ -95,7 +95,10 @@ public static class PrinterDiagnosticEndpoints
                             job.Copies,
                             job.PageCount,
                             job.LocalQueueReceivedUtc,
-                            job.PrintDispatchAttempts
+                            job.PrintDispatchAttempts,
+                            job.SpoolerPagesPrinted,
+                            job.SpoolerTotalPages,
+                            job.OutputCompletedUtc
                         })
                         .SingleOrDefault()
                 })
@@ -433,14 +436,49 @@ public static class PrinterDiagnosticEndpoints
                 return Results.Conflict(new { code = "diagnostic_not_yet_attempted", message = "The Agent has not yet attempted this diagnostic. Keep the shop computer connected and wait for the print result before confirming." });
             }
 
-            if (decision is "PRINTED_CORRECTLY" or "PRINTED_WITH_ISSUE" or
-                "OUTPUT_RECEIVED_CORRECTLY" or "OUTPUT_RECEIVED_WITH_ISSUE")
+            var now = DateTimeOffset.UtcNow;
+            var terminalOutput = PrinterDiagnosticRules.IsTerminalOutputObservation(
+                job.OutputType,
+                job.Status,
+                job.SpoolerStatus,
+                job.SpoolerSubmittedUtc,
+                job.SpoolerObservedUtc,
+                job.FailureCode,
+                job.SpoolerJobId,
+                job.SpoolerPagesPrinted,
+                job.SpoolerTotalPages,
+                job.OutputCompletedUtc,
+                now);
+            if (!terminalOutput)
             {
-                if (job.SpoolerSubmittedUtc is null)
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
                 {
-                    await transaction.RollbackAsync(ct);
-                    return Results.Conflict(new { code = "diagnostic_spooler_receipt_missing", message = "SmartPrint has no confirmed spooler submission receipt for this diagnostic. Do not record a successful output result yet." });
-                }
+                    code = "diagnostic_output_not_terminal",
+                    message = "Windows has not finished this print attempt yet. SmartPrint will ask for your confirmation only after it reports PRINTED, verifies the spooler job is no longer present, or confirms that submission was blocked before StartDoc."
+                });
+            }
+
+            if (decision is "PRINTED_CORRECTLY" && !virtualOutput &&
+                !string.Equals(job.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_not_verified_printed", message = "The Windows Agent has not reported a completed PRINTED observation for this physical test." });
+            }
+
+            if (decision is "PRINTED_WITH_ISSUE" &&
+                !string.Equals(job.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(job.SpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_output_not_observed", message = "There is no terminal spooler output observation to attach this issue to." });
+            }
+
+            if (decision is "OUTPUT_RECEIVED_CORRECTLY" &&
+                job.Status != "TEST_OUTPUT_READY")
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_virtual_output_not_ready", message = "The virtual output artifact has not been confirmed ready yet." });
             }
 
             var actorExists = await db.Users.AnyAsync(
@@ -451,7 +489,6 @@ public static class PrinterDiagnosticEndpoints
                 return Results.Forbid();
             }
 
-            var now = DateTimeOffset.UtcNow;
             attempt.OwnerDecision = decision;
             attempt.OwnerNotes = string.IsNullOrWhiteSpace(notes) ? null : notes;
             attempt.ConfirmedByUserId = actorId;
