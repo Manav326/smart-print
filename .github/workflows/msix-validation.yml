@@ -1,0 +1,184 @@
+name: SmartPrint MSIX validation
+
+on:
+  push:
+    branches:
+      - feat/store-msix-parallel-release
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smartprint-msix-validation-\${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  msix-build-install-upgrade:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      SMARTPRINT_PUBLIC_BASE_URL: https://example.invalid
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+      - uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6
+        with:
+          dotnet-version: 10.0.x
+      - name: Install workspace dependencies
+        shell: pwsh
+        run: |
+          pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) { throw "Workspace dependency installation failed." }
+      - name: Build existing desktop frontend and native executable
+        shell: pwsh
+        run: |
+          $env:VITE_API_BASE_URL = $env:SMARTPRINT_PUBLIC_BASE_URL
+          pnpm --filter @smart-print/desktop build
+          if ($LASTEXITCODE -ne 0) { throw "Desktop frontend build failed." }
+          pnpm --filter @smart-print/desktop exec tauri build --no-bundle --ci
+          if ($LASTEXITCODE -ne 0) { throw "Native desktop build failed." }
+          $nativeExe = "apps/desktop/src-tauri/target/release/smartprint-desktop.exe"
+          if (-not (Test-Path -LiteralPath $nativeExe)) { throw "Native desktop executable was not produced." }
+          New-Item -ItemType Directory -Force -Path artifacts/desktop | Out-Null
+          Copy-Item -LiteralPath $nativeExe -Destination artifacts/desktop/SmartPrint.Desktop.exe
+          Get-ChildItem -LiteralPath "apps/desktop/src-tauri/target/release" -Filter "*.dll" -File | Copy-Item -Destination artifacts/desktop -Force
+      - name: Publish the existing Windows Agent unchanged
+        shell: pwsh
+        run: |
+          dotnet publish src/SmartPrint.Agent/SmartPrint.Agent.csproj --configuration Release --runtime win-x64 --self-contained true --output artifacts/agent
+          if ($LASTEXITCODE -ne 0) { throw "Self-contained Agent publish failed." }
+      - name: Run Agent unit tests
+        shell: pwsh
+        run: |
+          dotnet test tests/SmartPrint.Agent.Tests/SmartPrint.Agent.Tests.csproj --configuration Release
+          if ($LASTEXITCODE -ne 0) { throw "SmartPrint Agent tests failed." }
+      - name: Create ephemeral CI-only package certificate
+        id: certificate
+        shell: pwsh
+        run: |
+          $password = [Guid]::NewGuid().ToString("N") + "Aa1!"
+          $securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=SmartPrint MSIX CI" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(7)
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
+          Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
+          "pfx_path=$pfxPath" >> $env:GITHUB_OUTPUT
+          "pfx_password=$password" >> $env:GITHUB_OUTPUT
+      - name: Build, sign and verify MSIX
+        shell: pwsh
+        env:
+          PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
+          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+        run: |
+          $arguments = @{
+            DesktopDirectory = "artifacts/desktop"
+            AgentDirectory = "artifacts/agent"
+            OutputPath = "artifacts/SmartPrint-Windows-Store.msix"
+            PackageName = "SmartPrint.Test"
+            Publisher = "CN=SmartPrint MSIX CI"
+            Version = "0.1.0.0"
+            PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
+            IconPath = "apps/desktop/src-tauri/icons/icon.ico"
+            SigningCertificatePath = $env:PFX_PATH
+            SigningCertificatePassword = $env:PFX_PASSWORD
+            PublisherDisplayName = "SmartPrint CI"
+          }
+          ./scripts/build-msix-package.ps1 @arguments
+      - name: Trust CI certificate and install MSIX
+        shell: pwsh
+        env:
+          PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
+          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+        run: |
+          $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
+          $certificate = Import-PfxCertificate -FilePath $env:PFX_PATH -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" -Password $securePassword
+          Import-PfxCertificate -FilePath $env:PFX_PATH -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null
+          if (-not $certificate) { throw "Could not trust the ephemeral MSIX CI certificate." }
+          Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix"
+          if (-not (Get-AppxPackage -Name "SmartPrint.Test")) { throw "Windows did not register SmartPrint MSIX." }
+      - name: Verify packaged service, local API, named pipe and printer subsystem
+        shell: pwsh
+        run: |
+          $deadline = (Get-Date).AddSeconds(90)
+          do {
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
+            if ($service -and $service.State -eq "Running") { break }
+            Start-Sleep -Seconds 3
+          } while ((Get-Date) -lt $deadline)
+          if (-not $service) { throw "MSIX did not register the existing SmartPrint Agent service." }
+          if ($service.StartName -notmatch "LocalService$") { throw "MSIX Agent is not running as NT AUTHORITY\LocalService." }
+          if ($service.State -ne "Running") { throw "MSIX Agent did not start automatically." }
+
+          $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(".", "QRtoPrint.SmartPrint.Agent.Control", [System.IO.Pipes.PipeDirection]::InOut)
+          try {
+            $pipe.Connect(10000)
+            $writer = [System.IO.StreamWriter]::new($pipe, [System.Text.UTF8Encoding]::new($false), 1024, $true)
+            $reader = [System.IO.StreamReader]::new($pipe, [System.Text.UTF8Encoding]::new($false), $false, 1024, $true)
+            $writer.AutoFlush = $true
+            $writer.WriteLine('{"operation":"status"}')
+            $response = $reader.ReadLine() | ConvertFrom-Json
+            if ($response.serviceReachable -ne $true) { throw "Existing desktop-to-Agent named-pipe protocol failed." }
+          } finally { $pipe.Dispose() }
+
+          $apiReady = $false
+          try {
+            $localStatus = Invoke-WebRequest -Uri "http://127.0.0.1:17842/api/v1/local/status" -TimeoutSec 10 -SkipHttpErrorCheck
+            $apiReady = $localStatus.StatusCode -in @(200, 503)
+          } catch { $apiReady = $false }
+          if (-not $apiReady) { throw "Agent did not expose its existing local API on TCP 17842." }
+          $printers = Get-CimInstance -ClassName Win32_Printer -ErrorAction Stop
+          Write-Host "Windows printer subsystem query succeeded; installed printer count: $(@($printers).Count)"
+          if (-not (Test-Path -LiteralPath "$env:ProgramData\QRtoPrint")) { throw "Agent did not initialize persistent machine data." }
+      - name: Verify upgrade preserves machine data and LocalService Agent
+        shell: pwsh
+        env:
+          PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
+          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+        run: |
+          $marker = Join-Path $env:ProgramData "QRtoPrint\msix-upgrade-preservation-test.txt"
+          Set-Content -LiteralPath $marker -Value "preserve-across-msix-upgrade" -Encoding utf8
+          $arguments = @{
+            DesktopDirectory = "artifacts/desktop"
+            AgentDirectory = "artifacts/agent"
+            OutputPath = "artifacts/SmartPrint-Windows-Store-Upgrade.msix"
+            PackageName = "SmartPrint.Test"
+            Publisher = "CN=SmartPrint MSIX CI"
+            Version = "0.1.1.0"
+            PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
+            IconPath = "apps/desktop/src-tauri/icons/icon.ico"
+            SigningCertificatePath = $env:PFX_PATH
+            SigningCertificatePassword = $env:PFX_PASSWORD
+            PublisherDisplayName = "SmartPrint CI"
+          }
+          ./scripts/build-msix-package.ps1 @arguments
+          Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store-Upgrade.msix"
+          $deadline = (Get-Date).AddSeconds(90)
+          do {
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
+            if ($service -and $service.State -eq "Running") { break }
+            Start-Sleep -Seconds 3
+          } while ((Get-Date) -lt $deadline)
+          if (-not $service -or $service.State -ne "Running" -or $service.StartName -notmatch "LocalService$") { throw "MSIX upgrade did not retain a running LocalService Agent." }
+          if ((Get-Content -LiteralPath $marker -Raw).Trim() -ne "preserve-across-msix-upgrade") { throw "MSIX upgrade modified persistent machine data." }
+      - name: Verify uninstall removes service but preserves machine data
+        if: always()
+        shell: pwsh
+        run: |
+          $package = Get-AppxPackage -Name "SmartPrint.Test" -ErrorAction SilentlyContinue
+          if ($package) { Remove-AppxPackage -Package $package.PackageFullName -ErrorAction Stop }
+          $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
+          if ($service) { throw "MSIX uninstall left the Agent service registered." }
+          $marker = Join-Path $env:ProgramData "QRtoPrint\msix-upgrade-preservation-test.txt"
+          if (Test-Path -LiteralPath $marker) {
+            Write-Host "Verified: machine data survives MSIX uninstall."
+            Remove-Item -LiteralPath $marker -Force
+          }
