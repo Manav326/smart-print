@@ -12,10 +12,10 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its service in
 
 | Area | Required behavior |
 |---|---|
-| Agent lifecycle | Windows registers QRtoPrintSmartPrintAgent as an automatic packaged service under LocalService; it starts after install and restarts after upgrade |
+| Agent lifecycle | Windows registers QRtoPrintSmartPrintAgent as an automatic packaged service under LocalService; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker |
 | Desktop IPC | Existing named-pipe status, enrollment and network-selection operations remain available to the desktop UI |
 | Local API | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary |
-| LAN | Package declares private-network access and an inbound private-profile firewall exception for the Agent on TCP 17842; Agent-side selected-network/subnet validation remains authoritative |
+| LAN | Package declares private-network access and an inbound all-profile firewall exception for the Agent on TCP 17842; Agent-side selected-interface/subnet validation remains authoritative and must be tested on Private, Public and Domain profiles |
 | Printer discovery | Same WindowsPrinterDiscovery and Windows spooler integration are used |
 | Printing | Same queue, worker, PDF rendering and print executor are used; no alternate print implementation is introduced |
 | Pairing and identity | Existing encrypted machine identity, enrollment, revocation, DPAPI and device identity behavior remain in the Agent |
@@ -49,7 +49,7 @@ The Agent appsettings.json is generated before packaging because MSIX contents a
 5. A package upgrade preserves %ProgramData%\QRtoPrint and keeps the Agent service running.
 6. Package uninstall removes the packaged service but preserves machine data.
 
-This CI validation does not prove physical printer output: a hosted runner does not provide the customer's actual printer, USB/network topology, spooler driver or phone. Before release, test the exact signed MSIX on clean Windows machines with representative USB and network printers, a phone on the selected shop LAN, actual PDF/photo jobs, cancellation, queue recovery, sleep/resume, upgrade and uninstall. Confirm the Windows firewall permits a phone on the private LAN to reach TCP 17842 while the Agent still rejects clients outside the selected network.
+The current desktop6:Service manifest schema exposes service name, startup type, start account, arguments and dependencies, but no SCM failure-action settings. The existing EXE installer configures SCM recovery with sc.exe; the current MSIX package does not yet demonstrate equivalent crash recovery. This is a release blocker. Do not claim crash-recovery parity until a Store-compatible method is implemented and a forced Agent-process crash test proves automatic restart.\n\nThis CI validation does not prove physical printer output: a hosted runner does not provide the customer's actual printer, USB/network topology, spooler driver or phone. Before release, test the exact signed MSIX on clean Windows machines with representative USB and network printers, a phone on the selected shop LAN, actual PDF/photo jobs, cancellation, queue recovery, sleep/resume, upgrade and uninstall. Confirm the Windows firewall permits a phone on the selected shop LAN to reach TCP 17842 while the Agent still rejects clients outside the selected network.
 
 ## Microsoft Store approval is a separate gate
 
