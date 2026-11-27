@@ -34,6 +34,51 @@ function Set-JsonProperty([object]$Object, [string]$Name, [object]$Value) {
     else { $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
 }
 
+function Invoke-NativeTool {
+    param(
+        [Parameter(Mandatory=$true)][string]$FilePath,
+        [Parameter(Mandatory=$true)][string[]]$Arguments,
+        [Parameter(Mandatory=$true)][string]$Operation,
+        [ValidateRange(1,1800)][int]$TimeoutSeconds = 600
+    )
+
+    Write-Host "BEGIN: $Operation (timeout: $TimeoutSeconds seconds)"
+    $startInfo = [System.Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $FilePath
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    $startInfo.RedirectStandardOutput = $true
+    $startInfo.RedirectStandardError = $true
+    foreach ($argument in $Arguments) {
+        [void]$startInfo.ArgumentList.Add([string]$argument)
+    }
+
+    $process = [System.Diagnostics.Process]::new()
+    $process.StartInfo = $startInfo
+    try {
+        if (-not $process.Start()) { throw "Could not start $Operation." }
+        $stdoutTask = $process.StandardOutput.ReadToEndAsync()
+        $stderrTask = $process.StandardError.ReadToEndAsync()
+        if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
+            try { $process.Kill($true) } catch { try { $process.Kill() } catch { } }
+            $process.WaitForExit()
+            throw "$Operation exceeded its $TimeoutSeconds-second timeout and was terminated."
+        }
+        $process.WaitForExit()
+        $stdout = $stdoutTask.GetAwaiter().GetResult()
+        $stderr = $stderrTask.GetAwaiter().GetResult()
+        if (-not [string]::IsNullOrWhiteSpace($stdout)) { Write-Host $stdout.TrimEnd() }
+        if (-not [string]::IsNullOrWhiteSpace($stderr)) { Write-Host $stderr.TrimEnd() }
+        if ($process.ExitCode -ne 0) {
+            throw "$Operation failed with exit code $($process.ExitCode)."
+        }
+        Write-Host "END: $Operation (exit code 0)"
+    }
+    finally {
+        $process.Dispose()
+    }
+}
+
 Write-Host "Resolving MSIX input directories and validating signing identity."
 $desktopRoot = (Resolve-Path -LiteralPath $DesktopDirectory).Path
 $agentRoot = (Resolve-Path -LiteralPath $AgentDirectory).Path
@@ -77,7 +122,12 @@ $verify = Join-Path $outDir "SmartPrint-MSIX-Verify"
 Remove-Item -LiteralPath $stage, $verify, $out -Recurse -Force -ErrorAction SilentlyContinue
 New-Item -ItemType Directory -Force -Path $stage, (Join-Path $stage "Agent"), (Join-Path $stage "Assets") | Out-Null
 Copy-Item -Path (Join-Path $desktopRoot "*") -Destination $stage -Recurse -Force
+Write-Host "Desktop payload staged."
 Copy-Item -Path (Join-Path $agentRoot "*") -Destination (Join-Path $stage "Agent") -Recurse -Force
+Write-Host "Agent payload staged."
+$stagedFiles = @(Get-ChildItem -LiteralPath $stage -File -Recurse)
+$stagedBytes = ($stagedFiles | Measure-Object -Property Length -Sum).Sum
+Write-Host "Staged $($stagedFiles.Count) files ($([math]::Round($stagedBytes / 1MB, 1)) MiB) for MSIX compression."
 
 # MSIX files are immutable. Embed the API origin and the same Tauri CORS origin
 # that the website installer currently writes into the Agent configuration.
@@ -100,6 +150,7 @@ $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $settingsPath -E
 
 Write-Host "Preparing Agent configuration and package assets."
 # Reuse the checked-in Windows icon for the MSIX logos.
+Write-Host "Generating MSIX logos from $iconFullPath."
 Add-Type -AssemblyName System.Drawing
 $icon = [System.Drawing.Icon]::new($iconFullPath)
 if (-not $icon) { throw "Could not load SmartPrint Windows icon." }
@@ -122,6 +173,7 @@ try {
         } finally { $bitmap.Dispose() }
     }
 } finally { $icon.Dispose() }
+Write-Host "MSIX logo generation completed."
 
 $esc = { param([string]$value) [System.Security.SecurityElement]::Escape($value) }
 $manifest = @"
@@ -151,18 +203,16 @@ $manifestPath = Join-Path $stage "AppxManifest.xml"
 Set-Content -LiteralPath $manifestPath -Value $manifest -Encoding utf8
 $null = [xml](Get-Content -LiteralPath $manifestPath -Raw)
 
-Write-Host "Packing MSIX with MakeAppx."
-& $makeAppx pack /d $stage /p $out /o
-if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $out)) { throw "MakeAppx failed to create the MSIX package." }
-Write-Host "Signing MSIX with the temporary publisher-matched certificate."
-& $signTool sign /fd SHA256 /f $certificateFullPath /p $SigningCertificatePassword $out
-if ($LASTEXITCODE -ne 0) { throw "SignTool failed to sign the MSIX package." }
+Invoke-NativeTool -FilePath $makeAppx -Arguments @("pack", "/d", $stage, "/p", $out, "/o") -Operation "MakeAppx package compression" -TimeoutSeconds 900
+if (-not (Test-Path -LiteralPath $out -PathType Leaf)) { throw "MakeAppx did not create the MSIX package." }
+$packageBytes = (Get-Item -LiteralPath $out).Length
+Write-Host "MSIX compressed: $([math]::Round($packageBytes / 1MB, 1)) MiB."
+Write-Host "Signing MSIX with the temporary publisher-matched certificate (no network timestamp; Store re-signs the package)."
+Invoke-NativeTool -FilePath $signTool -Arguments @("sign", "/fd", "SHA256", "/f", $certificateFullPath, "/p", $SigningCertificatePassword, $out) -Operation "SignTool package signing" -TimeoutSeconds 180
 Write-Host "Verifying MSIX signature."
-& $signTool verify /pa /v $out
-if ($LASTEXITCODE -ne 0) { throw "MSIX package signature verification failed." }
+Invoke-NativeTool -FilePath $signTool -Arguments @("verify", "/pa", "/v", $out) -Operation "SignTool signature verification" -TimeoutSeconds 180
 Write-Host "Unpacking signed MSIX and validating package contents."
-& $makeAppx unpack /p $out /d $verify /o
-if ($LASTEXITCODE -ne 0) { throw "Could not unpack signed MSIX for verification." }
+Invoke-NativeTool -FilePath $makeAppx -Arguments @("unpack", "/p", $out, "/d", $verify, "/o") -Operation "MakeAppx package verification/unpack" -TimeoutSeconds 900
 
 foreach ($file in @(
     "AppxManifest.xml",
