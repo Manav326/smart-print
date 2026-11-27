@@ -59,7 +59,7 @@ The canonical public privacy-policy URL has not been confirmed from this reposit
 SmartPrint is a Windows desktop printing application. The packaged background service is required for the print Agent to remain available independently of the desktop window.
 
 Suggested test sequence:
-1. Ensure the website EXE distribution is not installed side by side. If switching from it, uninstall it first. The EXE installer and MSIX currently register different SCM service keys, but both use TCP 17842, the same named pipe and machine data.
+1. Ensure the website EXE distribution is not installed side by side. If switching from it, uninstall it first. Both distributions now use the same SCM service key, TCP 17842, the same named pipe and machine data; do not run them side by side.
 2. Install the package on a supported Windows desktop using an account permitted to install packages containing a Windows service.
 3. Launch SmartPrint and complete sign-in/pairing using the test credentials supplied privately in Partner Center, if sign-in is required.
 4. Confirm the Agent service is registered and running as NT AUTHORITY\LocalService.
