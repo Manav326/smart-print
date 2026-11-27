@@ -536,10 +536,10 @@ public static class PrinterDiagnosticEndpoints
             });
 
         var physical = string.Equals(printer.OutputMode, PrinterTypePolicy.Physical, StringComparison.OrdinalIgnoreCase);
-        var virtual = string.Equals(printer.OutputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase);
-        if (!physical && !virtual)
+        var isVirtual = string.Equals(printer.OutputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase);
+        if (!physical && !isVirtual)
             return Results.Conflict(new { code = "diagnostic_output_mode_unsupported", message = "Diagnostics are available only for installed physical Windows queues and explicitly authorised non-production virtual test queues." });
-        if (virtual && environment.IsProduction())
+        if (isVirtual && environment.IsProduction())
             return Results.Conflict(new { code = "virtual_diagnostic_disabled_in_production", message = "Virtual-printer diagnostics are disabled in production." });
 
         var agentOnline = await db.AgentDevices.AsNoTracking().AnyAsync(agent =>
@@ -549,7 +549,7 @@ public static class PrinterDiagnosticEndpoints
         if (!agentOnline)
             return Results.Conflict(new { code = "diagnostic_agent_offline", message = "Reconnect the paired Windows Print Agent before starting a diagnostic." });
 
-        if (virtual)
+        if (isVirtual)
         {
             var grantActive = await db.VirtualPrinterTestGrants.AsNoTracking().AnyAsync(grant =>
                 grant.TenantId == tenantId && grant.PrinterDeviceId == printer.Id &&
