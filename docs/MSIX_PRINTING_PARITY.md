@@ -69,8 +69,8 @@ After downloading the manual workflow artifact, import the accompanying public c
 
 ```powershell
 .\scripts\validate-msix-wack.ps1 `
-  -PackagePath "C:\\path\\to\\SmartPrint-Windows-Store.msix" `
-  -CertificatePath "C:\\path\\to\\SmartPrint-MSIX-DevCert.cer"
+  -PackagePath "C:\path\to\SmartPrint-Windows-Store.msix" `
+  -CertificatePath "C:\path\to\SmartPrint-MSIX-DevCert.cer"
 ```
 
 The script invokes `appcert.exe`, validates the complete XML report and package identity/version, and fails unless the overall result is `PASS`. Keep the XML/HTML reports with the release evidence. Install the Windows App Certification Kit component from the Windows SDK if `appcert.exe` is not present.
