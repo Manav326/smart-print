@@ -4,9 +4,20 @@ on:
   push:
     branches:
       - feat/store-msix-parallel-release
+      - main
   pull_request:
     branches:
       - main
+    paths:
+      - ".github/workflows/msix-validation.yml"
+      - "scripts/build-msix-package.ps1"
+      - "scripts/install-agent-service.ps1"
+      - "scripts/uninstall-agent-service.ps1"
+      - "src/SmartPrint.Agent/**"
+      - "tests/SmartPrint.Agent.Tests/**"
+      - "apps/desktop/**"
+      - "pnpm-lock.yaml"
+      - "docs/MSIX_*.md"
   workflow_dispatch:
     inputs:
       package_name:
