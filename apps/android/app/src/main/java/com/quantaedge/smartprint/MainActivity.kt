@@ -1847,7 +1847,7 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
             })
-            addView(text(message, 12, R.color.qp_muted, false).apply {
+            addView(text(message, 12, R.color.qp_muted, false, translate = false).apply {
                 gravity = Gravity.CENTER
                 textAlignment = View.TEXT_ALIGNMENT_CENTER
                 setPadding(0, dp(7), 0, dp(16))
@@ -2694,7 +2694,7 @@ class MainActivity : AppCompatActivity() {
                                 ?: historyItem?.currency ?: "INR"
                         )
                         if (paymentSummary != null) {
-                            fileBody.addView(text(paymentSummary, 9, R.color.qp_muted, false)
+                            fileBody.addView(text(paymentSummary, 9, R.color.qp_muted, false, translate = false)
                                 .apply { setPadding(0, dp(5), 0, 0) })
                         }
                         fileCard.addView(fileBody)
@@ -3143,8 +3143,9 @@ class MainActivity : AppCompatActivity() {
             gravity = Gravity.CENTER_VERTICAL
             setPadding(dp(2), dp(3), dp(2), dp(8))
         }
-        val breadcrumbText = if (path.isBlank()) "My Files" else "My Files  ›  " + path.replace("/", "  ›  ")
-        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true),
+        val breadcrumbText = if (path.isBlank()) AndroidCustomerLocale.translate(this, "My Files") else
+            AndroidCustomerLocale.translate(this, "My Files") + "  ›  " + path.replace("/", "  ›  ")
+        crumb.addView(text(breadcrumbText, 12, R.color.qp_muted, true, translate = false),
             LinearLayout.LayoutParams(0, -2, 1f))
         if (path.isNotEmpty()) {
             val up = ImageView(this).apply {
@@ -5998,7 +5999,7 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(11), 0, 0, 0)
         }
-        details.addView(text(title, 13, R.color.qp_text, true))
+        details.addView(text(title, 13, R.color.qp_text, true, translate = false))
         details.addView(text(
             if (captured) "Photo saved privately" else "No photo added yet",
             10, R.color.qp_muted, false
