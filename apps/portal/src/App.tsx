@@ -2917,15 +2917,17 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
       </div>}
       <div className="agent-command-panel">
         <div><span>GUIDED WINDOWS INSTALLER</span><strong>Download and run SmartPrint Windows Setup on the shop computer.</strong><small>Run setup as administrator, enter the one-time pairing code in its wizard, and let it install and start the background service.</small></div>
-        <DownloadAction
-          platform="windows"
-          label="Download Windows installer"
-          available={Boolean(windowsInstallerUrl)}
-          downloadUrl={windowsInstallerUrl}
-          fallbackDownloadUrl={windowsInstallerFallbackUrl}
-          releaseState={releaseState}
-          onRefresh={refresh}
-        />
+        <div className="agent-installer-download">
+          <DownloadAction
+            platform="windows"
+            label="Download Windows installer"
+            available={Boolean(windowsInstallerUrl)}
+            downloadUrl={windowsInstallerUrl}
+            fallbackDownloadUrl={windowsInstallerFallbackUrl}
+            releaseState={releaseState}
+            onRefresh={refresh}
+          />
+        </div>
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.</span></div>
       <div className="agent-generate-row"><span>Pairing codes are single use. Generating a new one does not revoke already paired computers.</span><button className="primary-button" disabled={busy} onClick={onGenerate}>{busy?<span className="button-spinner"/>:<><Plus size={15}/> Generate pairing code</>}</button></div>
