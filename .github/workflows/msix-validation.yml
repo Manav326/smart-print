@@ -226,16 +226,13 @@ jobs:
           Export-Certificate -Cert $certificate -FilePath "artifacts/SmartPrint-MSIX-DevCert.cer" -Type CERT | Out-Null
           Write-Output "::add-mask::$password"
           "pfx_password=$password" >> $env:GITHUB_OUTPUT
-      - name: Build, sign and verify MSIX
-        timeout-minutes: 50
+      - name: Import public MSIX certificate into build-user trust stores
+        timeout-minutes: 3
         shell: pwsh
         env:
           CERT_SUBJECT: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
-          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
-          $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          Write-Host "Importing only the public publisher certificate into the build-user trust stores."
+          Write-Host "BEGIN: validate and trust public MSIX certificate"
           $publicCertificatePath = "artifacts/SmartPrint-MSIX-DevCert.cer"
           if (-not (Test-Path -LiteralPath $publicCertificatePath -PathType Leaf)) {
             throw "The exported public MSIX signing certificate is missing."
@@ -244,9 +241,19 @@ jobs:
           if ($publicCertificate.Subject -ine $env:CERT_SUBJECT) {
             throw "Public certificate subject '$($publicCertificate.Subject)' does not match the requested MSIX Publisher '$env:CERT_SUBJECT'."
           }
+          Write-Host "Importing public certificate into CurrentUser Root."
           Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\Root" -ErrorAction Stop | Out-Null
+          Write-Host "Importing public certificate into CurrentUser TrustedPeople."
           Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -ErrorAction Stop | Out-Null
-          Write-Host "Public certificate trust setup completed. The private-key PFX remains isolated for SignTool only."
+          Write-Host "END: public certificate trust setup completed. Private-key PFX remains isolated for SignTool."
+
+      - name: Build, sign and verify MSIX
+        timeout-minutes: 45
+        shell: pwsh
+        env:
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
+        run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $arguments = @{
             DesktopDirectory = "artifacts/desktop"
             AgentDirectory = "artifacts/agent"
@@ -261,9 +268,11 @@ jobs:
             SigningCertificatePassword = $env:PFX_PASSWORD
             PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME
           }
+          Write-Host "BEGIN: MSIX staging, compression, signing and package verification"
           ./scripts/build-msix-package.ps1 @arguments
           if (-not (Test-Path -LiteralPath "artifacts/SmartPrint-Windows-Store.msix" -PathType Leaf)) { throw "MSIX package builder returned without producing the expected package." }
-          Write-Host "MSIX package builder completed and the package file exists."
+          Write-Host "END: MSIX package builder completed and the package file exists."
+
       - name: Trust development signing certificate and install MSIX
         shell: pwsh
         env:
