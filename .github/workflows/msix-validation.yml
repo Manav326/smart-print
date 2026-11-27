@@ -122,7 +122,7 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:PFX_PASSWORD)) { throw "Production MSIX build requires WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD repository secrets." }
           if ($env:SMARTPRINT_PUBLIC_BASE_URL -eq "https://example.invalid") { throw "Production MSIX build requires the SMARTPRINT_PUBLIC_BASE_URL repository variable." }
-          if ($env:MSIX_PACKAGE_NAME -eq "SmartPrint.Test" -or $env:MSIX_PUBLISHER -eq "CN=SmartPrint MSIX CI" -or $env:MSIX_PUBLISHER_DISPLAY_NAME -eq "SmartPrint CI" -or $env:MSIX_APP_DISPLAY_NAME -eq "Smart Print") { throw "Production MSIX build requires the exact Partner Center package identity, Publisher and publisher display name." }
+          if ([string]::IsNullOrWhiteSpace($env:MSIX_PACKAGE_NAME) -or [string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER) -or [string]::IsNullOrWhiteSpace($env:MSIX_APP_DISPLAY_NAME) -or [string]::IsNullOrWhiteSpace($env:MSIX_PUBLISHER_DISPLAY_NAME)) { throw "Production MSIX build requires the exact Partner Center package identity, app display name, Publisher and publisher display name." }
           if ($env:MSIX_VERSION -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Production MSIX version must contain four numeric parts, e.g. 0.1.97.0." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_BASE64))
