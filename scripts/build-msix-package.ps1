@@ -94,7 +94,7 @@ if (-not $settings.Agent.PSObject.Properties["LocalApi"] -or $null -eq $settings
 }
 Set-JsonProperty $settings.Agent "ApiBaseUrl" $apiUri.GetLeftPart([UriPartial]::Authority)
 Set-JsonProperty $settings.Agent.LocalApi "Enabled" $true
-Set-JsonProperty $settings.Agent.LocalApi "AllowedOrigins" @($PublicApiOrigin, "http://tauri.localhost")
+Set-JsonProperty $settings.Agent.LocalApi "AllowedOrigins" @($apiUri.GetLeftPart([UriPartial]::Authority), "http://tauri.localhost")
 $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
 Write-Host "Preparing Agent configuration and package assets."
@@ -180,7 +180,7 @@ foreach ($file in @(
 $packagedSettingsPath = Join-Path $verify "Agent\appsettings.json"
 $packagedSettings = Get-Content -LiteralPath $packagedSettingsPath -Raw | ConvertFrom-Json
 $allowedOrigins = @($packagedSettings.Agent.LocalApi.AllowedOrigins)
-if ($allowedOrigins -notcontains $PublicApiOrigin) { throw "Packaged Agent CORS settings are missing the customer portal origin: $PublicApiOrigin" }
+if ($allowedOrigins -notcontains $apiUri.GetLeftPart([UriPartial]::Authority)) { throw "Packaged Agent CORS settings are missing the customer portal origin: $PublicApiOrigin" }
 if ($allowedOrigins -notcontains "http://tauri.localhost") { throw "Packaged Agent CORS settings are missing the Tauri desktop origin." }
 if ($allowedOrigins -contains "http://localhost:3000") { throw "Development localhost origin must not be included in the Store package." }
 
