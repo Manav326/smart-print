@@ -7,7 +7,7 @@
 - `runFullTrust`: required by the packaged Win32/Tauri desktop application.
 - `packagedServices`: required by the `windows.service` extension for the LocalService Agent.
 - Manifest extension: `windows.service`
-- Service identity: `QRtoPrintSmartPrintAgent`
+- Service identity in the MSIX: `QRtoPrint Smart Print Agent` (matches the Agent binary's `WindowsServiceLifetimeOptions.ServiceName`).
 - Service account: `NT AUTHORITY\LocalService`
 - Not requested: `localSystemServices`; SmartPrint does not need to run this service as LocalSystem.
 
@@ -51,7 +51,7 @@ The canonical public privacy-policy URL has not been confirmed from this reposit
 SmartPrint is a Windows desktop printing application. The packaged background service is required for the print Agent to remain available independently of the desktop window.
 
 Suggested test sequence:
-1. Ensure the website EXE distribution is not installed side by side. If switching from it, uninstall it first; it shares the same service name and machine data with the MSIX.
+1. Ensure the website EXE distribution is not installed side by side. If switching from it, uninstall it first. The EXE installer and MSIX currently register different SCM service keys, but both use TCP 17842, the same named pipe and machine data.
 2. Install the package on a supported Windows desktop using an account permitted to install packages containing a Windows service.
 3. Launch SmartPrint and complete sign-in/pairing using the test credentials supplied privately in Partner Center, if sign-in is required.
 4. Confirm the Agent service is registered and running as NT AUTHORITY\LocalService.
@@ -119,6 +119,10 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] Canonical public privacy policy URL for this exact SmartPrint product; Microsoft requires one for Win32/Desktop Bridge apps even when no personal information is collected.
 - [ ] Current data-flow and retention explanation consistent with actual desktop, Agent, cloud and paired-device behavior.
 - [ ] Certification notes with simple tester steps and a test account if login is required.
+
+## Distribution-specific service registration
+
+The existing website EXE installer registers the service key `QRtoPrintSmartPrintAgent`. The Agent binary currently configures `WindowsServiceLifetimeOptions.ServiceName` as `QRtoPrint Smart Print Agent`. The MSIX manifest uses the name configured by the binary so its packaged service can start without changing the existing website EXE installer or its service behavior. The two distributions are alternatives and must not be installed side by side: they share the local API port, named pipe and machine-wide queue/identity data. Test both directions of migration before promising customers a seamless switch.
 
 ## MSIX package signing for Store submission
 
