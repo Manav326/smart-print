@@ -4,7 +4,7 @@
 
 The MSIX distribution is a second Windows package for the existing SmartPrint desktop application. It must not become a UI-only or reduced-functionality edition.
 
-The MSIX package includes the same native Tauri desktop executable and the same self-contained .NET SmartPrint Agent build used by the existing Windows release. The Agent remains a Windows service running as NT AUTHORITY\\LocalService; it is not replaced with a per-user background process.
+The MSIX package includes the same native Tauri desktop executable and the same self-contained .NET SmartPrint Agent build used by the existing Windows release. The Agent remains a Windows service running as NT AUTHORITY\LocalService; it is not replaced with a per-user background process.
 
 The existing website installer (SmartPrint-Windows-Setup.exe) and its service installer/uninstaller remain independent and unchanged by the MSIX packaging path. Android APK and AAB release paths are also independent.
 
@@ -20,7 +20,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its service in
 | Printing | Same queue, worker, PDF rendering and print executor are used; no alternate print implementation is introduced. |
 | Pairing and identity | Existing encrypted machine identity, enrollment, revocation, DPAPI and device identity behavior remain in the Agent. |
 | Private printing | Existing encrypted local queue and protected temporary-document handling remain in the Agent. |
-| Persistence | %ProgramData%\\QRtoPrint is outside the package and must survive package upgrade and uninstall. |
+| Persistence | %ProgramData%\QRtoPrint is outside the package and must survive package upgrade and uninstall. |
 | WebView2 | Package currently relies on the machine's Evergreen WebView2 Runtime. It does not bundle an installer or fixed runtime. Runtime availability and the supported Windows edition/version matrix are release gates. |
 
 ## Package implementation
@@ -32,7 +32,7 @@ The package manifest declares:
 - `packagedServices` as a restricted capability required by the service extension;
 - `runFullTrust` as a restricted capability required by the full-trust Win32/Tauri desktop application;
 - `privateNetworkClientServer` for the selected shop LAN;
-- an all-profile inbound TCP 17842 firewall exception for Agent\\SmartPrint.Agent.exe; Agent middleware continues to restrict remote clients to the selected interface and subnet;
+- an all-profile inbound TCP 17842 firewall exception for Agent\SmartPrint.Agent.exe; Agent middleware continues to restrict remote clients to the selected interface and subnet;
 - no `localSystemServices`, no `internetClient`, and no `internetClientServer`.
 
 The desktop app is a full-trust Win32 process, not an AppContainer app. Microsoft documents that `internetClient` is unnecessary for medium-integrity full-trust desktop apps because they already have the user's network access. The Agent's cloud HTTPS requests therefore do not justify declaring that extra capability.
@@ -49,7 +49,7 @@ The Agent appsettings.json is generated before packaging because MSIX contents a
 3. The existing local HTTP API responds on TCP 17842.
 4. Windows printer subsystem enumeration is available to the same Agent build.
 5. The package firewall rule applies to the Agent executable and TCP 17842 across the intended Windows network profiles.
-6. A package upgrade preserves %ProgramData%\\QRtoPrint and keeps the Agent service running.
+6. A package upgrade preserves %ProgramData%\QRtoPrint and keeps the Agent service running.
 7. Package uninstall removes the packaged service but preserves machine data.
 8. The Windows runner has a valid Evergreen WebView2 Runtime registration.
 
