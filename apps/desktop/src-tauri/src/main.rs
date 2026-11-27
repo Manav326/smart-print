@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 const AGENT_STATUS_URL: &str = "http://127.0.0.1:17842/api/v1/local/status";
 const AGENT_PIPE_NAME: &str = "QRtoPrint.SmartPrint.Agent.Control";
@@ -437,6 +437,7 @@ mod tests {
 #[cfg(windows)]
 mod msix_webview2 {
     use std::process::Command;
+    use std::time::{Duration, Instant};
 
     const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
     const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
