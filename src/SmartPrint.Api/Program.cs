@@ -12557,6 +12557,26 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
     var canRefreshExpiredQuote = savedQuoteExpired &&
         (job.Status is "AWAITING_CUSTOMER_APPROVAL" or "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED");
+    var previousQuotedAmountMinor = job.QuotedAmountMinor;
+    if (canRefreshExpiredQuote)
+    {
+        // Do not rewrite a quote while an individual or batch payment is active.
+        // Checkout takes the same job locks, so this check serialises safely with payment creation.
+        var hasUnresolvedIndividualPayment = await db.PrintPayments.AsNoTracking().AnyAsync(item =>
+            item.TenantId == job.TenantId && item.PrintJobId == job.Id && item.Status != "REJECTED", ct);
+        var hasUnresolvedBatchPayment = job.BatchId is Guid quoteBatchId &&
+            await db.PrintBatchPayments.AsNoTracking().AnyAsync(item =>
+                item.TenantId == job.TenantId && item.BatchId == quoteBatchId && item.Status != "REJECTED", ct);
+        if (hasUnresolvedIndividualPayment || hasUnresolvedBatchPayment)
+        {
+            await transaction.RollbackAsync(ct);
+            return Results.Conflict(new
+            {
+                code = "quote_refresh_payment_in_progress",
+                message = "A payment is already in progress for this request. Refresh its payment status before changing the quote."
+            });
+        }
+    }
     if (!PrintJobQuoteRules.CanCreateQuote(job.Status) && !canRefreshExpiredQuote)
     {
         return Results.Conflict(new
@@ -12747,9 +12767,10 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.PricingVersion = pricing.Version;
         job.QuoteExpiresUtc = now.AddMinutes(10);
         var previousStatus = job.Status;
-        job.Status = paymentPreferences?.InstantPaymentEnabled == true
-            ? "AWAITING_PAYMENT"
-            : "AWAITING_CUSTOMER_APPROVAL";
+        var instantPaymentEnabled = paymentPreferences?.InstantPaymentEnabled == true;
+        var quotePriceChanged = canRefreshExpiredQuote && previousQuotedAmountMinor != amount;
+        job.Status = PrintJobQuoteRules.ResolveStatusAfterQuote(
+            previousStatus, canRefreshExpiredQuote, quotePriceChanged, instantPaymentEnabled);
         job.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
         {
@@ -12758,9 +12779,13 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             PreviousStatus = previousStatus,
             NewStatus = job.Status,
             ActorType = "Customer",
-            ReasonCode = paymentPreferences?.InstantPaymentEnabled == true
-                ? "INSTANT_CHECKOUT_QUOTE_CREATED"
-                : "QUOTE_CREATED",
+            ReasonCode = quotePriceChanged
+                ? "EXPIRED_QUOTE_PRICE_CHANGED_REQUIRES_CUSTOMER_ACCEPTANCE"
+                : canRefreshExpiredQuote
+                    ? "EXPIRED_QUOTE_RENEWED"
+                    : instantPaymentEnabled
+                        ? "INSTANT_CHECKOUT_QUOTE_CREATED"
+                        : "QUOTE_CREATED",
             CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
