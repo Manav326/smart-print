@@ -327,13 +327,12 @@ jobs:
           }
           $localServiceAccess = @($queueAclEntries | Where-Object { $_.Sid -eq "S-1-5-19" -and $_.Rule.FileSystemRights.ToString() -match "FullControl" })
           $systemAccess = @($queueAclEntries | Where-Object { $_.Sid -eq "S-1-5-18" -and $_.Rule.FileSystemRights.ToString() -match "FullControl" })
-          $unexpectedFullControl = @($queueAclEntries | Where-Object {
+          $unexpectedAllowed = @($queueAclEntries | Where-Object {
             $_.Rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
-            $_.Rule.FileSystemRights.ToString() -match "FullControl" -and
             $_.Sid -notin @("S-1-5-19", "S-1-5-18")
           })
-          if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0 -or $unexpectedFullControl.Count -gt 0) {
-            throw "The protected queue ACL must grant FullControl only to LocalService and SYSTEM; unexpected SIDs: $($unexpectedFullControl.Sid -join ', ')"
+          if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0 -or $unexpectedAllowed.Count -gt 0) {
+            throw "The protected queue ACL must allow access only to LocalService and SYSTEM; unexpected SIDs: $($unexpectedAllowed.Sid -join ', ')"
           }
 
           # Exercise a real unexpected process exit, not just the SCM configuration text.
