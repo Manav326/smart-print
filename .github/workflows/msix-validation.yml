@@ -3,7 +3,6 @@ name: SmartPrint MSIX validation
 on:
   push:
     branches:
-      - feat/store-msix-parallel-release
       - main
   pull_request:
     branches:
