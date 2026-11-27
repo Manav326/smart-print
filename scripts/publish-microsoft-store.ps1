@@ -123,14 +123,21 @@ Write-Host "Verifying the Partner Center dependency declaration and public priva
 $metadataResponse = Invoke-StoreApi -Method GET -Path "/submission/v1/product/$ProductId/metadata?languages=en-us"
 $metadata = $metadataResponse.responseData
 if ($null -eq $metadata) { throw "Partner Center did not return product metadata. Refusing to submit without checking required declarations." }
-$dependsOnDriversOrNt = $null
-if ($metadata.PSObject.Properties["dependsOnDriversOrNT"]) { $dependsOnDriversOrNt = $metadata.dependsOnDriversOrNT }
-if ($null -eq $dependsOnDriversOrNt -and $metadata.properties -and $metadata.properties.PSObject.Properties["dependsOnDriversOrNT"]) { $dependsOnDriversOrNt = $metadata.properties.dependsOnDriversOrNT }
-if ($dependsOnDriversOrNt -ne $true) {
-    throw "Partner Center must declare dependsOnDriversOrNT=true for SmartPrint. The Windows Agent installs a non-Microsoft LocalService NT service. Set the declaration in the product properties, save the draft, and rerun; no package changes or submission were made."
-}
 $properties = $metadata.properties
-if ($null -eq $properties -or $properties.isPrivacyPolicyRequired -ne $true) {
+if ($null -eq $properties) { throw "Partner Center did not return the product properties module. Refusing to submit without checking the required declarations." }
+
+# The Store Submission API nests dependsOnDriversOrNT inside
+# properties.productDeclarations (not directly on properties).
+$productDeclarations = $properties.productDeclarations
+$dependsOnDriversOrNt = $null
+if ($productDeclarations -and $productDeclarations.PSObject.Properties["dependsOnDriversOrNT"]) {
+    $dependsOnDriversOrNt = $productDeclarations.dependsOnDriversOrNT
+}
+if ($dependsOnDriversOrNt -ne $true) {
+    throw "Partner Center must set properties.productDeclarations.dependsOnDriversOrNT=true. SmartPrint installs its own non-Microsoft LocalService NT service. Set and save this declaration in Partner Center; no package changes or submission were made."
+}
+
+if ($properties.isPrivacyPolicyRequired -ne $true) {
     throw "Partner Center must mark a privacy policy as required for SmartPrint. Set isPrivacyPolicyRequired=true and save the draft before submitting."
 }
 $privacyPolicyUrl = [string]$properties.privacyPolicyUrl
@@ -138,7 +145,23 @@ $privacyPolicyUri = $null
 if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyPolicyUri) -or $privacyPolicyUri.Scheme -ne "https") {
     throw "Partner Center must contain a real public HTTPS privacyPolicyUrl for SmartPrint. Supply and verify the product-specific policy before submitting."
 }
-Write-Host "Partner Center service-dependency declaration and HTTPS privacy-policy metadata are present."
+
+# Current Store policy requires NT-service dependencies to be disclosed in
+# both the product description and certification notes. Do not auto-edit
+# product metadata here: the publisher must review the customer-facing wording.
+$certificationNotes = [string]$properties.certificationNotes
+if ($certificationNotes -notmatch '(?i)NT service' -or $certificationNotes -notmatch '(?i)LocalService') {
+    throw "Partner Center certificationNotes must explicitly disclose the non-Microsoft NT service and its LocalService account. Update the certification notes and save the draft."
+}
+$listings = @($metadata.listings)
+if ($listings.Count -eq 0) { throw "Partner Center returned no listing metadata to verify the required service-dependency disclosure." }
+foreach ($listing in $listings) {
+    $description = [string]$listing.description
+    if ($description -notmatch '(?i)^\s*SmartPrint installs and depends on its own non-Microsoft Windows NT service.*LocalService') {
+        throw "The beginning of every submitted listing description must disclose SmartPrint's non-Microsoft Windows NT service dependency and LocalService account. Update the listing description and save the draft."
+    }
+}
+Write-Host "Partner Center service-dependency declarations, certification disclosure, listing disclosure and HTTPS privacy-policy metadata are present."
 $draftStatusPath = "/submission/v1/product/$ProductId/status"
 $initialStatus = Invoke-StoreApi -Method GET -Path $draftStatusPath
 if (-not [string]::IsNullOrWhiteSpace([string]$initialStatus.responseData.ongoingSubmissionId)) {
