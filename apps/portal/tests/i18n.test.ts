@@ -187,3 +187,16 @@ test("subscription billing, Google sign-in, campaign administration and theme co
     "SmartPrint सब्सक्रिप्शन भुगतान रसीद",
   );
 });
+
+test("advertising lookup labels and asset guidance are localized", () => {
+  assert.equal(translateUiText("hindi", "Customer app · Home"), "ग्राहक ऐप · होम");
+  assert.equal(translateUiText("hinglish", "Customer app · Home"), "Customer app ka Home");
+  assert.equal(
+    translateUiText("hindi", "640 × 200 px (2× asset for a 320 × 100 display)"),
+    "640 × 200 px (320 × 100 डिस्प्ले के लिए 2× एसेट)",
+  );
+  assert.equal(
+    translateUiText("hinglish", "600 × 500 px (2× asset for a 300 × 250 card)"),
+    "600 × 500 px (300 × 250 card ke liye 2× asset)",
+  );
+});
