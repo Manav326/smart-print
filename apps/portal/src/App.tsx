@@ -2902,6 +2902,8 @@ function PrinterDiagnosticControls({
                   <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("OUTPUT_RECEIVED_CORRECTLY")}>{t("File received correctly")}</button>
                   <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("OUTPUT_RECEIVED_WITH_ISSUE")}>{t("File has an issue")}</button>
                 </>
+              ) : blockedBeforeSubmission ? (
+                <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("NO_OUTPUT_RECEIVED")}>{t("No file received")}</button>
               ) : (
                 <>
                   <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("OUTPUT_RECEIVED_WITH_ISSUE")}>{t("File has an issue")}</button>
