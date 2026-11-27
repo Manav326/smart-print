@@ -384,6 +384,39 @@ jobs:
           if ((Get-Content -LiteralPath $uninstallMarker -Raw).Trim() -ne "preserve-across-msix-uninstall") { throw "MSIX uninstall modified the machine data marker." }
           Remove-Item -LiteralPath $uninstallMarker -Force
           }
+      - name: Verify EXE service installer identity and crash recovery parity
+        if: success()
+        shell: pwsh
+        run: |
+          $serviceName = "QRtoPrintSmartPrintAgent"
+          $agentExe = (Resolve-Path -LiteralPath "artifacts/agent/SmartPrint.Agent.exe").Path
+          $installed = $false
+          try {
+            & ./scripts/install-agent-service.ps1 -AgentExePath $agentExe -AgentVersion "msix-parity-validation" -CustomerPortalOrigin $env:SMARTPRINT_PUBLIC_BASE_URL -ApiBaseUrl $env:SMARTPRINT_PUBLIC_BASE_URL
+            $installed = $true
+            $service = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction Stop
+            if (-not $service -or $service.State -ne "Running" -or $service.StartName -notmatch "LocalService$") {
+              throw "The existing EXE installer did not start the canonical Agent service as LocalService."
+            }
+            $failureActions = (& sc.exe qfailure $serviceName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $failureActions -notmatch "RESTART") {
+              throw "The existing EXE installer did not configure SCM restart actions for the Agent."
+            }
+            $failureFlag = (& sc.exe qfailureflag $serviceName 2>&1 | Out-String)
+            if ($LASTEXITCODE -ne 0 -or $failureFlag -notmatch "1") {
+              throw "The existing EXE installer did not enable SCM failure actions for the Agent."
+            }
+            Write-Host "Verified EXE installer service identity, LocalService startup and SCM crash recovery."
+          }
+          finally {
+            if ($installed) { & ./scripts/uninstall-agent-service.ps1 }
+          }
+          if (Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue) {
+            throw "The EXE installer parity test did not remove the Agent service."
+          }
+          if (Get-NetFirewallRule -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "QRtoPrint Smart Print Agent Local API*" }) {
+            throw "The EXE installer parity test left an Agent firewall rule behind."
+          }
       - name: Enforce service recovery release gate
         if: success()
         shell: pwsh
