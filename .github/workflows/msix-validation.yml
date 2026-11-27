@@ -305,7 +305,7 @@ jobs:
         if: success()
         shell: pwsh
         run: |
-          if ("${ steps.service_validation.outputs.recovery_ready }" -ne "true") {
+          if ("${{ steps.service_validation.outputs.recovery_ready }}" -ne "true") {
             throw "MSIX service crash-recovery parity is not proven. Do not release or submit this package."
           }
       - name: Upload Store-submission MSIX and public test certificate
