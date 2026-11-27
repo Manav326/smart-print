@@ -1681,9 +1681,9 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
                 aria-expanded={accountMenuOpen} aria-controls="shop-account-menu"
                 title={t("Account and shop settings")}
                 onClick={() => setAccountMenuOpen(value => !value)}>
-                <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
+                <span className="account-avatar">{initials(profile?.ownerName || t("Shop owner"))}</span>
                 <span className="account-menu-trigger-copy">
-                  <strong>{profile?.ownerName || "Shop owner"}</strong>
+                  <strong>{profile?.ownerName || t("Shop owner")}</strong>
                   <small>{t("Account")}</small>
                 </span>
                 <ChevronDown size={14} aria-hidden="true"/>
@@ -1694,25 +1694,25 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
                     <span className="account-avatar">{initials(profile?.ownerName || "Shop owner")}</span>
                     <div>
                       <strong>{profile?.ownerName || "Shop owner"}</strong>
-                      <span>{profile?.businessName || "Your shop"}</span>
+                      <span>{profile?.businessName || t("Your shop")}</span>
                     </div>
                   </div>
                   <div className="account-menu-divider"/>
                   <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setOwnerAccountOpen(true); }}>
-                    <UserRound size={16}/>Personal details
+                    <UserRound size={16}/>{t("Personal details")}
                   </button>
                   <button type="button" className="account-menu-item" onClick={() => navAction("Settings")}>
-                    <Settings size={16}/>Shop profile &amp; branding
+                    <Settings size={16}/>{t("Shop profile & branding")}
                   </button>
                   <button type="button" className="account-menu-item" onClick={() => navAction("Subscription")}>
-                    <ShieldCheck size={16}/>Trial &amp; subscription
+                    <ShieldCheck size={16}/>{t("Trial & subscription")}
                   </button>
                   <button type="button" className="account-menu-item" onClick={() => { setAccountMenuOpen(false); setHelpOpen(true); }}>
-                    <LifeBuoy size={16}/>Help &amp; support
+                    <LifeBuoy size={16}/>{t("Help & support")}
                   </button>
                   <div className="account-menu-divider"/>
                   <button type="button" className="account-menu-item account-menu-signout" onClick={() => { setAccountMenuOpen(false); void signOut(); }}>
-                    <LogOut size={16}/>Sign out
+                    <LogOut size={16}/>{t("Sign out")}
                   </button>
                 </div>
               )}
