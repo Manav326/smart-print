@@ -1714,7 +1714,7 @@ function createLocalUploadGrantToken(): string {
 }
 
 type CustomerPrivateRelayStatus =
-  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
+  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; uploadInProgress?: boolean; message?: string }
   | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
   | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string; uploadResult: UploadedPrintJob };
 
@@ -1848,7 +1848,7 @@ async function uploadCustomerPrivateRelay(
   // concurrently; reconcile that same local handoff first to prevent duplicate
   // queue staging after a lost LAN response. This has not started a second encrypted transfer.
   if (existing.state === "PENDING" &&
-      (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY")) {
+      (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY" || existing.uploadInProgress)) {
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
     let lastStage = existing.stage ?? "WAITING_FOR_AGENT";
     let pendingChecks = 0;
@@ -1898,6 +1898,9 @@ async function uploadCustomerPrivateRelay(
           status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
         );
       }
+      // The prior upload or LAN claim has ended without accepting a relay.
+      // It is now safe to resume the same ticket with a new encrypted attempt.
+      if(status.state === "PENDING" && !status.transferPath && !status.uploadInProgress)break;
     }
   }
 
@@ -1959,6 +1962,8 @@ async function uploadCustomerPrivateRelay(
     if(status.state==="PENDING"){
       if(status.transferPath){
         ambiguousRelayPost=false;
+        unclaimedPendingChecks=0;
+      }else if(status.uploadInProgress){
         unclaimedPendingChecks=0;
       }else if(ambiguousRelayPost&&relayPostRetryCount===0){
         unclaimedPendingChecks+=1;
