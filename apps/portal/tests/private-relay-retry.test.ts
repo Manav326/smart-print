@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   customerPrivateRelayPollDelay,
+  shouldContinueCustomerPrivateRelayStatusRetries,
   shouldReconcileCustomerPrivateRelayPostError,
   shouldRetryCustomerPrivateRelayStatusError
 } from "../src/private-relay-retry.ts";
@@ -46,4 +47,11 @@ test("ambiguous relay POST outcomes are reconciled but definitive rejections are
   for(const status of [400,401,403,404,413,422])
     assert.equal(shouldReconcileCustomerPrivateRelayPostError({status}),false);
   assert.equal(shouldReconcileCustomerPrivateRelayPostError({status:409,code:"other_conflict"}),false);
+});
+
+test("persistent status-service failures eventually return a recoverable same-ticket state",()=>{
+  assert.equal(shouldContinueCustomerPrivateRelayStatusRetries(0),true);
+  assert.equal(shouldContinueCustomerPrivateRelayStatusRetries(7),true);
+  assert.equal(shouldContinueCustomerPrivateRelayStatusRetries(8),false);
+  assert.equal(shouldContinueCustomerPrivateRelayStatusRetries(100),false);
 });
