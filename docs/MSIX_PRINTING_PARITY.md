@@ -6,13 +6,13 @@ The MSIX distribution is a second Windows package for the existing SmartPrint de
 
 The MSIX package includes the same native Tauri desktop executable and the same self-contained .NET SmartPrint Agent build used by the existing Windows release. The Agent remains a Windows service running as NT AUTHORITY\LocalService; it is not replaced with a per-user background process.
 
-The existing website installer (SmartPrint-Windows-Setup.exe) and its service installer/uninstaller remain independent and unchanged by the MSIX packaging path. Android APK and AAB release paths are also independent.
+The existing website installer (SmartPrint-Windows-Setup.exe) and its Agent service install/uninstall scripts remain unchanged. The shared Tauri startup has an MSIX-package-identity-gated WebView2 prerequisite check; unpackaged website EXE launches skip it. Android APK and AAB release paths are also independent.
 
 ## Required parity checks
 
 | Area | Required behavior |
 |---|---|
-| Agent lifecycle | Windows registers QRtoPrintSmartPrintAgent as an automatic packaged service under LocalService; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
+| Agent lifecycle | Windows registers `QRtoPrint Smart Print Agent` as an automatic packaged service under LocalService, matching the Agent binary's configured service name; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
 | Desktop IPC | Existing named-pipe status, enrollment and network-selection operations remain available to the desktop UI. |
 | Local API / phone-to-printer | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary. The packaged CORS allow-list contains the exact customer portal origin supplied by `SMARTPRINT_PUBLIC_BASE_URL` plus `http://tauri.localhost`; it does not use a wildcard or the development `localhost:3000` origin. The package builder verifies these settings after unpacking the signed MSIX. |
 | LAN | Package declares private-network access and an inbound all-profile firewall exception for the Agent on TCP 17842. Agent-side selected-interface/subnet validation remains authoritative and must be tested on Private, Public and Domain profiles. |
@@ -67,11 +67,7 @@ The existing website EXE uninstaller intentionally preserves machine data. The M
 
 The current `desktop6:Service` manifest schema exposes service name, startup type, start account, arguments and dependencies, but no SCM failure-action settings. The existing EXE installer configures SCM recovery with `sc.exe`; the current MSIX package does not yet demonstrate equivalent crash recovery. This is a release blocker. Do not claim crash-recovery parity until a Store-compatible method is implemented and a forced Agent-process crash test proves automatic restart.
 
-The WebView2 runtime is preinstalled on Windows 11 and many eligible Windows 10 devices, but Microsoft notes that some devices may not have it. The current MSIX package does not run the existing EXE installer's WebView2 prerequisite step. Before release, either:
-- define and test a supported Windows edition/version matrix that guarantees the Evergreen Runtime; and verify first launch on clean machines, or
-- implement a supported way to provide the runtime without compromising Store packaging or customer installation.
-
-Do not assume that the presence of Microsoft Edge browser alone proves the WebView2 Runtime is available.
+The WebView2 runtime is preinstalled on Windows 11 and many eligible Windows 10 devices, but some devices may not have it. The MSIX bundles Microsoft's signed Evergreen x64 standalone installer. Before Tauri initializes, the packaged app checks the WebView2 runtime registration and silently installs the bundled runtime only when missing. CI verifies that the download exceeds 50 MiB and has a valid Microsoft Authenticode signature. The runtime remains Evergreen and receives Microsoft updates; no fixed runtime is frozen into the app. A clean-machine first-launch test with WebView2 absent remains a release gate. Do not assume that the presence of Microsoft Edge browser alone proves the WebView2 Runtime is available.
 
 ### Windows App Certification Kit (WACK)
 
