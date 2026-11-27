@@ -151,6 +151,18 @@ try {
     if ($finalPrivacyUri.Scheme -ne "https") {
         throw "Privacy policy redirected away from HTTPS."
     }
+    $privacyPolicyContent = [string]$privacyResponse.Content
+    foreach ($requiredDisclosure in @(
+        "Windows desktop and Agent information",
+        "NT AUTHORITY\\LocalService",
+        "Wi-Fi network name (SSID)",
+        "TCP port 17842",
+        "machine-level Agent data"
+    )) {
+        if ($privacyPolicyContent -notmatch [regex]::Escape($requiredDisclosure)) {
+            throw "The public privacy policy is missing the required Windows Agent disclosure: $requiredDisclosure"
+        }
+    }
 } catch {
     throw "The configured SmartPrint privacy policy URL could not be reached successfully from the Store publishing runner: $($_.Exception.Message)"
 }
