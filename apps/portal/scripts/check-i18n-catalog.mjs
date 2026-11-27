@@ -136,6 +136,7 @@ const localizedScreens = [
   "ShopSubscriptionCheckout.tsx",
   "ShopGoogleSignInButton.tsx",
   "PlatformAdvertisingSection.tsx",
+  "ThemeToggleButton.tsx",
 ];
 for (const file of localizedScreens) {
   const screenSource = readFileSync(resolve(root, "src", file), "utf8");
