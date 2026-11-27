@@ -700,15 +700,20 @@ async function exercisePhotoStudioBrowser() {
     { mode: "customer", theme: "light", width: 520, height: 900 },
     { mode: "shop", theme: "dark", width: 390, height: 568 },
     { mode: "shop", theme: "light", width: 768, height: 1024 },
-    { mode: "shop", theme: "dark", width: 1440, height: 1000 }
+    { mode: "shop", theme: "dark", width: 1440, height: 1000 },
+    { mode: "customer", theme: "light", width: 320, height: 568, locale: "hindi", htmlLang: "hi" },
+    { mode: "shop", theme: "dark", width: 390, height: 568, locale: "hinglish", htmlLang: "hi-Latn" },
+    { mode: "customer", theme: "dark", width: 768, height: 1024, locale: "hinglish", htmlLang: "hi-Latn" },
+    { mode: "shop", theme: "light", width: 1440, height: 1000, locale: "hindi", htmlLang: "hi" }
   ];
 
   for (const [index, item] of cases.entries()) {
-    const caseName = `Photo Studio ${item.mode} / ${item.theme} / ${item.width}x${item.height}`;
+    const caseName = `Photo Studio ${item.mode} / ${item.locale ?? "english"} / ${item.theme} / ${item.width}x${item.height}`;
     const caseStartedAt = Date.now();
     console.log(`[QA-CASE-START] ${index + 1}/${cases.length} | ${caseName} | opening editor and verifying layout, focus, page preview and PDF output`);
     const context = await browser.newContext({ viewport: { width: item.width, height: item.height } });
     const page = await context.newPage();
+    if (item.locale) await page.addInitScript(locale => localStorage.setItem("smartprint-ui-locale", locale), item.locale);
     await page.goto(
       `${baseUrl}/tests/photo-studio.browser.html?mode=${item.mode}&theme=${item.theme}`,
       { waitUntil: "domcontentloaded" }
@@ -738,6 +743,7 @@ async function exercisePhotoStudioBrowser() {
         bodyWidth: document.body.scrollWidth,
         dialog: rect("[role='dialog']"),
         header: rect("[role='dialog'] header"),
+        languageSelector: rect(".sp-language-switcher"),
         preview: rect("[class*='canvasWorkspace']"),
         canvas: rect("canvas"),
         panel: rect("[class*='toolPanel']"),
@@ -753,6 +759,14 @@ async function exercisePhotoStudioBrowser() {
       `Photo Studio has horizontal overflow at ${item.width}x${item.height}: ${JSON.stringify(measurements)}`);
     assert.ok(measurements.header && measurements.header.top >= -1 && measurements.header.bottom <= item.height + 1,
       `Photo Studio header is clipped: ${JSON.stringify(measurements)}`);
+    if (item.locale) {
+      const languageSelector = page.locator(".sp-language-switcher select").first();
+      await languageSelector.waitFor({ state: "visible" });
+      assert.equal(await page.locator("html").getAttribute("lang"), item.htmlLang);
+      assert.equal(await languageSelector.inputValue(), item.locale);
+      assert.ok(measurements.languageSelector && measurements.languageSelector.right <= item.width + 1,
+        `Photo Studio language selector is clipped at ${item.width}x${item.height}: ${JSON.stringify(measurements.languageSelector)}`);
+    }
     assert.ok(measurements.canvas && measurements.canvas.width > 0 && measurements.canvas.height > 0,
       `Photo Studio page preview is missing: ${JSON.stringify(measurements)}`);
     assert.ok(measurements.footer && measurements.footer.bottom <= item.height + 1,
@@ -761,10 +775,17 @@ async function exercisePhotoStudioBrowser() {
       `Photo Studio primary action is clipped: ${JSON.stringify(measurements)}`);
     assert.equal(measurements.bodyOverflow, "hidden", "The editor must prevent background page scroll while open.");
     await page.screenshot({
-      path: join(artifactDirectory, `photo-studio-${item.mode}-${item.width}x${item.height}-${item.theme}.png`),
+      path: join(artifactDirectory, `photo-studio-${item.mode}-${item.locale ?? "english"}-${item.width}x${item.height}-${item.theme}.png`),
       fullPage: false,
       animations: "disabled"
     });
+
+    if (item.locale) {
+      results.push({ check: caseName, passed: true, language: item.locale, viewport: `${item.width}x${item.height}` });
+      await context.close();
+      console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName} | translated editor layout verified`);
+      continue;
+    }
 
     // Cancel should restore focus to the exact customer/shop entry control.
     await dialog.getByRole("button", { name: "Cancel", exact: true }).click();
