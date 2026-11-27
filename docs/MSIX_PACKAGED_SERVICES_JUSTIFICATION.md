@@ -16,19 +16,19 @@ SmartPrint is a desktop printing application used by shop owners to receive and 
 
 The package requests `packagedServices` solely to install and run the SmartPrint Agent as a Windows service under the built-in, least-privileged `LocalService` account. The Agent performs the application's background printing functions: it maintains the durable print queue, communicates with the Windows printing subsystem, exposes the existing loopback API to the desktop application, and provides the existing LAN endpoint used by paired devices for shop printing.
 
-The service must remain available when the desktop window is closed, including while a shop owner is serving customers or using another application. A normal foreground desktop process does not provide the same independent lifecycle or Windows Service Control Manager startup and recovery behavior. Making the Agent dependent on the desktop window would interrupt unattended queue processing and could leave submitted jobs waiting until the desktop application is reopened.
+The service must remain available when the desktop window is closed, including while a shop owner is serving customers or using another application. A normal foreground desktop process does not provide the same independent lifecycle or automatic startup. The MSIX service manifest supports automatic startup, but does not expose the Service Control Manager failure-recovery settings used by the existing EXE installer. We are treating equivalent crash recovery as an explicit release blocker until a supported, Store-compatible configuration is demonstrated on a clean Windows installation. We will not tell Microsoft that the MSIX service has the same crash-recovery configuration unless that has been implemented and verified.
 
 The service runs as LocalService, not LocalSystem. SmartPrint does not request the additional `localSystemServices` capability. Its inbound LAN endpoint is limited by the application's existing selected-network/subnet validation and the package firewall declaration; it is not intended to provide a general-purpose network service. The desktop application communicates with the Agent using the existing local named-pipe protocol and loopback API.
 
 The MSIX package contains the same SmartPrint desktop executable and Agent implementation used by the existing Windows desktop distribution. The purpose of this package is distribution through MSIX and the Microsoft Store, not to introduce a reduced-feature printing edition or a separate printing implementation. The existing website installer remains a separate distribution and its service-based behavior is not changed by this package.
 
-We request approval for `packagedServices` because the persistent, independently running printing Agent is a core part of SmartPrint's user-facing functionality. The capability is limited to this one LocalService service. We will provide installation, upgrade, uninstall, IPC, local API, queue-persistence, network-security and physical-printer test evidence as part of certification.
+We request approval for `packagedServices` because the persistent, independently running printing Agent is a core part of SmartPrint's user-facing functionality. The capability is limited to this one LocalService service. We will provide installation, upgrade, uninstall, IPC, local API, queue-persistence, network-security and physical-printer test evidence as part of certification. We will also disclose and resolve the MSIX crash-recovery difference before release rather than representing an unverified parity claim.
 
 ## Short answers to likely reviewer questions
 
 ### Why does the app need a Windows service?
 
-The print Agent must continue processing accepted jobs independently of whether the desktop window is open. The service provides machine startup integration and Service Control Manager lifecycle/recovery for the background print worker.
+The print Agent must continue processing accepted jobs independently of whether the desktop window is open. The service provides machine startup integration and independent lifecycle for the background print worker. The current MSIX manifest specifies automatic startup; it does not configure the same Service Control Manager failure actions as the EXE installer. That recovery gap remains under investigation and is a release blocker.
 
 ### Why can't this run as a normal desktop process?
 
