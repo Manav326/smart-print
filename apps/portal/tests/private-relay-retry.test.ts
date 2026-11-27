@@ -1,0 +1,49 @@
+import assert from "node:assert/strict";
+import test from "node:test";
+import {
+  customerPrivateRelayPollDelay,
+  shouldReconcileCustomerPrivateRelayPostError,
+  shouldRetryCustomerPrivateRelayStatusError
+} from "../src/private-relay-retry.ts";
+
+test("pending status polling backs off, resets on stage change, and stays within its cap",()=>{
+  const randomLow=()=>0;
+  const randomHigh=()=>1;
+  assert.equal(customerPrivateRelayPollDelay(0,0,false,randomLow),1275);
+  assert.equal(customerPrivateRelayPollDelay(0,0,true,randomLow),1275);
+  assert.equal(customerPrivateRelayPollDelay(5,0,false,randomHigh),12000);
+  assert.equal(customerPrivateRelayPollDelay(100,0,false,randomHigh),12000);
+});
+
+test("transient status failures use bounded exponential backoff",()=>{
+  const randomLow=()=>0;
+  const randomHigh=()=>1;
+  assert.equal(customerPrivateRelayPollDelay(0,1,false,randomLow),1600);
+  assert.equal(customerPrivateRelayPollDelay(0,2,false,randomLow),3200);
+  assert.equal(customerPrivateRelayPollDelay(0,99,false,randomHigh),30000);
+});
+
+test("only transient and completion-reconciliation status errors are retried",()=>{
+  for(const status of [0,408,429,500,502,503])
+    assert.equal(shouldRetryCustomerPrivateRelayStatusError({status}),true);
+  assert.equal(shouldRetryCustomerPrivateRelayStatusError({
+    status:409,code:"private_relay_completion_missing"
+  }),true);
+  for(const status of [400,401,403,404,413,422])
+    assert.equal(shouldRetryCustomerPrivateRelayStatusError({status}),false);
+  assert.equal(shouldRetryCustomerPrivateRelayStatusError({status:409,code:"other_conflict"}),false);
+  assert.equal(shouldRetryCustomerPrivateRelayStatusError(new TypeError("fetch failed")),true);
+});
+
+test("ambiguous relay POST outcomes are reconciled but definitive rejections are not retried",()=>{
+  for(const status of [0,408,429,500,502,503])
+    assert.equal(shouldReconcileCustomerPrivateRelayPostError({status}),true);
+  for(const code of [
+    "private_relay_direct_transfer_in_progress",
+    "private_relay_state_changed",
+    "private_relay_already_completed"
+  ]) assert.equal(shouldReconcileCustomerPrivateRelayPostError({status:409,code}),true);
+  for(const status of [400,401,403,404,413,422])
+    assert.equal(shouldReconcileCustomerPrivateRelayPostError({status}),false);
+  assert.equal(shouldReconcileCustomerPrivateRelayPostError({status:409,code:"other_conflict"}),false);
+});
