@@ -62,7 +62,6 @@ Write-Host "Resetting Windows App Certification Kit."
 & $appCert reset
 if ($LASTEXITCODE -ne 0) { throw "WACK reset failed with exit code $LASTEXITCODE." }
 
-$startedAt = Get-Date
 Write-Host "Running WACK against the exact MSIX: $package"
 & $appCert test -appxpackagepath $package -reportoutputpath $report
 $wackExitCode = $LASTEXITCODE
