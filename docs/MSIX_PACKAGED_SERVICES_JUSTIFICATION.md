@@ -147,6 +147,8 @@ When the package is uploaded, provide a separate explanation for each detected r
 ## Official Microsoft references
 
 - App capability declarations: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations
+- Packaged service manifest schema (service attributes and supported child elements): https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-desktop6-service
+- MSIX firewall rule schema (profile/port fields; no remote-address field): https://learn.microsoft.com/en-us/uwp/schemas/appxpackage/uapmanifestschema/element-desktop2-rule
 - Manage submission options for MSIX apps: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options
 - MSIX Store readiness checklist: https://learn.microsoft.com/en-us/windows/apps/publish/store-readiness-checklist
 - Microsoft Store signing for MSIX: https://learn.microsoft.com/en-us/windows/apps/publish/get-started
