@@ -154,7 +154,7 @@ try {
     $privacyPolicyContent = [string]$privacyResponse.Content
     foreach ($requiredDisclosure in @(
         "Windows desktop and Agent information",
-        "NT AUTHORITY\\LocalService",
+        "NT AUTHORITY\LocalService",
         "Wi-Fi network name (SSID)",
         "TCP port 17842",
         "machine-level Agent data"
