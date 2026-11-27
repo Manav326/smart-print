@@ -71,7 +71,6 @@ jobs:
           $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject "CN=SmartPrint MSIX CI" -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(7)
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
-          "pfx_path=$pfxPath" >> $env:GITHUB_OUTPUT
           "pfx_password=$password" >> $env:GITHUB_OUTPUT
       - name: Build, sign and verify MSIX
         shell: pwsh
@@ -79,6 +78,10 @@ jobs:
           PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
           PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
         run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
+          $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword | Out-Null
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword | Out-Null
           $arguments = @{
             DesktopDirectory = "artifacts/desktop"
             AgentDirectory = "artifacts/agent"
@@ -88,7 +91,7 @@ jobs:
             Version = "0.1.0.0"
             PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
             IconPath = "apps/desktop/src-tauri/icons/icon.ico"
-            SigningCertificatePath = $env:PFX_PATH
+            SigningCertificatePath = $pfxPath
             SigningCertificatePassword = $env:PFX_PASSWORD
             PublisherDisplayName = "SmartPrint CI"
           }
@@ -99,9 +102,10 @@ jobs:
           PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
           PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
         run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          $certificate = Import-PfxCertificate -FilePath $env:PFX_PATH -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" -Password $securePassword
-          Import-PfxCertificate -FilePath $env:PFX_PATH -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null
+          $certificate = Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\TrustedPeople" -Password $securePassword
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\Root" -Password $securePassword | Out-Null
           if (-not $certificate) { throw "Could not trust the ephemeral MSIX CI certificate." }
           Add-AppxPackage -Path "artifacts/SmartPrint-Windows-Store.msix"
           if (-not (Get-AppxPackage -Name "SmartPrint.Test")) { throw "Windows did not register SmartPrint MSIX." }
@@ -144,6 +148,7 @@ jobs:
           PFX_PATH: \${{ steps.certificate.outputs.pfx_path }}
           PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
         run: |
+          $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $marker = Join-Path $env:ProgramData "QRtoPrint\msix-upgrade-preservation-test.txt"
           Set-Content -LiteralPath $marker -Value "preserve-across-msix-upgrade" -Encoding utf8
           $arguments = @{
@@ -155,7 +160,7 @@ jobs:
             Version = "0.1.1.0"
             PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
             IconPath = "apps/desktop/src-tauri/icons/icon.ico"
-            SigningCertificatePath = $env:PFX_PATH
+            SigningCertificatePath = $pfxPath
             SigningCertificatePassword = $env:PFX_PASSWORD
             PublisherDisplayName = "SmartPrint CI"
           }
