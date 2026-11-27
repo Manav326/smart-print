@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: smartprint-msix-validation-\${{ github.ref }}
+  group: smartprint-msix-validation-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -75,7 +75,7 @@ jobs:
       - name: Build, sign and verify MSIX
         shell: pwsh
         env:
-          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
@@ -98,7 +98,7 @@ jobs:
       - name: Trust CI certificate and install MSIX
         shell: pwsh
         env:
-          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
@@ -143,7 +143,7 @@ jobs:
       - name: Verify upgrade preserves machine data and LocalService Agent
         shell: pwsh
         env:
-          PFX_PASSWORD: \${{ steps.certificate.outputs.pfx_password }}
+          PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $marker = Join-Path $env:ProgramData "QRtoPrint\msix-upgrade-preservation-test.txt"
