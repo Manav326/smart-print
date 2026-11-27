@@ -64,6 +64,10 @@ Suggested test sequence:
 
 Do not provide production customer credentials. Create a dedicated certification account with minimum required permissions and provide its credentials only in Partner Center's private certification notes.
 
+## WebView2 prerequisite behavior
+
+The desktop interface is built with Tauri and requires Microsoft's WebView2 Evergreen Runtime. To avoid relying on the runtime being preinstalled, the MSIX includes Microsoft's signed Evergreen standalone runtime installer. Before initializing the Tauri window, the packaged app checks the WebView2 runtime registration and runs that installer silently only when the runtime is absent. It verifies that the runtime is available before continuing. The app does not bundle a frozen fixed-version runtime; the installed Evergreen Runtime continues to receive Microsoft's updates. This is a first-launch prerequisite check, not a custom MSIX install action. The existing website EXE installer path remains unchanged.
+
 ## Short answers to likely reviewer questions
 
 ### Why does the desktop app need `runFullTrust`?
@@ -109,6 +113,7 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] EXE-to-MSIX and MSIX-to-EXE migration test on a machine with real pairing/identity/queue data; verify both distributions are not installed side by side.
 - [ ] Firewall behavior on Private, Public and Domain network profiles; confirm only the intended shop LAN clients can reach the Agent.
 - [ ] Complete Windows App Certification Kit report for the exact production-identity MSIX, with overall result PASS; retain XML/HTML report.
+- [ ] Clean-machine first launch with WebView2 absent: verify the bundled Microsoft-signed Evergreen installer runs, the runtime registers, and the Tauri desktop opens afterward.
 - [ ] Physical print tests with USB and network printers, PDF and photo jobs, cancellation, printer offline/reconnect, sleep/resume and queue recovery.
 - [ ] Phone-to-printer test from a paired device on the selected shop LAN.
 - [ ] Canonical public privacy policy URL for this exact SmartPrint product; Microsoft requires one for Win32/Desktop Bridge apps even when no personal information is collected.
