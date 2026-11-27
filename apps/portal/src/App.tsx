@@ -42,7 +42,7 @@ import {
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, retryShopPrivateTestOutput, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
-  type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrinterDiagnosticAttempt, type PrinterDiagnosticProfile, type PrintQuoteResult, type ShopJobEvent,
+  type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrinterDiagnosticAttempt, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob, type CustomerPrintRequestSettings
 } from "./api";
@@ -2757,7 +2757,10 @@ function PrinterDiagnosticControls({
           copies: 1,
           pageCount: started.pageCount,
           localQueueReceivedUtc: null,
-          printDispatchAttempts: 0
+          printDispatchAttempts: 0,
+          spoolerPagesPrinted: 0,
+          spoolerTotalPages: 0,
+          outputCompletedUtc: null
         }
       }, ...current.filter(item => item.id !== started.id)]);
       setMessage(started.duplicateRequest
