@@ -120,7 +120,7 @@ function Invoke-StoreApi {
 }
 
 Write-Host "Verifying the Partner Center dependency declaration and public privacy-policy metadata before touching the package."
-$metadataResponse = Invoke-StoreApi -Method GET -Path "/submission/v1/product/$ProductId/metadata?languages=en-us"
+$metadataResponse = Invoke-StoreApi -Method GET -Path "/submission/v1/product/$ProductId/metadata?includelanguagelist=true"
 $metadata = $metadataResponse.responseData
 if ($null -eq $metadata) { throw "Partner Center did not return product metadata. Refusing to submit without checking required declarations." }
 $properties = $metadata.properties
@@ -142,8 +142,16 @@ if ($properties.isPrivacyPolicyRequired -ne $true) {
 }
 $privacyPolicyUrl = [string]$properties.privacyPolicyUrl
 $privacyPolicyUri = $null
-if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyPolicyUri) -or $privacyPolicyUri.Scheme -ne "https") {
-    throw "Partner Center must contain a real public HTTPS privacyPolicyUrl for SmartPrint. Supply and verify the product-specific policy before submitting."
+if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyPolicyUri) -or $privacyPolicyUri.Scheme -ne "https" -or $privacyPolicyUri.UserInfo) {
+    throw "Partner Center must contain a public HTTPS privacyPolicyUrl for SmartPrint. Supply and verify the product-specific policy before submitting."
+}
+try {
+    $privacyResponse = Invoke-WebRequest -Method Head -Uri $privacyPolicyUri -MaximumRedirection 5 -TimeoutSec 30 -ErrorAction Stop
+    if ([Uri]$privacyResponse.BaseResponse.ResponseUri -and ([Uri]$privacyResponse.BaseResponse.ResponseUri).Scheme -ne "https") {
+        throw "Privacy policy redirected away from HTTPS."
+    }
+} catch {
+    throw "The configured SmartPrint privacy policy URL could not be reached successfully from the Store publishing runner: $($_.Exception.Message)"
 }
 
 # Current Store policy requires NT-service dependencies to be disclosed in
