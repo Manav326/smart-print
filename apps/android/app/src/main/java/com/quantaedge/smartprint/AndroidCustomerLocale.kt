@@ -90,6 +90,33 @@ internal object AndroidCustomerLocale {
         "Payment QR saved to your device." to "पेमेंट QR आपके डिवाइस में सेव हो गया।",
         "Could not share this document." to "यह दस्तावेज़ शेयर नहीं हो सका।",
         "No app is available to open this link." to "इस लिंक को खोलने के लिए कोई ऐप उपलब्ध नहीं है।"
+        ,
+        "Add folders" to "फ़ोल्डर जोड़ें", "Add photos of your ID" to "अपने ID की फ़ोटो जोड़ें",
+        "Browse phone" to "फ़ोन ब्राउज़ करें", "Cancel scan" to "स्कैन रद्द करें",
+        "Choose from SmartPrint My Files" to "SmartPrint मेरी फ़ाइलों से चुनें",
+        "Combine PDF" to "PDF जोड़ें", "Continue editing" to "एडिटिंग जारी रखें",
+        "Continue with Google" to "Google से जारी रखें", "Create a new ID card" to "नया ID कार्ड बनाएँ",
+        "Create a new folder" to "नया फ़ोल्डर बनाएँ", "Edit" to "एडिट करें",
+        "Existing folders" to "मौजूदा फ़ोल्डर", "Files already saved in SmartPrint" to "SmartPrint में पहले से सेव फ़ाइलें",
+        "Files in this order" to "इस ऑर्डर की फ़ाइलें", "Front" to "आगे", "Go" to "जाएँ",
+        "ID Studio · Private documents" to "ID स्टूडियो · निजी दस्तावेज़", "ID card" to "ID कार्ड",
+        "Import files" to "फ़ाइलें इम्पोर्ट करें", "Import folder" to "फ़ोल्डर इम्पोर्ट करें",
+        "Import from phone gallery instead" to "फ़ोन गैलरी से इम्पोर्ट करें", "Import photo" to "फ़ोटो इम्पोर्ट करें",
+        "Move" to "मूव करें", "No orders match this status." to "इस स्टेटस से कोई ऑर्डर नहीं मिला।",
+        "No saved folders yet. You can create one above." to "अभी कोई फ़ोल्डर सेव नहीं है। ऊपर नया फ़ोल्डर बनाएँ।",
+        "Order progress" to "ऑर्डर की स्थिति", "Payment summary" to "पेमेंट का सारांश",
+        "Photo Studio · Private documents" to "फोटो स्टूडियो · निजी दस्तावेज़", "Prepared ID cards" to "तैयार ID कार्ड",
+        "Recent activity" to "हाल की गतिविधि", "Resume" to "फिर शुरू करें", "Retake" to "दोबारा लें",
+        "Rotate" to "घुमाएँ", "Rotate back" to "पीछे की ओर घुमाएँ", "Rotate front" to "आगे की ओर घुमाएँ",
+        "Save copy" to "कॉपी सेव करें", "Sign in to see your print orders." to "अपने प्रिंट ऑर्डर देखने के लिए साइन इन करें।",
+        "SmartPrint ID Studio" to "SmartPrint ID स्टूडियो", "SmartPrint My Files" to "SmartPrint मेरी फ़ाइलें",
+        "Status" to "स्टेटस", "Take photo" to "फ़ोटो लें", "Track order" to "ऑर्डर ट्रैक करें",
+        "Unfinished ID setup" to "अधूरा ID सेटअप", "Use photo" to "फ़ोटो इस्तेमाल करें", "View" to "देखें",
+        "View mode" to "देखने का मोड", "← Up one folder" to "← एक फ़ोल्डर ऊपर",
+        "12+ chars · Upper · Lower · Number · Symbol" to "12+ अक्षर · बड़ा · छोटा · नंबर · सिंबल",
+        "Connecting securely to Google…" to "Google से सुरक्षित रूप से जुड़ रहे हैं…",
+        "Checking for new orders…" to "नए ऑर्डर जाँचे जा रहे हैं…", "Checking this network…" to "इस नेटवर्क की जाँच हो रही है…"
+
     )
 
     private val hinglishCopy = mapOf(
@@ -128,5 +155,32 @@ internal object AndroidCustomerLocale {
         "Payment QR saved to your device." to "Payment QR aapke device mein save ho gaya.",
         "Could not share this document." to "Ye document share nahi ho saka.",
         "No app is available to open this link." to "Is link ko open karne ke liye app available nahi hai."
+        ,
+        "Add folders" to "Folders add karein", "Add photos of your ID" to "Apne ID ki photos add karein",
+        "Browse phone" to "Phone browse karein", "Cancel scan" to "Scan cancel karein",
+        "Choose from SmartPrint My Files" to "SmartPrint My Files se choose karein",
+        "Combine PDF" to "PDF combine karein", "Continue editing" to "Editing continue karein",
+        "Continue with Google" to "Google ke saath continue karein", "Create a new ID card" to "Naya ID card banayein",
+        "Create a new folder" to "Naya folder banayein", "Edit" to "Edit karein",
+        "Existing folders" to "Existing folders", "Files already saved in SmartPrint" to "SmartPrint mein pehle se saved files",
+        "Files in this order" to "Is order ki files", "Front" to "Front", "Go" to "Jaayein",
+        "ID Studio · Private documents" to "ID Studio · Private documents", "ID card" to "ID card",
+        "Import files" to "Files import karein", "Import folder" to "Folder import karein",
+        "Import from phone gallery instead" to "Phone gallery se import karein", "Import photo" to "Photo import karein",
+        "Move" to "Move karein", "No orders match this status." to "Is status ke liye koi order nahi mila.",
+        "No saved folders yet. You can create one above." to "Abhi koi folder saved nahi hai. Upar naya folder bana sakte hain.",
+        "Order progress" to "Order progress", "Payment summary" to "Payment summary",
+        "Photo Studio · Private documents" to "Photo Studio · Private documents", "Prepared ID cards" to "Prepared ID cards",
+        "Recent activity" to "Recent activity", "Resume" to "Resume karein", "Retake" to "Dobara lein",
+        "Rotate" to "Rotate karein", "Rotate back" to "Back side rotate karein", "Rotate front" to "Front side rotate karein",
+        "Save copy" to "Copy save karein", "Sign in to see your print orders." to "Print orders dekhne ke liye sign in karein.",
+        "SmartPrint ID Studio" to "SmartPrint ID Studio", "SmartPrint My Files" to "SmartPrint My Files",
+        "Status" to "Status", "Take photo" to "Photo lein", "Track order" to "Order track karein",
+        "Unfinished ID setup" to "Adhura ID setup", "Use photo" to "Photo use karein", "View" to "Dekhein",
+        "View mode" to "View mode", "← Up one folder" to "← Ek folder upar",
+        "12+ chars · Upper · Lower · Number · Symbol" to "12+ chars · Upper · Lower · Number · Symbol",
+        "Connecting securely to Google…" to "Google se securely connect ho raha hai…",
+        "Checking for new orders…" to "New orders check ho rahe hain…", "Checking this network…" to "Network check ho raha hai…"
+
     )
 }
