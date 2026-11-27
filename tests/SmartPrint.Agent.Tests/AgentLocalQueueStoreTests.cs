@@ -26,6 +26,10 @@ public sealed class AgentLocalQueueStoreTests
             await store.MarkSubmissionStartedAsync(diagnostic.Id, "SmartPrint-DIAG-1", CancellationToken.None);
             await store.MarkReadyAfterBlockedAsync(diagnostic.Id, "DRIVER_PREPARATION_FAILED", CancellationToken.None);
 
+            var customer = CreateJob("Ordinary customer document"u8.ToArray());
+            await store.EnqueueAsync(customer, "Ordinary customer document"u8.ToArray(), CancellationToken.None);
+            await store.MarkAcknowledgedAsync(customer.Id, CancellationToken.None);
+
             Assert.Equal(new[] { diagnostic.Id }, store.GetPendingDiagnosticReconciliationJobIds());
             Assert.Equal("BLOCKED_BEFORE_SUBMISSION", store.Find(diagnostic.Id)!.SpoolerStatus);
 
