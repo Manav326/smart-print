@@ -28,9 +28,15 @@ A PR merge never submits an app to either public Store. A stable release build a
 
 SmartPrint's installer creates the `QRtoPrintSmartPrintAgent` Windows NT service. The current installer configures it to run as the built-in `NT AUTHORITY\LocalService` account (not `LocalSystem`), with automatic startup and service recovery. The Agent is required for SmartPrint's local printer integration. It is not a kernel-mode printer driver.
 
-**This must be disclosed in Partner Center.** On the MSI/EXE submission's Properties page, select the declaration that the app depends on non-Microsoft drivers or NT services, and explain the dependency in Notes for certification. Microsoft's policy says these dependencies are generally not allowed and are reviewed case by case; disclosure does not guarantee approval. Do not claim accessibility certification or any other declaration unless separately tested.
+**This must be disclosed in Partner Center in two places.** On the MSI/EXE submission's Properties page, set the product declaration `dependsOnDriversOrNT=true`. The current Store policy also requires the dependency to be disclosed at the beginning of the customer-facing product description and in Notes for certification. Microsoft's policy says dependencies on non-Microsoft drivers or NT services are generally not allowed; its case-by-case wording specifically references WHCP-certified drivers. SmartPrint's Agent is an application NT service, not a WHCP-certified kernel driver, so do not assume the driver exception applies or that disclosure guarantees approval. Obtain Microsoft's written guidance before treating the EXE/MSI service route as viable.
 
 Suggested certification note (review against the final Agent implementation before submission):
+
+Suggested opening sentence for every localized Store listing description (review with Microsoft before publication):
+
+> SmartPrint installs and depends on its own non-Microsoft Windows NT service (SmartPrint Agent), running under the built-in LocalService account, for background print queue processing and shop-network printing.
+
+The automated publisher checks the Partner Center product declaration, all returned listing descriptions, certification notes, and the public HTTPS privacy-policy URL. It fails closed if the service dependency is not disclosed in the required locations.
 
 > SmartPrint installs one Windows NT service named QRtoPrintSmartPrintAgent. The service runs under the built-in NT AUTHORITY\LocalService account, not LocalSystem, and no kernel-mode driver is installed. It provides the local printer-integration component required by the SmartPrint desktop application, including local printer inventory and secure communication with the desktop client. The installer configures automatic startup and service recovery. The service is removed during application uninstall. The installer does not install unrelated third-party applications.
 
