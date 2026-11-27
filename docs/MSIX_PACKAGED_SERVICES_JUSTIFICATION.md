@@ -2,6 +2,14 @@
 
 **Status:** Draft for Partner Center. Not an approval, and not a prediction of the certification outcome.
 
+## Store distribution decision for the Windows Agent
+
+The service must not be removed or downgraded to a user-session process merely to avoid a restricted MSIX capability. Microsoft documents a separate Microsoft Store Win32 route for a standalone, offline EXE/MSI installer. SmartPrint's existing signed Windows installer can use that route while retaining the LocalService Agent, its SCM recovery actions, printer access, and existing rollback behavior. This is the preferred Store submission route for the service-dependent product unless Microsoft explicitly approves the MSIX `packagedServices` capability.
+
+The EXE/MSI route is not an MSIX submission: the installer must be Authenticode-signed with a certificate chaining to a CA in Microsoft's Trusted Root Program, must install offline and silently, and must remain byte-for-byte unchanged at its submitted URL. Microsoft does not re-sign this installer or deliver Store-managed updates to existing installations; SmartPrint must maintain its own signed update mechanism. The Partner Center steps and current automation requirements are documented in `docs/STORE_RELEASE_SETUP.md`.
+
+The MSIX route remains a separate, conditional submission candidate. It requests `packagedServices`, which Microsoft says is not approved in most Store submissions. If Microsoft declines that capability, use the supported EXE/MSI Store route; do not remove the background service, weaken queue processing, or replace it with a foreground-only Agent to force MSIX acceptance.
+
 ## Restricted capabilities declared
 
 - `runFullTrust`: required by the packaged Win32/Tauri desktop application.
