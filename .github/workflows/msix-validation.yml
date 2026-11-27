@@ -46,12 +46,14 @@ permissions:
 
 concurrency:
   group: smartprint-msix-validation-${{ github.ref }}
-  cancel-in-progress: true
+  # Keep a costly Windows packaging run alive when another commit is pushed.
+  cancel-in-progress: false
 
 jobs:
   msix-build-install-upgrade:
     runs-on: windows-latest
-    timeout-minutes: 45
+    # Native build, Agent publish, MSIX packaging, install and lifecycle validation.
+    timeout-minutes: 90
     env:
       SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://example.invalid' }}
       WEBVIEW2_STANDALONE_X64_URL: ${{ vars.WEBVIEW2_STANDALONE_X64_URL || 'https://go.microsoft.com/fwlink/?linkid=2124701' }}
@@ -186,14 +188,17 @@ jobs:
           Write-Output "::add-mask::$password"
           "pfx_password=$password" >> $env:GITHUB_OUTPUT
       - name: Build, sign and verify MSIX
+        timeout-minutes: 50
         shell: pwsh
         env:
           PFX_PASSWORD: ${{ steps.certificate.outputs.pfx_password }}
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword | Out-Null
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword | Out-Null
+          Write-Host "Importing the ephemeral publisher-matched certificate into the build-user trust stores."
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword -ErrorAction Stop | Out-Null
+          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword -ErrorAction Stop | Out-Null
+          Write-Host "Certificate trust setup completed. Starting bounded MSIX staging, compression, signing and verification."
           $arguments = @{
             DesktopDirectory = "artifacts/desktop"
             AgentDirectory = "artifacts/agent"
@@ -209,6 +214,9 @@ jobs:
             PublisherDisplayName = $env:MSIX_PUBLISHER_DISPLAY_NAME
           }
           ./scripts/build-msix-package.ps1 @arguments
+          if ($LASTEXITCODE -ne 0) { throw "MSIX package builder returned a non-zero exit code." }
+          if (-not (Test-Path -LiteralPath "artifacts/SmartPrint-Windows-Store.msix" -PathType Leaf)) { throw "MSIX package builder returned without producing the expected package." }
+          Write-Host "MSIX package builder completed and the package file exists."
       - name: Trust development signing certificate and install MSIX
         shell: pwsh
         env:
