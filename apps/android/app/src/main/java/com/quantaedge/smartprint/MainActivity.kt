@@ -322,8 +322,6 @@ class MainActivity : AppCompatActivity() {
         shopAccentColor = savedShop.getString("shopAccentColor", null)
         portalUrl?.let { url ->
             val view = ensureWebView()
-        // Capture the Activity context before entering WebViewClient callbacks.
-        val customerLocaleContext = applicationContext
             val webState = savedInstanceState?.getBundle("webViewState")
             val restored = webState?.let { view.restoreState(it) != null } ?: false
             if (!restored) view.loadUrl(url)
@@ -2937,6 +2935,8 @@ class MainActivity : AppCompatActivity() {
         updateBottomNavigationSelection(SCAN_PRINT)
         content.removeAllViews()
         val view = ensureWebView()
+        // Capture the Activity context before entering WebViewClient callbacks.
+        val customerLocaleContext = applicationContext
         (view.parent as? ViewGroup)?.removeView(view)
         content.addView(view, frameParams())
         val activeShopUrl = portalUrl
