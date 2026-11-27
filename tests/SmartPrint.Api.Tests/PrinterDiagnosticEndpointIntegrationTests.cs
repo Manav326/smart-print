@@ -102,6 +102,36 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
             item => item.PrintJobId == seeded.JobId));
     }
 
+    [Fact]
+    public async Task VirtualDiagnosticCanRecordNoOutputWhenWindowsBlocksBeforeSubmission()
+    {
+        var connectionString = Environment.GetEnvironmentVariable("SMARTPRINT_TEST_POSTGRES");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return;
+
+        await using var fixture = await TestFixture.CreateAsync(connectionString);
+        var seeded = await fixture.SeedDiagnosticAsync();
+        await using (var db = new SmartPrintDbContext(fixture.DbOptions))
+        {
+            var job = await db.PrintJobs.SingleAsync(item => item.Id == seeded.JobId);
+            job.OutputType = PrivatePrintingOutputPolicy.TestVirtual;
+            job.Status = "LOCAL_QUEUE_READY";
+            job.SpoolerStatus = "BLOCKED_BEFORE_SUBMISSION";
+            job.FailureCode = "DRIVER_PREPARATION_FAILED";
+            job.LocalQueueReceivedUtc = DateTimeOffset.UtcNow.AddMinutes(-1);
+            job.PrintDispatchAttempts = 1;
+            job.SpoolerSubmittedUtc = null;
+            await db.SaveChangesAsync();
+        }
+
+        var confirmation = await fixture.InvokeConfirmationAsync(seeded.AttemptId, "NO_OUTPUT_RECEIVED");
+
+        Assert.Equal(StatusCodes.Status200OK, confirmation.StatusCode);
+        using var json = JsonDocument.Parse(confirmation.Body);
+        Assert.Equal("NO_OUTPUT_RECEIVED", json.RootElement.GetProperty("ownerDecision").GetString());
+        Assert.Equal("DIAGNOSTIC_NO_OUTPUT", json.RootElement.GetProperty("jobStatus").GetString());
+    }
+
     private sealed class TestRequestBodyDetectionFeature : IHttpRequestBodyDetectionFeature
     {
         public bool CanHaveBody => true;
