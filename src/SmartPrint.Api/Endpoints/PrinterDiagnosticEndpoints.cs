@@ -158,7 +158,21 @@ public static class PrinterDiagnosticEndpoints
                     on new { attempt.TenantId, PrintJobId = attempt.PrintJobId }
                     equals new { job.TenantId, PrintJobId = job.Id }
                 where attempt.TenantId == tenantId && job.IdempotencyKey == storedIdempotencyKey
-                select new { attempt.Id, attempt.PrintJobId, job.JobNumber, job.Status, attempt.CreatedUtc }
+                select new
+                {
+                    attempt.Id,
+                    attempt.PrintJobId,
+                    job.JobNumber,
+                    job.Status,
+                    job.Copies,
+                    job.PageCount,
+                    job.PaperSize,
+                    job.ColourMode,
+                    job.IsDuplex,
+                    job.OutputType,
+                    attempt.TemplateVersion,
+                    attempt.CreatedUtc
+                }
             ).SingleOrDefaultAsync(ct);
             if (duplicate is not null)
             {
@@ -171,6 +185,13 @@ public static class PrinterDiagnosticEndpoints
                     duplicate.PrintJobId,
                     duplicate.JobNumber,
                     duplicate.Status,
+                    duplicate.Copies,
+                    duplicate.PageCount,
+                    duplicate.PaperSize,
+                    duplicate.ColourMode,
+                    duplicate.IsDuplex,
+                    duplicate.OutputType,
+                    duplicate.TemplateVersion,
                     duplicate.CreatedUtc,
                     DuplicateRequest = true
                 });
