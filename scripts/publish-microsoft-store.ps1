@@ -147,7 +147,8 @@ if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyP
 }
 try {
     $privacyResponse = Invoke-WebRequest -Method Head -Uri $privacyPolicyUri -MaximumRedirection 5 -TimeoutSec 30 -ErrorAction Stop
-    if ([Uri]$privacyResponse.BaseResponse.ResponseUri -and ([Uri]$privacyResponse.BaseResponse.ResponseUri).Scheme -ne "https") {
+    $finalPrivacyUri = [Uri]$privacyResponse.BaseResponse.RequestMessage.RequestUri
+    if ($finalPrivacyUri.Scheme -ne "https") {
         throw "Privacy policy redirected away from HTTPS."
     }
 } catch {
