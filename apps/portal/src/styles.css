@@ -5106,6 +5106,7 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 .printer-diagnostic-preflight>span:first-child{font-size:11px;font-weight:700;color:var(--text)}
 .printer-diagnostic-preflight>span:nth-child(2){font-size:10px;line-height:1.45;color:var(--muted)}
 .printer-diagnostic-preflight>div{display:flex;justify-content:flex-end;gap:7px;margin-top:3px}
+.printer-diagnostic-preflight .subtle-button.primary{border-color:var(--accent-strong);background:var(--accent-strong);color:#fff}
 .printer-diagnostic-notes{display:grid;gap:4px;max-width:100%}
 .printer-diagnostic-notes span{font-size:9px;color:var(--muted)}
 .printer-diagnostic-notes input{width:100%;min-width:0;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);padding:8px 9px;font:10px "DM Sans",sans-serif}
