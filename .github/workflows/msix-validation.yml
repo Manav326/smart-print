@@ -122,7 +122,7 @@ jobs:
           if ([string]::IsNullOrWhiteSpace($env:CERT_SUBJECT)) { throw "MSIX Publisher identity is required." }
           $password = [Guid]::NewGuid().ToString("N") + "Aa1!"
           $securePassword = ConvertTo-SecureString -String $password -Force -AsPlainText
-          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:CERT_SUBJECT -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(7)
+          $certificate = New-SelfSignedCertificate -Type CodeSigningCert -Subject $env:CERT_SUBJECT -CertStoreLocation "Cert:\CurrentUser\My" -KeyExportPolicy Exportable -KeyLength 3072 -HashAlgorithm SHA256 -NotAfter (Get-Date).AddDays(365)
           if ($certificate.Subject -ine $env:CERT_SUBJECT) { throw "Generated certificate subject '$($certificate.Subject)' does not exactly match requested Publisher '$env:CERT_SUBJECT'." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           Export-PfxCertificate -Cert $certificate -FilePath $pfxPath -Password $securePassword | Out-Null
