@@ -481,6 +481,13 @@ public static class PrinterDiagnosticEndpoints
                 return Results.Conflict(new { code = "diagnostic_virtual_output_not_ready", message = "The virtual output artifact has not been confirmed ready yet." });
             }
 
+            if (decision is "OUTPUT_RECEIVED_WITH_ISSUE" &&
+                job.Status is not ("TEST_OUTPUT_READY" or "OUTPUT_UNCONFIRMED"))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_virtual_output_not_observed", message = "No virtual output artifact or verified spooler-absence observation is available to attach this issue to." });
+            }
+
             var actorExists = await db.Users.AnyAsync(
                 user => user.Id == actorId && user.TenantId == tenantId, ct);
             if (!actorExists)
