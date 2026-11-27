@@ -8685,11 +8685,31 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
-        await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
-            attempt => attempt.TenantId == device.TenantId &&
-                attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct))
-        return Results.Ok(new { job.Id, Status = "COMPLETED", job.FailureCode, job.OutputType, DuplicateRequest = true });
+    // Diagnostic callbacks and owner confirmation serialize on the diagnostic
+    // attempt row. Without the shared lock, a late Agent callback could pass the
+    // unconfirmed check and overwrite the owner's committed terminal decision.
+    await using var diagnosticTransaction = job.Origin == "PRINTER_DIAGNOSTIC"
+        ? await db.Database.BeginTransactionAsync(ct)
+        : null;
+    if (diagnosticTransaction is not null)
+    {
+        var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
+            $"SELECT * FROM \\"PrinterDiagnosticAttempts\\" WHERE \\"TenantId\\" = {device.TenantId} AND \\"PrintJobId\\" = {job.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var diagnosticAttempt = lockedAttempts.SingleOrDefault();
+        if (diagnosticAttempt is null)
+            return Results.Conflict(new { code = "diagnostic_attempt_missing" });
+        if (diagnosticAttempt.ConfirmedUtc is not null)
+        {
+            await diagnosticTransaction.CommitAsync(ct);
+            return Results.Ok(new { job.Id, Status = "COMPLETED", job.FailureCode, job.OutputType, DuplicateRequest = true });
+        }
+
+        // The initial job read happened before acquiring the attempt lock. Reload
+        // it now so this callback validates the latest state after any prior owner
+        // confirmation or diagnostic callback has finished.
+        await db.Entry(job).ReloadAsync(ct);
+    }
     if (!string.Equals(job.SpoolerJobName, request.SpoolerJobName, StringComparison.Ordinal))
         return Results.Conflict(new { code = "stale_spooler_submission_attempt" });
     var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
@@ -8762,6 +8782,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    if (diagnosticTransaction is not null)
+        await diagnosticTransaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.FailureCode });
 });
 
@@ -8775,11 +8797,25 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
-        await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
-            attempt => attempt.TenantId == device.TenantId &&
-                attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct))
-        return Results.Ok(new { job.Id, Status = "COMPLETED", DuplicateRequest = true });
+    await using var diagnosticTransaction = job.Origin == "PRINTER_DIAGNOSTIC"
+        ? await db.Database.BeginTransactionAsync(ct)
+        : null;
+    if (diagnosticTransaction is not null)
+    {
+        var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
+            $"SELECT * FROM \\"PrinterDiagnosticAttempts\\" WHERE \\"TenantId\\" = {device.TenantId} AND \\"PrintJobId\\" = {job.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var diagnosticAttempt = lockedAttempts.SingleOrDefault();
+        if (diagnosticAttempt is null)
+            return Results.Conflict(new { code = "diagnostic_attempt_missing" });
+        if (diagnosticAttempt.ConfirmedUtc is not null)
+        {
+            await diagnosticTransaction.CommitAsync(ct);
+            return Results.Ok(new { job.Id, Status = "COMPLETED", DuplicateRequest = true });
+        }
+
+        await db.Entry(job).ReloadAsync(ct);
+    }
     if (job.Status == "COMPLETED")
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED") ||
@@ -8812,6 +8848,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     if (job.Status == "OUTPUT_UNCONFIRMED")
     {
         await db.SaveChangesAsync(ct);
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
         return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
     }
 
@@ -8831,6 +8869,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
             ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
         return Results.Ok(new { job.Id, job.Status, job.OutputType, job.OutputCompletedUtc, job.SpoolerStatus });
     }
     job.Status = request.SpoolerStatus == "PRINTING" ? "PRINTING" : "SPOOLER_ACCEPTED";
@@ -8841,6 +8881,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
             ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = "WINDOWS_SPOOLER_STATUS_UPDATED", CreatedUtc = now
         });
     await db.SaveChangesAsync(ct);
+    if (diagnosticTransaction is not null)
+        await diagnosticTransaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
 });
 
