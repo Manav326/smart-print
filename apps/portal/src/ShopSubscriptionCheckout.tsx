@@ -512,7 +512,7 @@ export default function ShopSubscriptionCheckout({
           </span>
           {pendingPayment.status !== "CAPTURED_REVIEW_REQUIRED" && (
             <button type="button" className="secondary-button small" onClick={copyPendingPaymentReference}>
-              Copy reference
+              {t("Copy reference")}
             </button>
           )}
           {pendingPayment.status !== "CAPTURED_REVIEW_REQUIRED" && (
