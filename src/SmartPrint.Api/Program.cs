@@ -8656,6 +8656,11 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
+        await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
+            attempt => attempt.TenantId == device.TenantId &&
+                attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct))
+        return Results.Ok(new { job.Id, Status = "COMPLETED", job.FailureCode, job.OutputType, DuplicateRequest = true });
     if (!string.Equals(job.SpoolerJobName, request.SpoolerJobName, StringComparison.Ordinal))
         return Results.Conflict(new { code = "stale_spooler_submission_attempt" });
     var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
@@ -8735,11 +8740,12 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
-    if (job.Status == "COMPLETED" ||
-        (job.Origin == "PRINTER_DIAGNOSTIC" &&
-         await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
-             attempt => attempt.TenantId == device.TenantId &&
-                 attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct)))
+    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
+        await db.PrinterDiagnosticAttempts.AsNoTracking().AnyAsync(
+            attempt => attempt.TenantId == device.TenantId &&
+                attempt.PrintJobId == job.Id && attempt.ConfirmedUtc != null, ct))
+        return Results.Ok(new { job.Id, Status = "COMPLETED", DuplicateRequest = true });
+    if (job.Status == "COMPLETED")
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED") ||
         job.ClaimedByAgentDeviceId != device.Id || job.SpoolerJobId != request.SpoolerJobId)
