@@ -1433,6 +1433,113 @@ try {
     }
   }
 
+  // Re-run the responsive and contrast checks with the actual translated UI, not just English.
+  // Hindi and Hinglish can be longer than English, so they must pass the same viewport checks.
+  console.log("[QA-STEP-START] Localized UI responsive acceptance | Hindi and Hinglish across customer, shop and platform-admin routes.");
+  const localizedViewports = [
+    { label: "phone-320", width: 320, height: 568 },
+    { label: "phone-390", width: 390, height: 844 },
+    { label: "tablet-768", width: 768, height: 1024 },
+    { label: "desktop-1440", width: 1440, height: 1000 }
+  ];
+  const localizedLocales = [
+    { id: "hindi", htmlLang: "hi" },
+    { id: "hinglish", htmlLang: "hi-Latn" }
+  ];
+  let localizedCaseIndex = 0;
+  const localizedTotal = localizedViewports.length * localizedLocales.length * routes.length;
+  for (const locale of localizedLocales) {
+    for (const viewport of localizedViewports) {
+      for (const route of routes) {
+        localizedCaseIndex += 1;
+        const caseName = `Localized route ${route.label} / ${locale.id} / ${viewport.label} / light + dark`;
+        const caseStartedAt = Date.now();
+        console.log(`[QA-CASE-START] ${localizedCaseIndex}/${localizedTotal} | ${caseName} | selecting locale, checking persistence, overflow and contrast`);
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}${route.path}`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, route.ready);
+
+        const localeSelector = page.locator(".sp-language-switcher select").first();
+        await localeSelector.waitFor({ state: "visible" });
+        const availableLocales = await localeSelector.locator("option").evaluateAll(options => options.map(option => option.value));
+        assert.deepEqual(availableLocales, ["english", "hindi", "hinglish"], "The selector must expose exactly the three approved languages.");
+        await localeSelector.selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        assert.equal(await localeSelector.inputValue(), locale.id);
+        assert.equal(await page.evaluate(() => localStorage.getItem("smartprint-ui-locale")), locale.id,
+          "The selected language must persist for this customer/shop/admin browser profile.");
+
+        const lightLayout = await assertNoHorizontalOverflow(page, route, viewport);
+        await assertRouteContrast(page, route);
+        await page.getByRole("button", { name: "Switch to dark theme" }).click();
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "dark");
+        const darkLayout = await assertNoHorizontalOverflow(page, route, viewport);
+        await assertRouteContrast(page, route);
+        await page.getByRole("button", { name: "Switch to light theme" }).click();
+        await page.waitForFunction(() => document.documentElement.dataset.theme === "light");
+
+        results.push({
+          check: caseName,
+          language: locale.id,
+          viewport: viewport.label,
+          lightDocumentWidth: lightLayout.rootWidth,
+          darkDocumentWidth: darkLayout.rootWidth,
+          passed: true
+        });
+        await context.close();
+        console.log(`[QA-CASE-END] PASS | elapsed=${((Date.now() - caseStartedAt) / 1000).toFixed(1)}s | ${caseName}`);
+      }
+    }
+  }
+  console.log("[QA-STEP-END] Localized UI responsive acceptance | all Hindi/Hinglish customer, shop and admin cases passed.");
+
+  // Specifically open the shop billing and platform advertising pages in both languages.
+  // These nested pages were not covered by the initial dashboard-only responsive matrix.
+  for (const locale of localizedLocales) {
+    for (const viewport of [
+      { label: "phone-390", width: 390, height: 844 },
+      { label: "desktop-1440", width: 1440, height: 1000 }
+    ]) {
+      {
+        const route = { label: "shop-subscription", auth: "shop" };
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}/shop`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, ".app-shell");
+        await page.locator(".sp-language-switcher select").first().selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        const subscriptionNav = page.locator(".sidebar .nav-item").filter({ hasText: /Subscription|सदस्यता/ }).first();
+        if (viewport.width <= 760) await page.locator(".mobile-menu").click();
+        await subscriptionNav.waitFor({ state: "visible" });
+        await subscriptionNav.click();
+        await page.locator(".subscription-payment-panel").waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const heading = await page.locator(".subscription-payment-panel h2").textContent();
+        assert.notEqual(heading?.trim(), "Choose or renew a plan", "The subscription heading must not remain English after selecting Hindi or Hinglish.");
+        await context.close();
+      }
+      {
+        const route = { label: "platform-advertising", auth: "admin" };
+        const context = await browser.newContext({ viewport: { width: viewport.width, height: viewport.height } });
+        const page = await preparePage(context, route);
+        await page.goto(`${baseUrl}/admin`, { waitUntil: "domcontentloaded" });
+        await waitForRoute(page, ".app-shell");
+        await page.locator(".sp-language-switcher select").first().selectOption(locale.id);
+        await page.waitForFunction(expected => document.documentElement.lang === expected, locale.htmlLang);
+        const advertisingNav = page.locator(".primary-nav .nav-item").nth(4);
+        if (viewport.width <= 760) await page.locator(".mobile-menu").click();
+        await advertisingNav.waitFor({ state: "visible" });
+        await advertisingNav.click();
+        await page.locator(".platform-ad-intro h2").waitFor({ state: "visible" });
+        await assertNoHorizontalOverflow(page, route, viewport);
+        const heading = await page.locator(".platform-ad-intro h2").textContent();
+        assert.notEqual(heading?.trim(), "Advertising campaigns", "The platform advertising heading must not remain English after selecting Hindi or Hinglish.");
+        await context.close();
+      }
+    }
+  }
+
   // Exercise the actual shared Photo Studio component on phone, tablet and desktop.
   console.log("[QA-STEP-START] Photo Studio browser acceptance | six customer/shop and light/dark viewport combinations.");
   await exercisePhotoStudioBrowser();
