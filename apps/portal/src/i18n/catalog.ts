@@ -3974,7 +3974,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Active campaigns": "Active campaigns",
     "Advertiser": "Ad dene wala",
     "Advertiser / business": "Advertiser / business",
-    "Advertising campaigns": "Advertising campaigns",
+    "Advertising campaigns": "Ads campaigns ka management",
     "Amount paid": "Pay ki gayi rakam",
     "Archive": "Archive karein",
     "Banner image": "Banner image",
