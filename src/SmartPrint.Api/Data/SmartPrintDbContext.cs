@@ -465,7 +465,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             {
                 table.HasCheckConstraint("CK_PrintJobs_PrintKind", "\"PrintKind\" IN ('DOCUMENT', 'PHOTO')");
                 table.HasCheckConstraint("CK_PrintJobs_PagesPerSheet", "\"PagesPerSheet\" BETWEEN 1 AND 500");
-                table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER')");
+                table.HasCheckConstraint("CK_PrintJobs_Origin", "\"Origin\" IN ('CUSTOMER_QR', 'SHOP_OWNER', 'PRINTER_DIAGNOSTIC')");
                 table.HasCheckConstraint(
                     "CK_PrintJobs_PhotoOutputOptions",
                     "\"PhotoPaperFinish\" IN ('PLAIN', 'GLOSSY', 'MATTE') AND \"PhotoOutputLayout\" IN ('A4_SHEET', 'PHOTO_PAPER')");
