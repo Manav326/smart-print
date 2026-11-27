@@ -164,6 +164,13 @@ for (const file of localizedScreens) {
 
 const requiredScreenCoverage = {
   "App.tsx": [
+    "Please confirm", "Confirm", "Enter details", "Welcome, {name}", "Batch · {name}", "Batch · {count} files", "First job · {job}",
+    "Select a file to view its status. Pay once for all accepted files.",
+    "Private filenames are kept only on this device. A filename that is not available locally is shown as “Private file”; the shop does not receive or restore the original name.",
+    "Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop.",
+    "This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them.",
+    "Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.",
+    "Send batch to shop",
     "Printer deselected. Existing files and Windows output were not deleted.",
     "Printer selected for new assignments.",
     "QR station enabled.",
@@ -193,10 +200,18 @@ const requiredScreenCoverage = {
     "Loading platform settings…", "Loading discovered virtual queues…"
   ],
   "PlatformPlansSection.tsx": [
+    "Plan code", "Stable uppercase identifier", "Description", "PROTECTED SYSTEM PLAN", "PLAN DETAILS",
+    "Allow secure cloud transfer for print jobs", "Remove or replace Smart Print platform branding", "Enable expanded shop reporting capabilities",
     "Loading plans…", "Protected", "Saving creates or updates a draft. Published terms cannot be edited in place.",
     "Unpublished draft", "New draft", "Optional limits", "created {date}"
   ],
   "PlatformDataNetworkSection.tsx": [
+    "Shop Wi-Fi / LAN", "Measured payload movement", "Recorded transfer legs",
+    "Customer document payload received by the cloud API; accepted, in-progress and failed attempts are separated by status",
+    "Bytes written to the Agent download HTTP response; receiver-side delivery is not confirmed",
+    "Customer phone upload payload received by shop Agent", "Sum of recorded transfer legs; cloud upload and download count twice",
+    "{started} in progress · {partial} partial · {failed} failed", "Customer → Cloud", "Cloud → Shop Agent", "Phone → Shop Agent",
+    "GB uses decimal units (1 GB = 1,000,000,000 bytes). Payload bytes represent original document content. Cloud egress measures bytes written to the API response body, not end-to-end Agent acknowledgement. Elapsed handling time includes API/Agent processing and response writes; it is not a network-latency, bandwidth or throughput test. HTTP/multipart headers and TLS overhead are not added; provider-billed traffic must be reconciled against infrastructure or proxy metrics. Raw transfer events are kept for {days} days and then folded into durable daily aggregates. The current dashboard does not estimate paths that are not instrumented.",
     "DATA &amp; NETWORK INTELLIGENCE", "Loading measured transfer data…"
   ],
   "PlatformSubscriptionsSection.tsx": [
