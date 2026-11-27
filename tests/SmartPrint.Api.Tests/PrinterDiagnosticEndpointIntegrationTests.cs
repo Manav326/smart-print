@@ -72,6 +72,11 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
             await db.SaveChangesAsync();
         }
 
+        var contradictoryNoOutput = await fixture.InvokeConfirmationAsync(
+            seeded.AttemptId, "NOTHING_PRINTED");
+        Assert.Equal(StatusCodes.Status409Conflict, contradictoryNoOutput.StatusCode);
+        Assert.Contains("diagnostic_no_output_decision_conflicts_with_printed_evidence", contradictoryNoOutput.Body, StringComparison.Ordinal);
+
         var confirmations = await Task.WhenAll(
             fixture.InvokeConfirmationAsync(seeded.AttemptId, "PRINTED_CORRECTLY"),
             fixture.InvokeConfirmationAsync(seeded.AttemptId, "PRINTED_WITH_ISSUE"));
