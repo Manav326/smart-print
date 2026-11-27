@@ -2792,8 +2792,19 @@ function PrinterDiagnosticControls({
 
   const execution = currentAttempt?.job;
   const staged = !!execution?.localQueueReceivedUtc && execution.printDispatchAttempts > 0;
-  const inSubmission = execution?.status === "PRINT_SUBMITTING" || execution?.status === "PRINT_AUTHORISED";
-  const canConfirm = !!currentAttempt && staged && !inSubmission && !currentAttempt.confirmedUtc;
+  const spoolerStatus = execution?.spoolerStatus?.toUpperCase() ?? "";
+  const hasSpoolerReceipt = !!execution?.spoolerSubmittedUtc && !!execution.spoolerObservedUtc;
+  const blockedBeforeSubmission = execution?.status === "LOCAL_QUEUE_READY" &&
+    spoolerStatus === "BLOCKED_BEFORE_SUBMISSION" && !execution.spoolerSubmittedUtc;
+  const verifiedPrinted = spoolerStatus === "PRINTED" && hasSpoolerReceipt &&
+    (execution?.spoolerTotalPages === 0 || execution?.spoolerPagesPrinted >= execution?.spoolerTotalPages);
+  const verifiedSpoolerAbsence = execution?.status === "OUTPUT_UNCONFIRMED" &&
+    spoolerStatus === "OUTPUT_UNCONFIRMED" && hasSpoolerReceipt &&
+    execution.failureCode === "SPOOLER_JOB_NO_LONGER_VISIBLE";
+  const virtualArtifactReady = virtualTest && execution?.status === "TEST_OUTPUT_READY" &&
+    !!execution.outputCompletedUtc && spoolerStatus === "PRINTED";
+  const terminalOutput = blockedBeforeSubmission || verifiedPrinted || verifiedSpoolerAbsence || virtualArtifactReady;
+  const canConfirm = !!currentAttempt && staged && terminalOutput && !currentAttempt.confirmedUtc;
   const stateLabel = execution?.status
     ? t(execution.status.replaceAll("_", " ").toLowerCase())
     : t("Waiting for the paired Agent");
