@@ -18,6 +18,7 @@ on:
       - "apps/desktop/**"
       - "pnpm-lock.yaml"
       - "docs/MSIX_*.md"
+      - "docs/STORE_RELEASE_SETUP.md"
   workflow_dispatch:
     inputs:
       package_name:
@@ -45,7 +46,8 @@ permissions:
   contents: read
 
 concurrency:
-  group: smartprint-msix-validation-${{ github.ref }}
+  # Use the same key for push and pull_request events from the same branch.
+  group: smartprint-msix-validation-${{ github.head_ref || github.ref_name }}
   # Keep a costly Windows packaging run alive when another commit is pushed.
   cancel-in-progress: false
 
