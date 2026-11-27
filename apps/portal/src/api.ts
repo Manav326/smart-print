@@ -1759,6 +1759,17 @@ function shouldRetryCustomerPrivateRelayStatusError(exception:unknown):boolean {
     (exception.status===409&&exception.code==="private_relay_completion_missing");
 }
 
+/** Ambiguous relay writes are reconciled against the ticket before any retry. */
+function shouldReconcileCustomerPrivateRelayPostError(exception:unknown):boolean {
+  if(!(exception instanceof ApiError))return true;
+  return exception.status===0||exception.status===408||exception.status===429||exception.status>=500||
+    (exception.status===409&&[
+      "private_relay_direct_transfer_in_progress",
+      "private_relay_state_changed",
+      "private_relay_already_completed"
+    ].includes(exception.code??""));
+}
+
 async function pollCustomerPrivateRelayStages(
   sessionToken:string,
   ticket:CustomerLocalUploadTicket,
@@ -1910,28 +1921,35 @@ async function uploadCustomerPrivateRelay(
     );
   }
 
-  try {
-    const attempt = await privateUpload.createAttempt();
-    await apiRequest<{ accepted: boolean; duplicateRequest?: boolean }>(
+  let ambiguousRelayPost=false;
+  let relayPostRetryCount=0;
+  let unclaimedPendingChecks=0;
+  const postPrivateRelayAttempt=async()=>{
+    const attempt=await privateUpload.createAttempt();
+    await apiRequest<{accepted:boolean;duplicateRequest?:boolean}>(
       `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay`,
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/vnd.smartprint.qsp2",
-          "X-Print-Session": sessionToken,
-          "X-Print-Upload-Grant": grantToken,
-          "X-Print-Encrypted-Format": "QSP2",
-          "X-Print-Encrypted-Key": attempt.wrappedKey,
-          "X-Print-Encrypted-Size": String(attempt.encryptedSizeBytes)
+        method:"POST",
+        headers:{
+          "Content-Type":"application/vnd.smartprint.qsp2",
+          "X-Print-Session":sessionToken,
+          "X-Print-Upload-Grant":grantToken,
+          "X-Print-Encrypted-Format":"QSP2",
+          "X-Print-Encrypted-Key":attempt.wrappedKey,
+          "X-Print-Encrypted-Size":String(attempt.encryptedSizeBytes)
         },
-        body: attempt.body,
-        duplex: "half"
-      } as RequestInit & { duplex: "half" }
+        body:attempt.body,
+        duplex:"half"
+      } as RequestInit & {duplex:"half"}
     );
-  } catch (exception) {
-    // A definitive client rejection must be surfaced. A server/transport failure
-    // can happen after the ciphertext commit, so reconcile the same ticket first.
-    if (exception instanceof ApiError && exception.status >= 400 && exception.status < 500) throw exception;
+  };
+  try {
+    await postPrivateRelayAttempt();
+  } catch(exception) {
+    // Do not repeat a rejected payload. Ambiguous outcomes are reconciled against
+    // the canonical ticket before a single guarded retry is considered.
+    if(!shouldReconcileCustomerPrivateRelayPostError(exception))throw exception;
+    ambiguousRelayPost=true;
   }
 
   let lastStageMessage=existing.stageMessage??existing.message??"Waiting for the shop computer";
@@ -1949,6 +1967,28 @@ async function uploadCustomerPrivateRelay(
       await new Promise(resolve => window.setTimeout(resolve,
         customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
       continue;
+    }
+    if(status.state==="PENDING"){
+      if(status.transferPath){
+        ambiguousRelayPost=false;
+        unclaimedPendingChecks=0;
+      }else if(ambiguousRelayPost&&relayPostRetryCount===0){
+        unclaimedPendingChecks+=1;
+        if(unclaimedPendingChecks>=2){
+          // The server confirms on two separate reads that this ticket has no
+          // accepted relay or live LAN claim. Retry once with a fresh QSP2 key/
+          // nonce; the API's ticket row lock makes a concurrent first commit safe.
+          relayPostRetryCount+=1;
+          ambiguousRelayPost=false;
+          unclaimedPendingChecks=0;
+          try {
+            await postPrivateRelayAttempt();
+          }catch(postException){
+            if(!shouldReconcileCustomerPrivateRelayPostError(postException))throw postException;
+            ambiguousRelayPost=true;
+          }
+        }
+      }
     }
     const currentStage=status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state);
     const stageChanged=currentStage!==lastStage;
