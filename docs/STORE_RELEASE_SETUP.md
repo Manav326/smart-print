@@ -1,5 +1,8 @@
 # SmartPrint Store publishing setup
 
+> **Distribution-path note:** This document describes the existing Windows EXE/MSI distribution workflow. It does not describe the new MSIX package path. For Microsoft Store MSIX submission, use [MSIX printing parity and release gates](MSIX_PRINTING_PARITY.md) and [the restricted-capability justifications](MSIX_PACKAGED_SERVICES_JUSTIFICATION.md). Do not use the EXE/MSI `packageType` workflow to submit an MSIX; reserve/confirm the correct MSIX app identity and use the MSIX validation workflow's manual production-signed build path.
+
+
 This repository uses one versioned GitHub release to produce the website downloads and Store-ready binaries. Store submission is a separate, manually dispatched workflow with explicit confirmation and protected GitHub Environments.
 
 ## Release flow
