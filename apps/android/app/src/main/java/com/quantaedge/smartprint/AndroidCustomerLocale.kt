@@ -91,7 +91,7 @@ internal object AndroidCustomerLocale {
     }
 
     private val hindiCopy = mapOf(
-        "Language" to "भाषा", "SMARTPRINT  ·  YOUR PRINT SPACE" to "स्मार्टप्रिंट  ·  आपकी प्रिंटिंग की जगह", "Choose the language for customer-facing app screens." to "ग्राहक को दिखने वाली ऐप स्क्रीन की भाषा चुनें।",
+        "Language" to "भाषा", "SMARTPRINT  ·  YOUR PRINT SPACE" to "स्मार्टप्रिंट  ·  आपकी प्रिंटिंग की जगह", "by" to "द्वारा", "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW" to "स्मार्टप्रिंट · केवल शॉप पर प्रिंट · निजी प्रीव्यू", "Choose the language for customer-facing app screens." to "ग्राहक को दिखने वाली ऐप स्क्रीन की भाषा चुनें।",
         "My Files" to "मेरी फ़ाइलें", "Print at a shop" to "शॉप पर प्रिंट करें",
         "Home" to "होम", "Files" to "फ़ाइलें", "Print" to "प्रिंट", "Activity" to "गतिविधि",
         "Account" to "अकाउंट", "Back" to "वापस", "Back to Home" to "होम पर जाएँ",
@@ -211,7 +211,7 @@ internal object AndroidCustomerLocale {
     )
 
     private val hinglishCopy = mapOf(
-        "Language" to "Language", "SMARTPRINT  ·  YOUR PRINT SPACE" to "SMARTPRINT  ·  Aapki print space", "Choose the language for customer-facing app screens." to "Customer app screens ki language choose karein.",
+        "Language" to "Language", "SMARTPRINT  ·  YOUR PRINT SPACE" to "SMARTPRINT  ·  Aapki print space", "by" to "by", "SMARTPRINT · SHOP PRINT ONLY · PRIVATE PREVIEW" to "SMARTPRINT · SIRF SHOP PRINT · PRIVATE PREVIEW", "Choose the language for customer-facing app screens." to "Customer app screens ki language choose karein.",
         "My Files" to "Meri Files", "Print at a shop" to "Shop par print karein",
         "Home" to "Home", "Files" to "Files", "Print" to "Print", "Activity" to "Activity",
         "Account" to "Account", "Back" to "Back", "Back to Home" to "Home par jaayein",
