@@ -376,7 +376,7 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                   <div>
                     <span className="platform-plan-panel-kicker">{selectedPlan.isSystemPlan ? "PROTECTED SYSTEM PLAN" : "PLAN DETAILS"}</span>
                     <h3>{selectedPlan.name}</h3>
-                    <p>{selectedPlan.code} · {t("created {date}", {date: formatIstDate(selectedPlan.createdUtc)})}</p>
+                    <p>{selectedPlan.code} · {t("created {date}").replace("{date}", formatIstDate(selectedPlan.createdUtc))}</p>
                   </div>
                   {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> {t("Protected")}</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? t("Active") : t("Inactive")}</span>}
                 </div>
