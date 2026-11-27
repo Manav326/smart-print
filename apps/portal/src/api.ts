@@ -1821,9 +1821,6 @@ async function uploadCustomerPrivateRelay(
   // queue staging after a lost LAN response.
   if (existing.state === "PENDING" &&
       (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY")) {
-    const activeTransferLabel = existing.transferPath === "DIRECT_LAN"
-      ? "direct shop-Wi-Fi"
-      : "encrypted cloud-relay";
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
     let lastStage = existing.stage ?? "WAITING_FOR_AGENT";
     let pendingChecks = 0;
