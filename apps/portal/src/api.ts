@@ -2684,6 +2684,9 @@ export interface PrinterDiagnosticAttempt {
     pageCount: number;
     localQueueReceivedUtc: string | null;
     printDispatchAttempts: number;
+    spoolerPagesPrinted: number;
+    spoolerTotalPages: number;
+    outputCompletedUtc: string | null;
   } | null;
 }
 
