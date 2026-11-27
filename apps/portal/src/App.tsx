@@ -5948,9 +5948,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
-      if(failures.length) setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
+      if(failures.length) {
+        automaticQuoteRefreshAttemptRef.current="";
+        setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
+      }
       else if(!Object.keys(nextQuotes).length) setError(t("No files are waiting for a quote."));
     } catch(exception) {
+      automaticQuoteRefreshAttemptRef.current="";
       setError(exception instanceof ApiError?t(exception.message):t("The shop could not calculate the batch quote."));
     } finally {setBusy(false);}
   }
