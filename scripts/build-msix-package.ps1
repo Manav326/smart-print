@@ -34,6 +34,7 @@ function Set-JsonProperty([object]$Object, [string]$Name, [object]$Value) {
     else { $Object | Add-Member -NotePropertyName $Name -NotePropertyValue $Value }
 }
 
+Write-Host "Resolving MSIX input directories and validating signing identity."
 $desktopRoot = (Resolve-Path -LiteralPath $DesktopDirectory).Path
 $agentRoot = (Resolve-Path -LiteralPath $AgentDirectory).Path
 $iconFullPath = (Resolve-Path -LiteralPath $IconPath).Path
@@ -68,6 +69,7 @@ $signTool = Resolve-WindowsSdkTool "SignTool.exe"
 $out = [IO.Path]::GetFullPath($OutputPath)
 $outDir = Split-Path -Parent $out
 New-Item -ItemType Directory -Force -Path $outDir | Out-Null
+Write-Host "Staging desktop and Agent payloads."
 $stage = Join-Path $outDir "SmartPrint-MSIX-Staging"
 $verify = Join-Path $outDir "SmartPrint-MSIX-Verify"
 Remove-Item -LiteralPath $stage, $verify, $out -Recurse -Force -ErrorAction SilentlyContinue
@@ -94,9 +96,10 @@ Set-JsonProperty $settings.Agent.LocalApi "Enabled" $true
 Set-JsonProperty $settings.Agent.LocalApi "AllowedOrigins" @("http://tauri.localhost")
 $settings | ConvertTo-Json -Depth 30 | Set-Content -LiteralPath $settingsPath -Encoding utf8
 
+Write-Host "Preparing Agent configuration and package assets."
 # Reuse the checked-in Windows icon for the MSIX logos.
 Add-Type -AssemblyName System.Drawing
-$icon = [System.Drawing.Icon]::ExtractAssociatedIcon($iconFullPath)
+$icon = [System.Drawing.Icon]::new($iconFullPath)
 if (-not $icon) { throw "Could not load SmartPrint Windows icon." }
 try {
     foreach ($asset in @(
@@ -141,16 +144,21 @@ $manifest = @"
 </Package>
 "@
 
+Write-Host "Writing and validating AppxManifest.xml."
 $manifestPath = Join-Path $stage "AppxManifest.xml"
 Set-Content -LiteralPath $manifestPath -Value $manifest -Encoding utf8
 $null = [xml](Get-Content -LiteralPath $manifestPath -Raw)
 
+Write-Host "Packing MSIX with MakeAppx."
 & $makeAppx pack /d $stage /p $out /o
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $out)) { throw "MakeAppx failed to create the MSIX package." }
-& $signTool sign /fd SHA256 /f $certificateFullPath /p $SigningCertificatePassword /tr "http://timestamp.digicert.com" /td SHA256 $out
+Write-Host "Signing MSIX with the temporary publisher-matched certificate."
+& $signTool sign /fd SHA256 /f $certificateFullPath /p $SigningCertificatePassword $out
 if ($LASTEXITCODE -ne 0) { throw "SignTool failed to sign the MSIX package." }
+Write-Host "Verifying MSIX signature."
 & $signTool verify /pa /v $out
 if ($LASTEXITCODE -ne 0) { throw "MSIX package signature verification failed." }
+Write-Host "Unpacking signed MSIX and validating package contents."
 & $makeAppx unpack /p $out /d $verify /o
 if ($LASTEXITCODE -ne 0) { throw "Could not unpack signed MSIX for verification." }
 
