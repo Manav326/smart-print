@@ -1752,6 +1752,13 @@ function customerPrivateRelayPollDelay(
   return Math.round(base*(0.85+Math.random()*0.3));
 }
 
+/** Status reads are safe to retry for transient transport/server/rate-limit failures. */
+function shouldRetryCustomerPrivateRelayStatusError(exception:unknown):boolean {
+  if(!(exception instanceof ApiError))return true;
+  return exception.status===0||exception.status===408||exception.status===429||exception.status>=500||
+    (exception.status===409&&exception.code==="private_relay_completion_missing");
+}
+
 async function pollCustomerPrivateRelayStages(
   sessionToken:string,
   ticket:CustomerLocalUploadTicket,
@@ -1846,7 +1853,7 @@ async function uploadCustomerPrivateRelay(
         status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
         consecutiveErrors = 0;
       } catch (exception) {
-        if (exception instanceof ApiError && exception.status >= 400) throw exception;
+        if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
         consecutiveErrors += 1;
         continue;
       }
@@ -1924,7 +1931,7 @@ async function uploadCustomerPrivateRelay(
       status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
       consecutiveErrors=0;
     } catch (exception) {
-      if (exception instanceof ApiError && exception.status >= 400) throw exception;
+      if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
       consecutiveErrors+=1;
       await new Promise(resolve => window.setTimeout(resolve,
         customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
