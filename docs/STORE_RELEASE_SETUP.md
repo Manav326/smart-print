@@ -117,6 +117,12 @@ The existing release workflow already expects these repository variables/secrets
 
 The public download base must be the root HTTPS custom-domain origin, not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
 
+### E. Microsoft Store privacy policy
+
+SmartPrint's current public privacy-policy page is `https://smartprint.quantaedge.in/privacy-policy/`. It now covers the Windows desktop app and background Agent as well as the Android app and website; verify that this exact URL is published and accurate before saving it in Partner Center.
+
+Set the Partner Center Properties fields `isPrivacyPolicyRequired=true` and `privacyPolicyUrl=https://smartprint.quantaedge.in/privacy-policy/`. The publisher preflight performs an unauthenticated HTTPS GET and checks that the listing metadata has the service disclosure described above. If the actual production privacy practices change, update the policy before submission rather than bypassing the preflight.
+
 ### E. Android upload signing
 
 The release build already expects the existing Android upload keystore and signing values. Confirm these four GitHub repository Actions secrets exist and correspond to the same keystore used for prior Android releases:
