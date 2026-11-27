@@ -24,7 +24,7 @@ public static class PrinterDiagnosticEndpoints
             IHostEnvironment environment,
             CancellationToken ct) =>
         {
-            if (!TryGetShopActor(principal, out var tenantId, out _))
+            if (!TryGetShopActor(principal, out var tenantId, out _) || !IsShopOwner(principal))
                 return Results.Forbid();
 
             var readiness = await GetReadyPrinterAsync(db, environment, tenantId, printerId, ct);
@@ -60,7 +60,7 @@ public static class PrinterDiagnosticEndpoints
             int? take,
             CancellationToken ct) =>
         {
-            if (!TryGetShopActor(principal, out var tenantId, out _))
+            if (!TryGetShopActor(principal, out var tenantId, out _) || !IsShopOwner(principal))
                 return Results.Forbid();
 
             var printerExists = await db.PrinterDevices.AsNoTracking()
