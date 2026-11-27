@@ -568,6 +568,8 @@ public static class PrinterDiagnosticEndpoints
         var tenant = principal.FindFirstValue("tenant_id");
         var actor = principal.FindFirstValue(JwtRegisteredClaimNames.Sub) ??
             principal.FindFirstValue(ClaimTypes.NameIdentifier);
+        tenantId = Guid.Empty;
+        actorId = Guid.Empty;
         return Guid.TryParse(tenant, out tenantId) && Guid.TryParse(actor, out actorId);
     }
 
