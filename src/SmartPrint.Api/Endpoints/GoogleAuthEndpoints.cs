@@ -182,6 +182,64 @@ public static class GoogleAuthEndpoints
             }
         }).AllowAnonymous();
 
+        // Account deletion must authenticate an existing identity, not create one.
+        auth.MapPost("/google/customer-existing", async (
+            GoogleAuthRequest request,
+            GoogleIdentityService google,
+            GoogleLoginNonceStore nonces,
+            UserManager<AppUser> userManager,
+            SmartPrintDbContext db,
+            TokenIssuer tokenIssuer,
+            CancellationToken ct) =>
+        {
+            try
+            {
+                var identity = await google.VerifyAsync(request.Credential, request.Nonce);
+                if (!nonces.TryConsume("customer", request.Nonce))
+                    return AuthProblem(StatusCodes.Status401Unauthorized, "google_nonce_expired", "This Google sign-in request has expired. Please start again.");
+
+                var user = await userManager.FindByLoginAsync(GoogleIdentityService.LoginProvider, identity.Subject);
+                if (user is null)
+                {
+                    user = await userManager.FindByEmailAsync(identity.Email);
+                    if (user is null)
+                    {
+                        return AuthProblem(
+                            StatusCodes.Status401Unauthorized,
+                            "customer_google_account_not_found",
+                            "No SmartPrint customer account uses this Google account. Sign in with the email and password already linked to your customer account.");
+                    }
+
+                    var existingClaims = await userManager.GetClaimsAsync(user);
+                    if (!GoogleAuthEndpointRules.CanAuthenticateCustomer(user, existingClaims))
+                    {
+                        return AuthProblem(
+                            StatusCodes.Status409Conflict,
+                            "google_account_type_mismatch",
+                            "This Google email belongs to a different SmartPrint account type. The account was not changed.");
+                    }
+
+                    var linked = await LinkVerifiedGoogleIdentityAsync(user, identity, userManager);
+                    if (linked is not null) return linked;
+                }
+
+                var currentClaims = await userManager.GetClaimsAsync(user);
+                if (!GoogleAuthEndpointRules.CanAuthenticateCustomer(user, currentClaims))
+                {
+                    return AuthProblem(
+                        StatusCodes.Status409Conflict,
+                        "google_account_type_mismatch",
+                        "This Google identity is not linked to an existing SmartPrint customer account.");
+                }
+
+                return Results.Ok(await CreateSessionAsync(user, db, tokenIssuer, ct));
+            }
+            catch (GoogleIdentityException exception)
+            {
+                return GoogleProblem(exception);
+            }
+        }).AllowAnonymous();
+
         return auth;
     }
 
