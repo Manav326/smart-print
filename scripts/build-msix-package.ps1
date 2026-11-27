@@ -191,7 +191,7 @@ $manifest = @"
  <Resources><Resource Language="en-us" /></Resources>
  <Applications><Application Id="SmartPrint" Executable="SmartPrint.Desktop.exe" EntryPoint="Windows.FullTrustApplication">
   <uap:VisualElements DisplayName="$(& $esc $AppDisplayName)" Description="SmartPrint desktop printing and shop connectivity" BackgroundColor="transparent" Square150x150Logo="Assets\Square150x150Logo.png" Square44x44Logo="Assets\Square44x44Logo.png" />
-  <Extensions><desktop6:Extension Category="windows.service" Executable="Agent\SmartPrint.Agent.exe"><desktop6:Service Name="QRtoPrint Smart Print Agent" StartupType="auto" StartAccount="localService" /></desktop6:Extension></Extensions>
+  <Extensions><desktop6:Extension Category="windows.service" Executable="Agent\SmartPrint.Agent.exe"><desktop6:Service Name="QRtoPrintSmartPrintAgent" StartupType="auto" StartAccount="localService" /></desktop6:Extension></Extensions>
  </Application></Applications>
  <Extensions><desktop2:Extension Category="windows.firewallRules"><desktop2:FirewallRules Executable="Agent\SmartPrint.Agent.exe"><desktop2:Rule Direction="in" IPProtocol="TCP" LocalPortMin="17842" LocalPortMax="17842" Profile="all" /></desktop2:FirewallRules></desktop2:Extension></Extensions>
  <Capabilities><uap:Capability Name="privateNetworkClientServer" /><rescap:Capability Name="runFullTrust" /><rescap:Capability Name="packagedServices" /></Capabilities>
@@ -241,7 +241,7 @@ $n.AddNamespace("d6", "http://schemas.microsoft.com/appx/manifest/desktop/window
 $n.AddNamespace("d2", "http://schemas.microsoft.com/appx/manifest/desktop/windows10/2")
 $n.AddNamespace("rc", "http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities")
 $n.AddNamespace("uap", "http://schemas.microsoft.com/appx/manifest/uap/windows10")
-if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrint Smart Print Agent' and @StartAccount='localService' and @StartupType='auto']", $n)) {
+if (-not $m.SelectSingleNode("//d6:Service[@Name='QRtoPrintSmartPrintAgent' and @StartAccount='localService' and @StartupType='auto']", $n)) {
     throw "Packaged LocalService Agent declaration is missing."
 }
 if (-not $m.SelectSingleNode("//d2:FirewallRules[@Executable='Agent\SmartPrint.Agent.exe']/d2:Rule[@Direction='in' and @IPProtocol='TCP' and @LocalPortMin='17842' and @LocalPortMax='17842' and @Profile='all']", $n)) {
