@@ -555,9 +555,11 @@ public sealed class SubscriptionRazorpayService(
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var lockKey = $"shop-subscription-order:{orderId}";
+        // Use the same database row lock as webhook processing so both capture
+        // paths serialize on the persisted payment record before reading its state.
         await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock(6, hashtext({lockKey}))", cancellationToken);
+            $"SELECT \"Id\" FROM \"ShopSubscriptionPayments\" WHERE \"TenantId\" = {tenantId} AND \"RazorpayOrderId\" = {orderId} FOR UPDATE",
+            cancellationToken);
 
         var payment = await db.ShopSubscriptionPayments
             .SingleOrDefaultAsync(
@@ -641,9 +643,12 @@ public sealed class SubscriptionRazorpayService(
         }
 
         await using var transaction = await db.Database.BeginTransactionAsync(cancellationToken);
-        var orderLockKey = $"shop-subscription-order:{webhookPayment.OrderId}";
+        // Lock the persisted payment row itself. This is the authoritative cross-process
+        // serialization point shared by browser verification and webhook delivery.
+        // The row lock guarantees payment state is read after the prior transaction commits.
         await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock(6, hashtext({orderLockKey}))", cancellationToken);
+            $"SELECT \"Id\" FROM \"ShopSubscriptionPayments\" WHERE \"RazorpayOrderId\" = {webhookPayment.OrderId} FOR UPDATE",
+            cancellationToken);
         var eventLockKey = $"razorpay-webhook-event:{eventId.Trim()}";
         await db.Database.ExecuteSqlInterpolatedAsync(
             $"SELECT pg_advisory_xact_lock(7, hashtext({eventLockKey}))", cancellationToken);
