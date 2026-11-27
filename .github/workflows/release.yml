@@ -337,8 +337,25 @@ jobs:
             cat /tmp/smartprint-keytool-export.log
             exit 1
           fi
-          aab_fingerprint="$(keytool -printcert -jarfile artifacts/android/SmartPrint-Android.aab \
-            | awk -F': ' 'toupper($1) == "SHA256" { gsub(":", "", $2); print toupper($2); exit }')"
+          aab_certificate_output="$(keytool -printcert -jarfile artifacts/android/SmartPrint-Android.aab 2>&1)"
+          aab_fingerprint="$(awk '
+            {
+              line = toupper($0)
+              if (line ~ /SHA-?256[[:space:]]*:/) {
+                sub(/^.*SHA-?256[[:space:]]*:[[:space:]]*/, "", line)
+                gsub(/:/, "", line)
+                if (line ~ /^[[:xdigit:]]+$/ && length(line) == 64) {
+                  print line
+                  exit
+                }
+              }
+            }
+          ' <<< "$aab_certificate_output")"
+          if [[ ! "$aab_fingerprint" =~ ^[[:xdigit:]]{64}$ ]]; then
+            echo "::error::Could not extract a valid SHA-256 fingerprint from the signed Android AAB."
+            printf '%s\\n' "$aab_certificate_output"
+            exit 1
+          fi
           if [[ "$aab_fingerprint" != "$keystore_fingerprint" ]]; then
             echo "::error::Android AAB upload certificate does not match the configured Android keystore."
             echo "Expected: $keystore_fingerprint"
