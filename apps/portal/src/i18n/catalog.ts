@@ -2260,6 +2260,9 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Switch to dark theme": "डार्क थीम पर जाएँ",
     "Light mode": "लाइट मोड",
     "Dark mode": "डार्क मोड",
+    "Copy reference": "रेफरेंस कॉपी करें",
+    "CAPTURED": "भुगतान सफल",
+    "FAILED": "असफल",
   },  hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
     "Your print shop": "Aapki print shop",
@@ -4146,6 +4149,9 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Switch to dark theme": "Dark theme par switch karein",
     "Light mode": "Light mode",
     "Dark mode": "Dark mode",
+    "Copy reference": "Reference copy karein",
+    "CAPTURED": "Payment successful",
+    "FAILED": "Failed",
   },
 };
 
