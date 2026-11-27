@@ -14,7 +14,6 @@ import {
 import { formatIstDate, formatIstDateTime } from "./date-time";
 import { getUiLocaleLanguage, translateUiText, useLocale, type UiLocale } from "./i18n";
 import {
-  formatSubscriptionAmount,
   getAnnualSavingsMinor,
   getAnnualSavingsPercent,
   getPaidBillingIntervals,
@@ -155,8 +154,8 @@ function printSubscriptionReceipt(payment: ShopSubscriptionPaymentRecord, locale
 
   printWindow.document.open();
   printWindow.document.write(`<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SmartPrint subscription payment receipt</title>
+<html lang="${escapeHtml(getUiLocaleLanguage(locale))}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${escapeHtml(t("SmartPrint subscription payment receipt"))}</title>
 <style>
 *{box-sizing:border-box}body{margin:0;padding:36px;font:14px/1.5 Arial,sans-serif;color:#18202c;background:#fff}
 main{width:min(100%,680px);margin:0 auto;border:1px solid #d9dee7;border-radius:14px;padding:30px}
