@@ -11844,7 +11844,42 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         ticket.PrivateRelayStageUpdatedUtc = DateTimeOffset.UtcNow;
     }
 
-    string storageKey;
+    // A PostgreSQL session advisory lock serialises the encrypted stream
+    // across API replicas without holding a row transaction open during network I/O.
+    // If the API process or database connection disappears, PostgreSQL releases it.
+    var relayConnection = db.Database.GetDbConnection();
+    var closeRelayConnection = relayConnection.State != System.Data.ConnectionState.Open;
+    if (closeRelayConnection) await db.Database.OpenConnectionAsync(ct);
+    bool relayLockAcquired;
+    try
+    {
+        await using var lockCommand = relayConnection.CreateCommand();
+        lockCommand.CommandText = "SELECT pg_try_advisory_lock(hashtextextended(@ticket_id, 0))";
+        var ticketParameter = lockCommand.CreateParameter();
+        ticketParameter.ParameterName = "@ticket_id";
+        ticketParameter.Value = ticketId.ToString("N");
+        lockCommand.Parameters.Add(ticketParameter);
+        relayLockAcquired = await lockCommand.ExecuteScalarAsync(ct) is true;
+    }
+    catch
+    {
+        if (closeRelayConnection) await db.Database.CloseConnectionAsync();
+        throw;
+    }
+
+    if (!relayLockAcquired)
+    {
+        if (closeRelayConnection) await db.Database.CloseConnectionAsync();
+        return Results.Conflict(new
+        {
+            code = "private_relay_upload_in_progress",
+            message = "Another encrypted upload for this same print request is still receiving. SmartPrint will keep the original ticket and will not start a second relay."
+        });
+    }
+
+    try
+    {
+        string storageKey;
     try
     {
         if (isQsp2)
@@ -11958,6 +11993,41 @@ publicApi.MapPost("/sessions/current/local-upload-tickets/{ticketId:guid}/privat
         ticket.PrintJobId,
         ticket.JobNumber
     });
+    }
+    finally
+    {
+        try
+        {
+            await using var unlockCommand = relayConnection.CreateCommand();
+            unlockCommand.CommandText = "SELECT pg_advisory_unlock(hashtextextended(@ticket_id, 0))";
+            var unlockParameter = unlockCommand.CreateParameter();
+            unlockParameter.ParameterName = "@ticket_id";
+            unlockParameter.Value = ticketId.ToString("N");
+            unlockCommand.Parameters.Add(unlockParameter);
+            await unlockCommand.ExecuteScalarAsync(CancellationToken.None);
+        }
+        catch (Exception lockException)
+        {
+            loggerFactory.CreateLogger("PrivateRelayUpload").LogWarning(
+                lockException,
+                "Could not explicitly release private relay advisory lock for ticket {TicketId}; closing the connection will release it.",
+                ticketId);
+        }
+        finally
+        {
+            if (closeRelayConnection)
+            {
+                try { await db.Database.CloseConnectionAsync(); }
+                catch (Exception closeException)
+                {
+                    loggerFactory.CreateLogger("PrivateRelayUpload").LogWarning(
+                        closeException,
+                        "Could not close the private relay database connection for ticket {TicketId}.",
+                        ticketId);
+                }
+            }
+        }
+    }
 })
 .WithMetadata(new RequestSizeLimitAttribute(UploadLimits.MaxMultipartRequestBytes))
 .RequireRateLimiting("document-upload");
@@ -12557,7 +12627,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
     var savedQuoteExpired = job.QuoteExpiresUtc is null || job.QuoteExpiresUtc <= now;
     var canRefreshExpiredQuote = savedQuoteExpired &&
         (job.Status is "QUOTE_EXPIRED" or "AWAITING_CUSTOMER_APPROVAL" or "AWAITING_SHOP_APPROVAL" or "AWAITING_PAYMENT" or "PAYMENT_REJECTED");
-    var previousQuotedAmountMinor = job.QuotedAmountMinor;
+    var previousPricingVersion = job.PricingVersion;
     if (canRefreshExpiredQuote)
     {
         // Do not rewrite a quote while an individual or batch payment is active.
@@ -12768,9 +12838,9 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
         job.QuoteExpiresUtc = now.AddMinutes(10);
         var previousStatus = job.Status;
         var instantPaymentEnabled = paymentPreferences?.InstantPaymentEnabled == true;
-        var quotePriceChanged = canRefreshExpiredQuote && previousQuotedAmountMinor != amount;
+        var pricingCardChanged = canRefreshExpiredQuote && previousPricingVersion != pricing.Version;
         job.Status = PrintJobQuoteRules.ResolveStatusAfterQuote(
-            previousStatus, canRefreshExpiredQuote, quotePriceChanged, instantPaymentEnabled);
+            previousStatus, canRefreshExpiredQuote, pricingCardChanged, instantPaymentEnabled);
         job.UpdatedUtc = now;
         db.PrintJobEvents.Add(new PrintJobEvent
         {
@@ -12779,8 +12849,8 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             PreviousStatus = previousStatus,
             NewStatus = job.Status,
             ActorType = "Customer",
-            ReasonCode = quotePriceChanged
-                ? "EXPIRED_QUOTE_PRICE_CHANGED_REQUIRES_CUSTOMER_ACCEPTANCE"
+            ReasonCode = pricingCardChanged
+                ? "EXPIRED_QUOTE_PRICING_CARD_CHANGED_REQUIRES_CUSTOMER_ACCEPTANCE"
                 : canRefreshExpiredQuote
                     ? "EXPIRED_QUOTE_RENEWED"
                     : instantPaymentEnabled
