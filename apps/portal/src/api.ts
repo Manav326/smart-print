@@ -1,5 +1,5 @@
 import { sha256Blob } from "./streaming-file-hash";
-import { preparePrivateQsp2Upload, type PrivateQsp2UploadFactory } from "./private-qsp2-upload";
+import { preparePrivateQsp2Upload, type PrivateQsp2UploadAttempt, type PrivateQsp2UploadFactory } from "./private-qsp2-upload";
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument } from "./document-content-policy";
@@ -1902,8 +1902,7 @@ async function uploadCustomerPrivateRelay(
   let ambiguousRelayPost=false;
   let relayPostRetryCount=0;
   let unclaimedPendingChecks=0;
-  const postPrivateRelayAttempt=async()=>{
-    const attempt=await privateUpload.createAttempt();
+  const postPrivateRelayAttempt=async(attempt:PrivateQsp2UploadAttempt)=>{
     await apiRequest<{accepted:boolean;duplicateRequest?:boolean}>(
       `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay`,
       {
@@ -1921,8 +1920,9 @@ async function uploadCustomerPrivateRelay(
       } as RequestInit & {duplex:"half"}
     );
   };
+  const initialRelayAttempt=await privateUpload.createAttempt();
   try {
-    await postPrivateRelayAttempt();
+    await postPrivateRelayAttempt(initialRelayAttempt);
   } catch(exception) {
     // Do not repeat a rejected payload. Ambiguous outcomes are reconciled against
     // the canonical ticket before a single guarded retry is considered.
@@ -1962,7 +1962,8 @@ async function uploadCustomerPrivateRelay(
           ambiguousRelayPost=false;
           unclaimedPendingChecks=0;
           try {
-            await postPrivateRelayAttempt();
+            const retryAttempt=await privateUpload.createAttempt();
+            await postPrivateRelayAttempt(retryAttempt);
           }catch(postException){
             if(!shouldReconcileCustomerPrivateRelayPostError(postException))throw postException;
             ambiguousRelayPost=true;
