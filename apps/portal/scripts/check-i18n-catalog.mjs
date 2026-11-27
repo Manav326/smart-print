@@ -189,6 +189,19 @@ const requiredScreenCoverage = {
     "Your subscription expired. Renew using the plans below to restore access. Existing customer payment records and completed jobs remain available.",
     "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."
   ],
+  "PlatformOperationsSection.tsx": [
+    "Loading platform settings…", "Loading discovered virtual queues…"
+  ],
+  "PlatformPlansSection.tsx": [
+    "Loading plans…", "Protected", "Saving creates or updates a draft. Published terms cannot be edited in place.",
+    "Unpublished draft", "New draft", "Optional limits", "created {date}"
+  ],
+  "PlatformDataNetworkSection.tsx": [
+    "DATA &amp; NETWORK INTELLIGENCE", "Loading measured transfer data…"
+  ],
+  "PlatformSubscriptionsSection.tsx": [
+    "Loading subscriptions…", "Loading history…"
+  ],
   "PlatformPlansSection.tsx": [
     "Enter a three-letter currency code.",
     "Plan code must contain 2–40 letters, digits or underscores and start with a letter."
