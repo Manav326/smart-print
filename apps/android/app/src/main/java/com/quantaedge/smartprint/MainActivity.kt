@@ -5034,7 +5034,7 @@ class MainActivity : AppCompatActivity() {
                     orientation = LinearLayout.VERTICAL
                     setPadding(dp(11), 0, dp(5), 0)
                 }
-                copy.addView(text("SPONSORED · ", 8, R.color.qp_muted, true))
+                copy.addView(text(AndroidCustomerLocale.translate(this, "SPONSORED · ") + advertiser, 8, R.color.qp_muted, true, translate = false))
                 copy.addView(text(headline, 12, R.color.qp_text, true, translate = false).apply {
                     maxLines = 2
                     ellipsize = android.text.TextUtils.TruncateAt.END
