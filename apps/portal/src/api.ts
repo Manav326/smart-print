@@ -2731,7 +2731,6 @@ export function startPrinterDiagnostic(
     colourMode: string;
     isDuplex: boolean;
     idempotencyKey: string;
-    pagesJpegBase64: string[];
   }
 ) {
   return apiRequest<PrinterDiagnosticStartResult>(
