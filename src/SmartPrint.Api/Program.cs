@@ -8694,7 +8694,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     if (diagnosticTransaction is not null)
     {
         var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
-            $"SELECT * FROM \\"PrinterDiagnosticAttempts\\" WHERE \\"TenantId\\" = {device.TenantId} AND \\"PrintJobId\\" = {job.Id} FOR UPDATE")
+            $"SELECT * FROM \"PrinterDiagnosticAttempts\" WHERE \"TenantId\" = {device.TenantId} AND \"PrintJobId\" = {job.Id} FOR UPDATE")
             .ToListAsync(ct);
         var diagnosticAttempt = lockedAttempts.SingleOrDefault();
         if (diagnosticAttempt is null)
@@ -8805,7 +8805,7 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     if (diagnosticTransaction is not null)
     {
         var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
-            $"SELECT * FROM \\"PrinterDiagnosticAttempts\\" WHERE \\"TenantId\\" = {device.TenantId} AND \\"PrintJobId\\" = {job.Id} FOR UPDATE")
+            $"SELECT * FROM \"PrinterDiagnosticAttempts\" WHERE \"TenantId\" = {device.TenantId} AND \"PrintJobId\" = {job.Id} FOR UPDATE")
             .ToListAsync(ct);
         var diagnosticAttempt = lockedAttempts.SingleOrDefault();
         if (diagnosticAttempt is null)
