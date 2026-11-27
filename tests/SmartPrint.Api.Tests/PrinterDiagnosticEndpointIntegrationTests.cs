@@ -31,6 +31,15 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
         await using var fixture = await TestFixture.CreateAsync(connectionString);
         var seeded = await fixture.SeedDiagnosticAsync();
 
+        // A different tenant must not discover this attempt, and staff without
+        // owner/manager authority must not be allowed to record its outcome.
+        var crossTenant = await fixture.InvokeConfirmationAsync(
+            seeded.AttemptId, "NOTHING_PRINTED", tenantIdOverride: Guid.NewGuid());
+        Assert.Equal(StatusCodes.Status404NotFound, crossTenant.StatusCode);
+        var nonOwner = await fixture.InvokeConfirmationAsync(
+            seeded.AttemptId, "NOTHING_PRINTED", shopRole: "ShopStaff");
+        Assert.Equal(StatusCodes.Status403Forbidden, nonOwner.StatusCode);
+
         // The printer and its Agent are deliberately offline. The request must
         // return the previously committed diagnostic before checking readiness.
         var retry = await fixture.InvokeStartAsync(seeded.PrinterId, "diagnostic-retry-123");
@@ -268,16 +277,24 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
                     idempotencyKey
                 });
 
-        public Task<(int StatusCode, string Body)> InvokeConfirmationAsync(Guid attemptId, string decision) =>
+        public Task<(int StatusCode, string Body)> InvokeConfirmationAsync(
+            Guid attemptId,
+            string decision,
+            Guid? tenantIdOverride = null,
+            string shopRole = "ShopOwner") =>
             InvokeAsync(
                 confirmationEndpoint,
                 new Dictionary<string, string> { ["attemptId"] = attemptId.ToString("D") },
-                new { decision, notes = (string?)null });
+                new { decision, notes = (string?)null },
+                tenantIdOverride,
+                shopRole);
 
         private async Task<(int StatusCode, string Body)> InvokeAsync(
             RouteEndpoint endpoint,
             IReadOnlyDictionary<string, string> routeValues,
-            object body)
+            object body,
+            Guid? tenantIdOverride = null,
+            string shopRole = "ShopOwner")
         {
             await using var scope = app.Services.CreateAsyncScope();
             var context = new DefaultHttpContext();
@@ -291,9 +308,9 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
             context.Response.Body = new MemoryStream();
             context.User = new ClaimsPrincipal(new ClaimsIdentity(
             [
-                new Claim("tenant_id", currentTenantId.ToString("D")),
+                new Claim("tenant_id", (tenantIdOverride ?? currentTenantId).ToString("D")),
                 new Claim(JwtRegisteredClaimNames.Sub, currentUserId.ToString("D")),
-                new Claim("shop_role", "ShopOwner")
+                new Claim("shop_role", shopRole)
             ], "diagnostic-integration"));
 
             await (endpoint.RequestDelegate
