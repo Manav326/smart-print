@@ -111,6 +111,12 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] Current data-flow and retention explanation consistent with actual desktop, Agent, cloud and paired-device behavior.
 - [ ] Certification notes with simple tester steps and a test account if login is required.
 
+## MSIX package signing for Store submission
+
+Microsoft Store handles production signing for MSIX packages after certification. A CA-trusted code-signing certificate or the existing website EXE signing PFX is not required for this Store-only MSIX route. The manual build workflow creates a temporary self-signed certificate whose subject matches the exact Partner Center Publisher identity so the package can be signed and installed for validation. It uploads the MSIX and a public-only .cer artifact for optional local sideload testing.
+
+Upload **only the .msix** to Partner Center. Do not upload the .cer, and do not distribute the self-signed package outside the Store. Microsoft replaces the package signature when it publishes the certified app. If testing the package on a separate local PC before submission, import the accompanying .cer into that test PC's Trusted People store, install the package, and remove the test certificate after testing.
+
 ## Important submission notes
 
 Microsoft's current documentation identifies both `runFullTrust` and `packagedServices` as restricted capabilities. Partner Center requires an explanation for each restricted capability detected in the package. `packagedServices` can be declared for a LocalService service, but Store approval is a separate review decision; Microsoft explicitly cautions that this capability is not approved in most Store submissions. `runFullTrust` is also subject to restricted-capability review. Do not describe approval for either capability as guaranteed.
@@ -122,5 +128,7 @@ When the package is uploaded, provide a separate explanation for each detected r
 - App capability declarations: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/app-capability-declarations
 - Manage submission options for MSIX apps: https://learn.microsoft.com/en-us/windows/apps/publish/publish-your-app/msix/manage-submission-options
 - MSIX Store readiness checklist: https://learn.microsoft.com/en-us/windows/apps/publish/store-readiness-checklist
+- Microsoft Store signing for MSIX: https://learn.microsoft.com/en-us/windows/apps/publish/get-started
+- Code signing options for Windows apps: https://learn.microsoft.com/en-us/windows/apps/package-and-deploy/code-signing-options
 - WebView2 runtime distribution: https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution
 
