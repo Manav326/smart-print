@@ -331,7 +331,7 @@ export default function ShopSubscriptionCheckout({
         return;
       }
       if (payment.status === "FAILED" || payment.status === "CAPTURED_REVIEW_REQUIRED") {
-        setNotice(subscriptionPaymentStatusMessage(payment.status));
+        setNotice(t(subscriptionPaymentStatusMessage(payment.status)));
         return;
       }
     }
