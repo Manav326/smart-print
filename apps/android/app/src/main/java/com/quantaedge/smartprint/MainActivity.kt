@@ -1078,7 +1078,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setToolbarPage(title: String) {
         if (::toolbarPageContext.isInitialized) {
-            toolbarPageContext.text = "·  " + title.trim().uppercase(Locale.ROOT)
+            toolbarPageContext.text = "·  " + AndroidCustomerLocale.translate(this, title).trim().uppercase(Locale.ROOT)
         }
     }
 
@@ -1145,6 +1145,27 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun chooseCustomerLanguage() {
+        val locales = arrayOf(AndroidCustomerLocale.ENGLISH, AndroidCustomerLocale.HINDI, AndroidCustomerLocale.HINGLISH)
+        val labels = arrayOf("English", "हिन्दी", "Hinglish")
+        val selected = locales.indexOf(AndroidCustomerLocale.current(this)).coerceAtLeast(0)
+        AlertDialog.Builder(this)
+            .setTitle("Language / भाषा")
+            .setSingleChoiceItems(labels, selected) { dialog, which ->
+                AndroidCustomerLocale.save(this, locales[which])
+                dialog.dismiss()
+                if (profileVisible) showProfile() else when (navigation.selectedItemId) {
+                    FILES -> showFiles()
+                    SCAN_PRINT -> showScanPrint()
+                    ACTIVITY -> showActivity()
+                    else -> showHome()
+                }
+                webView?.evaluateJavascript(AndroidCustomerLocale.documentStartScript(this), null)
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun accountView(): View {
         val scroll = ScrollView(this).apply { isFillViewport = true }
         val column = LinearLayout(this).apply {
@@ -1176,7 +1197,24 @@ class MainActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(0, dp(42), 1f).apply { marginStart = dp(8) })
         appearanceContent.addView(themeChoices)
         appearanceCard.addView(appearanceContent)
-        column.addView(appearanceCard, linearParams().apply { bottomMargin = dp(16) })
+        column.addView(appearanceCard, linearParams().apply { bottomMargin = dp(10) })
+
+        val languageCard = card()
+        val languageContent = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(14), dp(12), dp(14), dp(12))
+        }
+        languageContent.addView(text("Language", 15, R.color.qp_text, true))
+        languageContent.addView(text(
+            "Choose the language for customer-facing app screens.",
+            11, R.color.qp_muted, false
+        ).apply { setPadding(0, dp(4), 0, dp(10)) })
+        languageContent.addView(button(AndroidCustomerLocale.label(this), false).apply {
+            minHeight = dp(44)
+            setOnClickListener { chooseCustomerLanguage() }
+        }, LinearLayout.LayoutParams(-1, dp(44)))
+        languageCard.addView(languageContent)
+        column.addView(languageCard, linearParams().apply { bottomMargin = dp(16) })
 
         column.addView(text(
             if (auth == null) "Guest access is ready" else "Smart Print customer",
@@ -4281,7 +4319,7 @@ class MainActivity : AppCompatActivity() {
         if (themeBootstrapPlan.injectAtDocumentStart) {
             WebViewCompat.addDocumentStartJavaScript(
                 view,
-                SmartPrintThemeWebBootstrap.script(),
+                SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this),
                 setOf(trustedOrigin, offlinePhotoStudioOrigin)
             )
             webViewThemeBootstrapInstalled = true
@@ -4684,7 +4722,7 @@ class MainActivity : AppCompatActivity() {
                     // Fallback for WebView providers without DOCUMENT_START_SCRIPT.
                     // Reconcile saved preferences without forcing a reload or erasing
                     // a newer selection made inside the embedded portal.
-                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script(), null)
+                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this), null)
                 }
             }
             override fun onReceivedError(
@@ -7741,14 +7779,14 @@ class MainActivity : AppCompatActivity() {
         useCompatPadding = false
     }
     private fun text(value: String, size: Int, color: Int, bold: Boolean) = TextView(this).apply {
-        text = value
+        text = AndroidCustomerLocale.translate(this@MainActivity, value)
         textSize = maxOf(size, 11).toFloat()
         setTextColor(getColor(color))
         if (bold) setTypeface(typeface, android.graphics.Typeface.BOLD)
         includeFontPadding = false
     }
     private fun button(value: String, primary: Boolean) = MaterialButton(this).apply {
-        text = value
+        text = AndroidCustomerLocale.translate(this@MainActivity, value)
         isAllCaps = false
         minHeight = dp(42)
         minWidth = dp(0)
@@ -7773,6 +7811,6 @@ class MainActivity : AppCompatActivity() {
         return FrameLayout.LayoutParams(width, -1, Gravity.TOP or Gravity.CENTER_HORIZONTAL)
     }
     private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
-    private fun toast(value: String) = Toast.makeText(this, value, Toast.LENGTH_LONG).show()
+    private fun toast(value: String) = Toast.makeText(this, AndroidCustomerLocale.translate(this, value), Toast.LENGTH_LONG).show()
     private fun message(e: Exception) = e.message?.takeIf { it.isNotBlank() } ?: "Unexpected error"
 }
