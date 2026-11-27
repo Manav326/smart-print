@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::io::{BufRead, BufReader, Write};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 const AGENT_STATUS_URL: &str = "http://127.0.0.1:17842/api/v1/local/status";
 const AGENT_PIPE_NAME: &str = "QRtoPrint.SmartPrint.Agent.Control";
@@ -608,9 +608,33 @@ mod msix_webview2 {
             }
         };
 
-        let status = Command::new(&installer)
-            .args(["/silent", "/install"])
-            .status();
+        let status = match Command::new(&installer).args(["/silent", "/install"]).spawn() {
+            Ok(mut child) => {
+                let started = Instant::now();
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(exit)) => break Ok(exit),
+                        Ok(None) if started.elapsed() < Duration::from_secs(600) => {
+                            std::thread::sleep(Duration::from_millis(500));
+                        }
+                        Ok(None) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "Microsoft WebView2 Runtime setup exceeded the 10-minute limit",
+                            ));
+                        }
+                        Err(error) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break Err(error);
+                        }
+                    }
+                }
+            }
+            Err(error) => Err(error),
+        };
 
         match status {
             Ok(exit) if matches!(exit.code(), Some(0) | Some(3010)) => {}
@@ -621,6 +645,14 @@ mod msix_webview2 {
                         "Microsoft WebView2 Runtime setup returned exit code {:?}. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
                         exit.code()
                     ),
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+                show_message(
+                    "Smart Print WebView2 setup timed out",
+                    "Microsoft WebView2 Runtime setup did not finish within 10 minutes. Restart Smart Print and try again. If the problem continues, install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
                     MB_ICONERROR,
                 );
                 return false;
