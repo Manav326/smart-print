@@ -163,3 +163,27 @@ test("number, currency and date formatting use the selected locale", () => {
   assert.match(formatUiCurrency(1234.5, "english", "INR"), /1,234\.50/);
   assert.equal(typeof formatUiDate("2026-11-26T12:00:00Z", "hindi", { timeZone: "Asia/Kolkata" }), "string");
 });
+
+
+test("subscription billing, Google sign-in, campaign administration and theme controls are localized", () => {
+  assert.equal(translateUiText("hindi", "Choose or renew a plan"), "प्लान चुनें या रिन्यू करें");
+  assert.equal(translateUiText("hinglish", "Choose or renew a plan"), "Plan choose karein ya renew karein");
+  assert.equal(translateUiText("hindi", "Continue with Google"), "Google से जारी रखें");
+  assert.equal(translateUiText("hinglish", "Continue with Google"), "Google ke saath continue karein");
+  assert.equal(translateUiText("hindi", "Advertising campaigns"), "विज्ञापन कैंपेन");
+  assert.equal(translateUiText("hinglish", "Advertising campaigns"), "Advertising campaigns");
+  assert.equal(translateUiText("hindi", "Switch to dark theme"), "डार्क थीम पर जाएँ");
+  assert.equal(translateUiText("hinglish", "Switch to dark theme"), "Dark theme par switch karein");
+  assert.equal(
+    translateUiText("hindi", "Payment reference: {reference}", { reference: "order_123" }),
+    "भुगतान रेफरेंस: order_123",
+  );
+  assert.equal(
+    translateUiText("hinglish", "Confirm {action} campaign “{name}”?", { action: "publish", name: "Diwali offer" }),
+    "Kya aap “Diwali offer” campaign ko publish karna chahte hain?",
+  );
+  assert.equal(
+    translateUiText("hindi", "SmartPrint subscription payment receipt"),
+    "SmartPrint सब्सक्रिप्शन भुगतान रसीद",
+  );
+});
