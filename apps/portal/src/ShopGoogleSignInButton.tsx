@@ -85,7 +85,9 @@ export default function ShopGoogleSignInButton({
   onAuthenticated: (tokens: AuthTokens) => Promise<void> | void;
 }) {
   const { locale } = useLocale();
-  const t = useCallback((source: string) => translateUiText(locale, source), [locale]);
+  const localeRef = useRef(locale);
+  useEffect(() => { localeRef.current = locale; }, [locale]);
+  const t = useCallback((source: string) => translateUiText(localeRef.current, source), []);
   const googleLocale = locale === "hindi" ? "hi" : "en";
   const target = useRef<HTMLDivElement>(null);
   const [ready, setReady] = useState(false);
@@ -134,7 +136,6 @@ export default function ShopGoogleSignInButton({
       const challenge = await getGoogleAuthChallenge("shop");
       if (!active || !target.current) return;
 
-      target.current.replaceChildren();
       window.google.accounts.id.initialize({
         client_id: config.clientId.trim(),
         callback: result => { void receiveCredential(result, challenge.nonce); },
@@ -143,16 +144,6 @@ export default function ShopGoogleSignInButton({
         context: "signin",
         nonce: challenge.nonce,
         error_callback: () => setError(t("Google sign-in was cancelled or could not be started."))
-      });
-      window.google.accounts.id.renderButton(target.current, {
-        type: "standard",
-        theme: "outline",
-        size: "large",
-        text: "continue_with",
-        shape: "pill",
-        logo_alignment: "left",
-        width: Math.min(350, Math.max(240, target.current.clientWidth || 320)),
-        locale: googleLocale
       });
       setReady(true);
       setLoading(false);
@@ -164,7 +155,25 @@ export default function ShopGoogleSignInButton({
     });
 
     return () => { active = false; };
-  }, [receiveCredential, challengeRevision, locale, t]);
+  }, [receiveCredential, challengeRevision, t]);
+
+  // Google supports a locale option on renderButton. Re-render only its button
+  // on language changes; initialize the sign-in client once per challenge.
+  useEffect(() => {
+    if (!ready || !target.current || !window.google?.accounts?.id) return;
+    const container = target.current;
+    container.replaceChildren();
+    window.google.accounts.id.renderButton(container, {
+      type: "standard",
+      theme: "outline",
+      size: "large",
+      text: "continue_with",
+      shape: "pill",
+      logo_alignment: "left",
+      width: Math.min(350, Math.max(240, container.clientWidth || 320)),
+      locale: googleLocale
+    });
+  }, [ready, googleLocale]);
 
   return (
     <div className="auth-google-signin">
