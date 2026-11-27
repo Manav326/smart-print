@@ -5155,9 +5155,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   function rememberCustomerStatus(candidate:CustomerJobStatus) {
     rememberBatchStatuses({[candidate.id]:candidate});
-    setJobStatus(current=>
-      !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
-        ?candidate:current);
+    // Background responses for a previously selected file update its batch row,
+    // but must never replace the currently selected file's status panel.
+    if(uploaded?.job.id===candidate.id){
+      setJobStatus(current=>
+        !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
+          ?candidate:current);
+    }
     if(candidate.pricingVersion&&candidate.quotedAmountMinor>0) {
       const paperSize=(["A4","A3","A5","LETTER","LEGAL"].includes(candidate.paperSize)
         ?candidate.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"];
@@ -6375,7 +6379,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const batchLockedForPayment=(batchPayment!==null&&batchPayment.status!=="REJECTED")||
     (payment!==null&&!payment.batchPayment&&["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status));
   const statusForBatchItem=(item:UploadedPrintJob)=>
-    uploaded?.job.id===item.job.id&&jobStatus?.status
+    uploaded?.job.id===item.job.id&&jobStatus?.id===item.job.id&&jobStatus.status
       ? jobStatus.status
       : batchStatuses[item.job.id]?.status??item.job.status;
   const quoteExpiredForBatchItem=(item:UploadedPrintJob)=>{
