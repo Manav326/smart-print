@@ -61,6 +61,20 @@ The WebView2 runtime is preinstalled on Windows 11 and many eligible Windows 10 
 
 Do not assume that the presence of Microsoft Edge browser alone proves the WebView2 Runtime is available.
 
+### Windows App Certification Kit (WACK)
+
+WACK must be run on the final production-identity MSIX in an elevated, active Windows desktop session. Microsoft documents that WACK cannot run from Session 0, so it is deliberately not represented as a GitHub-hosted CI pass.
+
+After downloading the manual workflow artifact, import the accompanying public certificate for local sideload testing and run the following from an elevated interactive PowerShell window:
+
+```powershell
+.\scripts\validate-msix-wack.ps1 `
+  -PackagePath "C:\\path\\to\\SmartPrint-Windows-Store.msix" `
+  -CertificatePath "C:\\path\\to\\SmartPrint-MSIX-DevCert.cer"
+```
+
+The script invokes `appcert.exe`, validates the complete XML report and package identity/version, and fails unless the overall result is `PASS`. Keep the XML/HTML reports with the release evidence. Install the Windows App Certification Kit component from the Windows SDK if `appcert.exe` is not present.
+
 This CI validation does not prove physical printer output: a hosted runner does not provide the customer's actual printer, USB/network topology, spooler driver or phone. Before release, test the exact production-signed MSIX on clean Windows machines with representative USB and network printers, a phone on the selected shop LAN, actual PDF/photo jobs, cancellation, queue recovery, sleep/resume, upgrade and uninstall. Confirm the Windows firewall permits a phone on the selected shop LAN to reach TCP 17842 while the Agent still rejects clients outside the selected network.
 
 ## Microsoft Store approval is a separate gate
