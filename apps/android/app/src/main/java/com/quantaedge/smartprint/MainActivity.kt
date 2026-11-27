@@ -322,6 +322,8 @@ class MainActivity : AppCompatActivity() {
         shopAccentColor = savedShop.getString("shopAccentColor", null)
         portalUrl?.let { url ->
             val view = ensureWebView()
+        // Capture the Activity context before entering WebViewClient callbacks.
+        val customerLocaleContext = applicationContext
             val webState = savedInstanceState?.getBundle("webViewState")
             val restored = webState?.let { view.restoreState(it) != null } ?: false
             if (!restored) view.loadUrl(url)
@@ -4744,7 +4746,7 @@ class MainActivity : AppCompatActivity() {
                     // Fallback for WebView providers without DOCUMENT_START_SCRIPT.
                     // Reconcile saved preferences without forcing a reload or erasing
                     // a newer selection made inside the embedded portal.
-                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this@MainActivity.applicationContext), null)
+                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(customerLocaleContext), null)
                 }
             }
             override fun onReceivedError(
