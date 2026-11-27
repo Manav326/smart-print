@@ -270,9 +270,8 @@ jobs:
           $failureActionsExit = $LASTEXITCODE
           $failureFlag = (& sc.exe qfailureflag "QRtoPrintSmartPrintAgent" 2>&1 | Out-String)
           $failureFlagExit = $LASTEXITCODE
-          $recoveryReady = ($failureActionsExit -eq 0 -and $failureActions -match "RESTART" -and $failureFlagExit -eq 0 -and $failureFlag -match "1")
-          "recovery_ready=$($recoveryReady.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
-          if (-not $recoveryReady) { Write-Warning "Packaged Agent does not yet demonstrate the EXE's SCM crash-recovery configuration. Release remains blocked." }
+          $configRecoveryReady = ($failureActionsExit -eq 0 -and $failureActions -match "RESTART" -and $failureFlagExit -eq 0 -and $failureFlag -match "1")
+          if (-not $configRecoveryReady) { Write-Warning "Packaged Agent does not expose the EXE's SCM crash-recovery configuration." }
 
           $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(".", "QRtoPrint.SmartPrint.Agent.Control", [System.IO.Pipes.PipeDirection]::InOut)
           try {
@@ -305,6 +304,35 @@ jobs:
           $localServiceAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "LOCAL SERVICE" -and $_.FileSystemRights.ToString() -match "FullControl" })
           $systemAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "SYSTEM" -and $_.FileSystemRights.ToString() -match "FullControl" })
           if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0) { throw "The protected queue ACL does not grant FullControl only to its required service/system principals." }
+
+          # Exercise a real unexpected process exit, not just the SCM configuration text.
+          $crashedProcessId = [int]$service.ProcessId
+          if ($crashedProcessId -le 0) { throw "The packaged Agent has no service process ID for crash-recovery validation." }
+          Write-Host "Terminating the idle validation Agent process $crashedProcessId to test SCM recovery."
+          Stop-Process -Id $crashedProcessId -Force -ErrorAction Stop
+          $restartDeadline = (Get-Date).AddSeconds(30)
+          $crashRestarted = $false
+          do {
+            Start-Sleep -Seconds 2
+            $restartedService = Get-CimInstance -ClassName Win32_Service -Filter "Name='QRtoPrintSmartPrintAgent'" -ErrorAction SilentlyContinue
+            if ($restartedService -and $restartedService.State -eq "Running" -and [int]$restartedService.ProcessId -gt 0 -and [int]$restartedService.ProcessId -ne $crashedProcessId) {
+              $crashRestarted = $true
+              break
+            }
+          } while ((Get-Date) -lt $restartDeadline)
+          if (-not $crashRestarted) {
+            Write-Warning "SCM did not automatically restart the packaged Agent after an unexpected process exit."
+            $currentService = Get-Service -Name "QRtoPrintSmartPrintAgent" -ErrorAction SilentlyContinue
+            if ($currentService -and $currentService.Status -ne "Running") {
+              Start-Service -Name "QRtoPrintSmartPrintAgent"
+              (Get-Service -Name "QRtoPrintSmartPrintAgent").WaitForStatus("Running", [TimeSpan]::FromSeconds(30))
+            }
+          } else {
+            Write-Host "Verified SCM automatically restarted the packaged Agent after an unexpected process exit."
+          }
+          $recoveryReady = ($configRecoveryReady -and $crashRestarted)
+          "recovery_ready=$($recoveryReady.ToString().ToLowerInvariant())" >> $env:GITHUB_OUTPUT
+          if (-not $recoveryReady) { Write-Warning "Packaged Agent crash-recovery parity is not proven. Release remains blocked." }
 
           $package = Get-AppxPackage -Name $env:MSIX_PACKAGE_NAME
           $agentPath = Join-Path $package.InstallLocation "Agent\SmartPrint.Agent.exe"
@@ -408,7 +436,21 @@ jobs:
             if ($LASTEXITCODE -ne 0 -or $failureFlag -notmatch "1") {
               throw "The existing EXE installer did not enable SCM failure actions for the Agent."
             }
-            Write-Host "Verified EXE installer service identity, LocalService startup and SCM crash recovery."
+            $crashedProcessId = [int]$service.ProcessId
+            if ($crashedProcessId -le 0) { throw "The EXE-installed Agent has no process ID for crash-recovery validation." }
+            Stop-Process -Id $crashedProcessId -Force -ErrorAction Stop
+            $restartDeadline = (Get-Date).AddSeconds(30)
+            $crashRestarted = $false
+            do {
+              Start-Sleep -Seconds 2
+              $restartedService = Get-CimInstance -ClassName Win32_Service -Filter "Name='$serviceName'" -ErrorAction SilentlyContinue
+              if ($restartedService -and $restartedService.State -eq "Running" -and [int]$restartedService.ProcessId -gt 0 -and [int]$restartedService.ProcessId -ne $crashedProcessId) {
+                $crashRestarted = $true
+                break
+              }
+            } while ((Get-Date) -lt $restartDeadline)
+            if (-not $crashRestarted) { throw "The EXE-installed Agent did not restart automatically after an unexpected process exit." }
+            Write-Host "Verified EXE installer service identity, LocalService startup, configured SCM recovery and actual process restart."
           }
           finally {
             if ($installed) { & ./scripts/uninstall-agent-service.ps1 }
