@@ -1806,8 +1806,21 @@ async function uploadCustomerPrivateRelay(
   onProgress?: CustomerUploadProgressCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
-  // Check the canonical ticket before attempting a second transport.
-  const existing = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+  // Check the canonical ticket before attempting a second transport. Retry only
+  // transient status-read failures; never retry a rejected ticket or grant.
+  let existing:CustomerPrivateRelayStatus;
+  let initialStatusErrors=0;
+  while(true){
+    try {
+      existing=await getCustomerPrivateRelayStatus(sessionToken,ticket,grantToken);
+      break;
+    } catch(exception) {
+      if(!shouldRetryCustomerPrivateRelayStatusError(exception))throw exception;
+      initialStatusErrors+=1;
+      await new Promise(resolve=>window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(0,initialStatusErrors,false)));
+    }
+  }
   onStage?.(
     existing.stage ?? (existing.state === "PENDING" ? "WAITING_FOR_AGENT" : existing.state),
     existing.stageMessage ?? existing.message ?? "Checking the secure shop handoff",
