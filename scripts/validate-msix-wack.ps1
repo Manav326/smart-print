@@ -67,6 +67,9 @@ $root = $xml.DocumentElement
 if ($null -eq $root -or $root.LocalName -ne "REPORT" -or -not $root.HasAttribute("OVERALL_RESULT")) {
     throw "WACK report is incomplete or does not contain the expected REPORT/OVERALL_RESULT fields: $report"
 }
+if (-not $root.HasAttribute("VALIDATION_TYPE") -or $root.GetAttribute("PARTIAL_RUN") -eq "TRUE") {
+    throw "WACK produced an interim or partial report. Wait for the complete validation run and rerun if needed."
+}
 
 $result = $root.GetAttribute("OVERALL_RESULT")
 $appName = $root.GetAttribute("APP_NAME")
