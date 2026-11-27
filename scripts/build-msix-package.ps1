@@ -44,6 +44,7 @@ if ($apiUri.Scheme -ne "https" -or $apiUri.AbsolutePath -notin @("", "/") -or $a
     throw "PublicApiOrigin must be a canonical HTTPS origin."
 }
 if (-not (Test-Path -LiteralPath (Join-Path $desktopRoot "SmartPrint.Desktop.exe"))) { throw "Native desktop executable is missing." }
+if (-not (Test-Path -LiteralPath (Join-Path $desktopRoot "MicrosoftEdgeWebView2RuntimeInstallerX64.exe"))) { throw "Microsoft-signed Evergreen WebView2 standalone runtime installer is missing." }
 if (-not (Test-Path -LiteralPath (Join-Path $agentRoot "SmartPrint.Agent.exe"))) { throw "Self-contained Agent executable is missing." }
 
 $cert = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new(
