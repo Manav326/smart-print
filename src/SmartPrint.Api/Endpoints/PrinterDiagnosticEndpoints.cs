@@ -481,6 +481,46 @@ public static class PrinterDiagnosticEndpoints
                 });
             }
 
+            var blockedBeforeSubmission = job.Status == "LOCAL_QUEUE_READY" &&
+                string.Equals(job.SpoolerStatus, "BLOCKED_BEFORE_SUBMISSION", StringComparison.OrdinalIgnoreCase) &&
+                job.SpoolerSubmittedUtc is null;
+            var verifiedSpoolerAbsence = job.Status == "OUTPUT_UNCONFIRMED" &&
+                string.Equals(job.SpoolerStatus, "OUTPUT_UNCONFIRMED", StringComparison.OrdinalIgnoreCase) &&
+                job.SpoolerSubmittedUtc is not null && job.SpoolerObservedUtc is not null &&
+                string.Equals(job.FailureCode, "SPOOLER_JOB_NO_LONGER_VISIBLE", StringComparison.OrdinalIgnoreCase);
+
+            if (decision == "NOTHING_PRINTED" && !virtualOutput &&
+                !blockedBeforeSubmission && !verifiedSpoolerAbsence)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "diagnostic_no_output_decision_conflicts_with_printed_evidence",
+                    message = "Windows has reported a completed physical print. Record whether the sheet printed correctly or with an issue."
+                });
+            }
+
+            if (decision == "NOTHING_PRINTED" && !virtualOutput && blockedBeforeSubmission == false &&
+                !verifiedSpoolerAbsence)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_no_output_not_verified", message = "There is no verified no-output observation for this physical test." });
+            }
+
+            if (decision == "NO_OUTPUT_RECEIVED" &&
+                (!virtualOutput || !verifiedSpoolerAbsence))
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_virtual_no_output_not_verified", message = "There is no verified missing-output observation for this virtual test." });
+            }
+
+            if (decision is "PRINTED_CORRECTLY" or "PRINTED_WITH_ISSUE" &&
+                !virtualOutput && blockedBeforeSubmission)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new { code = "diagnostic_print_decision_conflicts_with_block", message = "Windows confirmed that this test was blocked before printing. Record that nothing printed." });
+            }
+
             if (decision is "PRINTED_CORRECTLY" && !virtualOutput &&
                 !string.Equals(job.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
             {
