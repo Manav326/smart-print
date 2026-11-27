@@ -4722,7 +4722,7 @@ class MainActivity : AppCompatActivity() {
                     // Fallback for WebView providers without DOCUMENT_START_SCRIPT.
                     // Reconcile saved preferences without forcing a reload or erasing
                     // a newer selection made inside the embedded portal.
-                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this), null)
+                    view.evaluateJavascript(SmartPrintThemeWebBootstrap.script() + AndroidCustomerLocale.documentStartScript(this@MainActivity), null)
                 }
             }
             override fun onReceivedError(
