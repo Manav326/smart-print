@@ -2569,6 +2569,7 @@ function PrintersPage({
                       printer={printer}
                       token={token}
                       disabled={!isSelected || !canSelect || !agentOnline}
+                      onOpenAgent={onOpenAgent}
                     />
                   )}
                   {possibleDuplicates.length > 0 && (
@@ -2661,11 +2662,12 @@ function PrintersPage({
 
 
 function PrinterDiagnosticControls({
-  printer, token, disabled
+  printer, token, disabled, onOpenAgent
 }: {
   printer: PrinterDevice;
   token: string;
   disabled: boolean;
+  onOpenAgent: () => void;
 }) {
   const { locale } = useLocale();
   const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
@@ -2685,6 +2687,8 @@ function PrinterDiagnosticControls({
     idempotencyKey: string;
   } | null>(null);
   const pendingAttempt = history.find(item => !item.confirmedUtc) ?? null;
+  const pendingNeedsAttention = !!pendingAttempt &&
+    Date.now() - new Date(pendingAttempt.createdUtc).getTime() > 10 * 60 * 1000;
   const currentAttempt = pendingAttempt ?? history[0] ?? null;
   const virtualTest = printer.outputMode === "UNSUPPORTED_VIRTUAL";
 
@@ -2933,9 +2937,14 @@ function PrinterDiagnosticControls({
       )}
 
       {pendingAttempt && !canConfirm && (
-        <p className="field-hint">{staged
-          ? t("Waiting for Windows to finish this test. Keep the printer and paired computer on.")
-          : t("Test queued. Keep the paired Windows computer and Print Agent online; SmartPrint will check automatically.")}</p>
+        <div className={pendingNeedsAttention ? "printer-diagnostic-pending is-stale" : "printer-diagnostic-pending"}>
+          <p className="field-hint">{pendingNeedsAttention
+            ? t("This test is taking longer than expected. Reconnect the Windows computer so SmartPrint can safely reconcile it before another test.")
+            : staged
+              ? t("Waiting for Windows to finish this test. Keep the printer and paired computer on.")
+              : t("Test queued. Keep the paired Windows computer and Print Agent online; SmartPrint will check automatically.")}</p>
+          {pendingNeedsAttention && <button type="button" className="text-action" onClick={onOpenAgent}>{t("Open Print Agent")}</button>}
+        </div>
       )}
       {message && <p className="inline-success" role="status">{message}</p>}
       {error && <p className="inline-error" role="alert">{error}</p>}
