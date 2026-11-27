@@ -12,7 +12,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its Agent serv
 
 | Area | Required behavior |
 |---|---|
-| Agent lifecycle | Windows registers `QRtoPrint Smart Print Agent` as an automatic packaged service under LocalService, matching the Agent binary's configured service name; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
+| Agent lifecycle | Windows registers `QRtoPrintSmartPrintAgent` (display name `QRtoPrint Smart Print Agent`) as an automatic packaged service under LocalService, matching the Agent binary's configured service name; it starts after install and is running after upgrade. SCM crash-recovery parity is a separate unresolved release blocker. |
 | Desktop IPC | Existing named-pipe status, enrollment and network-selection operations remain available to the desktop UI. |
 | Local API / phone-to-printer | Agent continues listening on TCP 17842; existing status, local upload, preview, photo-revision and phone-check endpoints remain in the same Agent binary. The packaged CORS allow-list contains the exact customer portal origin supplied by `SMARTPRINT_PUBLIC_BASE_URL` plus `http://tauri.localhost`; it does not use a wildcard or the development `localhost:3000` origin. The package builder verifies these settings after unpacking the signed MSIX. |
 | LAN | Package declares private-network access and an inbound all-profile firewall exception for the Agent on TCP 17842. Agent-side selected-interface/subnet validation remains authoritative and must be tested on Private, Public and Domain profiles. |
@@ -28,7 +28,7 @@ The existing website installer (SmartPrint-Windows-Setup.exe) and its Agent serv
 Tauri v2's supported Windows bundle targets are NSIS and MSI, not MSIX. The MSIX is therefore assembled separately from the same SmartPrint.Desktop.exe and the same Agent publish output. The Tauri bundle configuration and existing Inno Setup website installer are not modified.
 
 The package manifest declares:
-- `windows.service` for `QRtoPrint Smart Print Agent`, running as `localService` (matching `WindowsServiceLifetimeOptions.ServiceName` in the Agent binary);
+- `windows.service` for `QRtoPrintSmartPrintAgent`, running as `localService` (matching `WindowsServiceLifetimeOptions.ServiceName` in the Agent binary);
 - `packagedServices` as a restricted capability required by the service extension;
 - `runFullTrust` as a restricted capability required by the full-trust Win32/Tauri desktop application;
 - `privateNetworkClientServer` for the selected shop LAN;
