@@ -200,3 +200,12 @@ test("advertising lookup labels and asset guidance are localized", () => {
     "600 × 500 px (300 × 250 card ke liye 2× asset)",
   );
 });
+
+test("shop-owner account menu labels are localized", () => {
+  assert.equal(translateUiText("hindi", "Shop owner"), "शॉप मालिक");
+  assert.equal(translateUiText("hinglish", "Shop owner"), "Shop ke malik");
+  assert.equal(translateUiText("hindi", "Your shop"), "आपकी शॉप");
+  assert.equal(translateUiText("hinglish", "Your shop"), "Aapki shop");
+  assert.equal(translateUiText("hindi", "Trial & subscription"), "ट्रायल और सब्सक्रिप्शन");
+  assert.equal(translateUiText("hinglish", "Trial & subscription"), "Trial aur subscription");
+});
