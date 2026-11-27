@@ -118,8 +118,10 @@ internal object AndroidCustomerLocale {
         "View mode" to "देखने का मोड", "← Up one folder" to "← एक फ़ोल्डर ऊपर",
         "12+ chars · Upper · Lower · Number · Symbol" to "12+ अक्षर · बड़ा · छोटा · नंबर · सिंबल",
         "Connecting securely to Google…" to "Google से सुरक्षित रूप से जुड़ रहे हैं…",
-        "Checking for new orders…" to "नए ऑर्डर जाँचे जा रहे हैं…", "Checking this network…" to "इस नेटवर्क की जाँच हो रही है…"
-
+        "Checking for new orders…" to "नए ऑर्डर जाँचे जा रहे हैं…", "Checking this network…" to "इस नेटवर्क की जाँच हो रही है…",
+        "OR" to "या", "Clear" to "साफ़ करें", "ZIP" to "ZIP",
+        "Swipe-free · Use arrows to reorder." to "स्वाइप किए बिना · क्रम बदलने के लिए ऐरो इस्तेमाल करें।",
+        "Preparing document…" to "दस्तावेज़ तैयार हो रहा है…", "FRONT + BACK" to "आगे + पीछे"
     )
 
     private val hinglishCopy = mapOf(
@@ -183,7 +185,9 @@ internal object AndroidCustomerLocale {
         "View mode" to "View mode", "← Up one folder" to "← Ek folder upar",
         "12+ chars · Upper · Lower · Number · Symbol" to "12+ chars · Upper · Lower · Number · Symbol",
         "Connecting securely to Google…" to "Google se securely connect ho raha hai…",
-        "Checking for new orders…" to "New orders check ho rahe hain…", "Checking this network…" to "Network check ho raha hai…"
-
+        "Checking for new orders…" to "New orders check ho rahe hain…", "Checking this network…" to "Network check ho raha hai…",
+        "OR" to "YA", "Clear" to "Clear", "ZIP" to "ZIP",
+        "Swipe-free · Use arrows to reorder." to "Swipe ki zaroorat nahi · Order badalne ke liye arrows use karein.",
+        "Preparing document…" to "Document prepare ho raha hai…", "FRONT + BACK" to "FRONT + BACK"
     )
 }
