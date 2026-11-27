@@ -10,6 +10,41 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AgentLocalQueueStoreTests
 {
     [Fact]
+    public async Task DiagnosticOriginIsPersistedAndConfirmedBlockedOutputCanBeCleaned()
+    {
+        var root = CreateTemporaryDirectory();
+        try
+        {
+            var store = new AgentLocalQueueStore(root);
+            await store.InitializeAsync(CancellationToken.None);
+            var bytes = "One-copy printer diagnostic document"u8.ToArray();
+            var diagnostic = CreateJob(bytes) with { Origin = "PRINTER_DIAGNOSTIC" };
+
+            var staged = await store.EnqueueAsync(diagnostic, bytes, CancellationToken.None);
+            Assert.Equal("PRINTER_DIAGNOSTIC", staged.Origin);
+            await store.MarkAcknowledgedAsync(diagnostic.Id, CancellationToken.None);
+            await store.MarkSubmissionStartedAsync(diagnostic.Id, "SmartPrint-DIAG-1", CancellationToken.None);
+            await store.MarkReadyAfterBlockedAsync(diagnostic.Id, "DRIVER_PREPARATION_FAILED", CancellationToken.None);
+
+            Assert.Equal(new[] { diagnostic.Id }, store.GetPendingDiagnosticReconciliationJobIds());
+            Assert.Equal("BLOCKED_BEFORE_SUBMISSION", store.Find(diagnostic.Id)!.SpoolerStatus);
+
+            await store.MarkOutputConfirmedAsync(diagnostic.Id, CancellationToken.None);
+            var confirmed = store.Find(diagnostic.Id)!;
+            Assert.Equal("OUTPUT_CONFIRMED", confirmed.State);
+            Assert.Equal("SHOP_CONFIRMED_OUTPUT", confirmed.SpoolerStatus);
+            Assert.NotNull(confirmed.CompletedUtc);
+            Assert.Empty(store.GetPendingDiagnosticReconciliationJobIds());
+            Assert.True(File.Exists(confirmed.DocumentPath));
+            Assert.True(bytes.AsSpan().SequenceEqual(store.ReadDocument(diagnostic.Id)));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task PersistsTheDocumentEncryptedAndAcknowledgesIdempotently()
     {
         var root = CreateTemporaryDirectory();
