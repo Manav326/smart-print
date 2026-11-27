@@ -5861,7 +5861,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             : "This batch already contains a Private Printing file. Keep Private Printing selected for every additional file."
         : exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
+          ? exception.message
           : "Your original print request is saved. Tap Retry to check its status. The file may need to be sent again from the beginning; SmartPrint will not create a duplicate print job."
         : batchCheckoutLocked
           ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
