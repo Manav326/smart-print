@@ -626,7 +626,22 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
 
   if (route.auth === "shop") {
     const openAccountMenu = async () => {
-      await page.locator(".account-menu-trigger").click();
+      const trigger = page.locator(".topbar .account-menu-trigger");
+      try {
+        await trigger.waitFor({ state: "visible", timeout: 8000 });
+      } catch (error) {
+        const diagnostic = {
+          url: page.url(),
+          shellCount: await page.locator(".app-shell").count(),
+          topbarCount: await page.locator(".topbar").count(),
+          topbarText: await page.locator(".topbar").innerText().catch(() => "topbar unavailable"),
+          accountTriggerCount: await page.locator(".account-menu-trigger").count(),
+          bodyText: (await page.locator("body").innerText().catch(() => "")).slice(0, 2500)
+        };
+        await page.screenshot({ path: join(artifactDirectory, `account-menu-missing-${route.label}-${themeLabel}-${viewport.width}.png`), fullPage: true, animations: "disabled" }).catch(() => {});
+        throw new Error(`Shop account menu trigger did not render after workspace navigation: ${JSON.stringify(diagnostic)}. Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
+      await trigger.click();
       await page.locator("#shop-account-menu").waitFor({ state: "visible" });
     };
 
