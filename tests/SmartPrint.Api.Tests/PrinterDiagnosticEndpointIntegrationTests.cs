@@ -152,12 +152,24 @@ public sealed class PrinterDiagnosticEndpointIntegrationTests
                 .SelectMany(source => source.Endpoints)
                 .OfType<RouteEndpoint>()
                 .ToArray();
-            var startEndpoint = endpoints.Single(endpoint =>
-                endpoint.RoutePattern.RawText?.EndsWith(
-                    "/printers/{printerId:guid}/diagnostics", StringComparison.Ordinal) == true);
-            var confirmationEndpoint = endpoints.Single(endpoint =>
-                endpoint.RoutePattern.RawText?.EndsWith(
-                    "/printer-diagnostics/{attemptId:guid}/confirm", StringComparison.Ordinal) == true);
+            static RouteEndpoint GetPostEndpoint(
+                IEnumerable<RouteEndpoint> candidates,
+                string routeSuffix)
+            {
+                var matches = candidates.Where(endpoint =>
+                    endpoint.RoutePattern.RawText?.EndsWith(routeSuffix, StringComparison.Ordinal) == true &&
+                    endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods.Contains(
+                        "POST", StringComparer.OrdinalIgnoreCase) == true).ToArray();
+                return matches.Length == 1
+                    ? matches[0]
+                    : throw new InvalidOperationException(
+                        $"Expected one POST endpoint ending in '{routeSuffix}', found {matches.Length}.");
+            }
+
+            var startEndpoint = GetPostEndpoint(
+                endpoints, "/printers/{printerId:guid}/diagnostics");
+            var confirmationEndpoint = GetPostEndpoint(
+                endpoints, "/printer-diagnostics/{attemptId:guid}/confirm");
 
             return new TestFixture(
                 rootConnectionString, schemaName, dbOptions, app,
