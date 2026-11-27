@@ -1916,9 +1916,9 @@ async function uploadCustomerPrivateRelay(
       } as RequestInit & { duplex: "half" }
     );
   } catch (exception) {
-    // A lost HTTP response does not prove that the ciphertext was not stored.
-    // Poll the same ticket/grant before deciding that the transfer failed.
-    if (exception instanceof ApiError && exception.status >= 400) throw exception;
+    // A definitive client rejection must be surfaced. A server/transport failure
+    // can happen after the ciphertext commit, so reconcile the same ticket first.
+    if (exception instanceof ApiError && exception.status >= 400 && exception.status < 500) throw exception;
   }
 
   let lastStageMessage=existing.stageMessage??existing.message??"Waiting for the shop computer";
