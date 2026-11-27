@@ -19,6 +19,11 @@ public static class DocumentRetentionRules
         if (string.Equals(jobStatus, "TEST_OUTPUT_READY", StringComparison.OrdinalIgnoreCase))
             return outputCompletedUtc is not null && outputCompletedUtc <= completedCutoffUtc;
 
+        var diagnosticTerminal = jobStatus is "DIAGNOSTIC_VERIFIED" or "DIAGNOSTIC_RECEIVED" or
+            "DIAGNOSTIC_ISSUE" or "DIAGNOSTIC_NO_OUTPUT";
+        if (diagnosticTerminal)
+            return outputCompletedUtc is not null && outputCompletedUtc <= completedCutoffUtc;
+
         if (string.Equals(jobStatus, "COMPLETED", StringComparison.OrdinalIgnoreCase))
         {
             var completionUtc = outputConfirmedUtc ?? outputCompletedUtc;
