@@ -202,9 +202,11 @@ async function preparePage(context, route) {
         ? profile
         : path.endsWith("/print-jobs")
           ? sampleJobs
-          : path.endsWith("/payments")
-            ? samplePayments
-            : path.endsWith("/printers")
+          : path.startsWith("/api/v1/shop/subscription/payments")
+            ? { items: [], skip: 0, take: 20, totalCount: 0 }
+            : path.endsWith("/payments")
+              ? samplePayments
+              : path.endsWith("/printers")
               ? samplePrinters
               : path.endsWith("/agent-devices")
                 ? sampleAgents
