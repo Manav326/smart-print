@@ -5117,6 +5117,9 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 .printer-diagnostic-details li span{overflow-wrap:anywhere}
 .printer-diagnostic-details li strong{color:var(--text);font-size:9px}
 .printer-diagnostic-details li small{grid-column:1/-1;overflow-wrap:anywhere}
+.printer-diagnostic-pending{display:grid;gap:4px}
+.printer-diagnostic-pending.is-stale{padding:9px;border:1px solid var(--amber);border-radius:8px;background:var(--surface)}
+.printer-diagnostic-pending .field-hint{margin:0}
 .printer-diagnostic-panel .inline-success,.printer-diagnostic-panel .inline-error{font-size:10px;margin:0}
 @media(max-width:650px){
   .printer-diagnostic-heading{align-items:flex-start;flex-direction:column}
