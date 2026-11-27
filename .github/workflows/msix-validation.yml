@@ -234,10 +234,18 @@ jobs:
         run: |
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           $securePassword = ConvertTo-SecureString -String $env:PFX_PASSWORD -Force -AsPlainText
-          Write-Host "Importing the ephemeral publisher-matched certificate into the build-user trust stores."
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\Root" -Password $securePassword -ErrorAction Stop | Out-Null
-          Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -Password $securePassword -ErrorAction Stop | Out-Null
-          Write-Host "Certificate trust setup completed. Starting bounded MSIX staging, compression, signing and verification."
+          Write-Host "Importing only the public publisher certificate into the build-user trust stores."
+          $publicCertificatePath = "artifacts/SmartPrint-MSIX-DevCert.cer"
+          if (-not (Test-Path -LiteralPath $publicCertificatePath -PathType Leaf)) {
+            throw "The exported public MSIX signing certificate is missing."
+          }
+          $publicCertificate = [System.Security.Cryptography.X509Certificates.X509Certificate2]::new($publicCertificatePath)
+          if ($publicCertificate.Subject -ine $env:CERT_SUBJECT) {
+            throw "Public certificate subject '$($publicCertificate.Subject)' does not match the requested MSIX Publisher '$env:CERT_SUBJECT'."
+          }
+          Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\Root" -ErrorAction Stop | Out-Null
+          Import-Certificate -FilePath $publicCertificatePath -CertStoreLocation "Cert:\CurrentUser\TrustedPeople" -ErrorAction Stop | Out-Null
+          Write-Host "Public certificate trust setup completed. The private-key PFX remains isolated for SignTool only."
           $arguments = @{
             DesktopDirectory = "artifacts/desktop"
             AgentDirectory = "artifacts/agent"
