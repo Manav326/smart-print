@@ -106,6 +106,7 @@ Describe the final tested package-uninstall behavior. In particular, verify serv
 - [ ] Queue persistence and machine-identity continuity tests across upgrade.
 - [ ] Uninstall behavior and customer-data retention/deletion verification.
 - [ ] Firewall behavior on Private, Public and Domain network profiles; confirm only the intended shop LAN clients can reach the Agent.
+- [ ] Complete Windows App Certification Kit report for the exact production-identity MSIX, with overall result PASS; retain XML/HTML report.
 - [ ] Physical print tests with USB and network printers, PDF and photo jobs, cancellation, printer offline/reconnect, sleep/resume and queue recovery.
 - [ ] Phone-to-printer test from a paired device on the selected shop LAN.
 - [ ] Canonical public privacy policy URL for this exact SmartPrint product; Microsoft requires one for Win32/Desktop Bridge apps even when no personal information is collected.
