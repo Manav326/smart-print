@@ -135,9 +135,9 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
           <div className="platform-data-metrics-grid">
             <MetricCard
               icon={<Database size={18}/>}
-              label="Unique documents"
+              label={t("Unique documents")}
               value={formatCount(report.summary.uniqueDocumentCount)}
-              note={formatGb(report.summary.uniqueDocumentBytes) + " original file volume counted once"}
+              note={formatGb(report.summary.uniqueDocumentBytes) + " " + t("original file volume counted once")}
             />
             <MetricCard
               icon={<ArrowUpFromLine size={18}/>}
@@ -186,7 +186,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
                 {formatGb(report.storage.localQueueLogicalBytes)} logical documents · {formatGb(report.storage.localOutputFileBytes)} tracked PDF exports
                 {report.storage.storageMeasurementComplete ? " · all paired Agents reporting" : " · stale or missing Agent snapshots excluded"}
               </small>
-              <small>Agent values are reported file lengths, not filesystem-allocated cluster usage; exact physical disk occupancy is not measured.</small>
+              <small>{t("Agent values are reported file lengths, not filesystem-allocated cluster usage; exact physical disk occupancy is not measured.")}</small>
             </article>
           </div>
 
