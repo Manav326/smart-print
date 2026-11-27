@@ -32,14 +32,15 @@ internal object AndroidCustomerLocale {
         else -> "Language · English"
     }
 
-    fun translate(context: Context, source: String): String {
-        val locale = current(context)
+    fun translate(context: Context, source: String): String =
+        translate(current(context), source)
+
+    /** Pure translation lookup, also used by JVM regression tests. */
+    fun translate(locale: String, source: String): String {
         if (locale == ENGLISH) return source
-        val hindi = hindiCopy[source]
-        val hinglish = hinglishCopy[source]
         return when (locale) {
-            HINDI -> hindi ?: source
-            HINGLISH -> hinglish ?: source
+            HINDI -> hindiCopy[source] ?: source
+            HINGLISH -> hinglishCopy[source] ?: source
             else -> source
         }
     }
@@ -48,8 +49,11 @@ internal object AndroidCustomerLocale {
      * The embedded customer/shop journey uses the same locale key as the
      * portal LanguageProvider. Install before first paint on the trusted origin.
      */
-    fun documentStartScript(context: Context): String {
-        val locale = current(context)
+    fun documentStartScript(context: Context): String =
+        documentStartScript(current(context))
+
+    fun documentStartScript(localeValue: String): String {
+        val locale = localeValue.takeIf { it in setOf(ENGLISH, HINDI, HINGLISH) } ?: ENGLISH
         return """(function(){try{var l='$locale';localStorage.setItem('smartprint-ui-locale',l);document.cookie='smartprint-ui-locale='+l+'; Path=/; Max-Age=31536000; SameSite=Lax'+(location.protocol==='https:'?'; Secure':'');window.dispatchEvent(new StorageEvent('storage',{key:'smartprint-ui-locale',newValue:l}));}catch(e){}})();"""
     }
 
@@ -90,7 +94,6 @@ internal object AndroidCustomerLocale {
         "Payment QR saved to your device." to "पेमेंट QR आपके डिवाइस में सेव हो गया।",
         "Could not share this document." to "यह दस्तावेज़ शेयर नहीं हो सका।",
         "No app is available to open this link." to "इस लिंक को खोलने के लिए कोई ऐप उपलब्ध नहीं है।"
-        ,
         "Add folders" to "फ़ोल्डर जोड़ें", "Add photos of your ID" to "अपने ID की फ़ोटो जोड़ें",
         "Browse phone" to "फ़ोन ब्राउज़ करें", "Cancel scan" to "स्कैन रद्द करें",
         "Choose from SmartPrint My Files" to "SmartPrint मेरी फ़ाइलों से चुनें",
