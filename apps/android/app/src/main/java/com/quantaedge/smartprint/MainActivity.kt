@@ -4312,9 +4312,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun ensureWebView(): WebView {
         webView?.let { return it }
-        val view = WebView(this).apply {
         // Capture the Activity context before entering WebViewClient callbacks.
         val customerLocaleContext = applicationContext
+        val view = WebView(this).apply {
             setBackgroundColor(getColor(R.color.qp_surface))
             isVerticalScrollBarEnabled = false
             isHorizontalScrollBarEnabled = false
