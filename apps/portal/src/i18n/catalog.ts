@@ -2263,6 +2263,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Copy reference": "रेफरेंस कॉपी करें",
     "CAPTURED": "भुगतान सफल",
     "FAILED": "असफल",
+    "Customer app · Home": "ग्राहक ऐप · होम",
+    "Customer app · My Files": "ग्राहक ऐप · मेरी फ़ाइलें",
+    "Shop owner · Overview": "शॉप-मालिक · ओवरव्यू",
+    "640 × 200 px (2× asset for a 320 × 100 display)": "640 × 200 px (320 × 100 डिस्प्ले के लिए 2× एसेट)",
+    "600 × 500 px (2× asset for a 300 × 250 card)": "600 × 500 px (300 × 250 कार्ड के लिए 2× एसेट)",
+    "1456 × 180 px (2× asset for a 728 × 90 display)": "1456 × 180 px (728 × 90 डिस्प्ले के लिए 2× एसेट)",
   },  hinglish: {
     "SMART PRINT BY QUANTAEDGE": "SMART PRINT BY QUANTAEDGE",
     "Your print shop": "Aapki print shop",
@@ -4152,6 +4158,12 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Copy reference": "Reference copy karein",
     "CAPTURED": "Payment successful",
     "FAILED": "Failed",
+    "Customer app · Home": "Customer app ka Home",
+    "Customer app · My Files": "Customer app ke My Files",
+    "Shop owner · Overview": "Shop owner ka Overview",
+    "640 × 200 px (2× asset for a 320 × 100 display)": "640 × 200 px (320 × 100 display ke liye 2× asset)",
+    "600 × 500 px (2× asset for a 300 × 250 card)": "600 × 500 px (300 × 250 card ke liye 2× asset)",
+    "1456 × 180 px (2× asset for a 728 × 90 display)": "1456 × 180 px (728 × 90 display ke liye 2× asset)",
   },
 };
 
