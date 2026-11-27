@@ -146,7 +146,7 @@ if (-not [Uri]::TryCreate($privacyPolicyUrl, [UriKind]::Absolute, [ref]$privacyP
     throw "Partner Center must contain a public HTTPS privacyPolicyUrl for SmartPrint. Supply and verify the product-specific policy before submitting."
 }
 try {
-    $privacyResponse = Invoke-WebRequest -Method Head -Uri $privacyPolicyUri -MaximumRedirection 5 -TimeoutSec 30 -ErrorAction Stop
+    $privacyResponse = Invoke-WebRequest -Method Get -Uri $privacyPolicyUri -MaximumRedirection 5 -TimeoutSec 30 -ErrorAction Stop
     $finalPrivacyUri = [Uri]$privacyResponse.BaseResponse.RequestMessage.RequestUri
     if ($finalPrivacyUri.Scheme -ne "https") {
         throw "Privacy policy redirected away from HTTPS."
