@@ -12,8 +12,8 @@ namespace SmartPrint.Api.Endpoints;
 public static class PrinterDiagnosticEndpoints
 {
     private const string TemplateVersion = "SP-DIAG-1";
-    private const int MaximumPageBytes = 4 * 1024 * 1024;
-    private const int MaximumTotalPageBytes = 8 * 1024 * 1024;
+    private static readonly TimeSpan PerPrinterDiagnosticCooldown = TimeSpan.FromMinutes(5);
+    private const int MaximumDiagnosticsPerShopPerUtcDay = 10;
 
     public static RouteGroupBuilder MapPrinterDiagnosticEndpoints(this RouteGroupBuilder shop)
     {
@@ -128,14 +128,6 @@ public static class PrinterDiagnosticEndpoints
                     ["idempotencyKey"] = ["Provide a unique 8–64 character idempotency key."]
                 });
 
-            if (request.PagesJpegBase64 is null || request.PagesJpegBase64.Count is < 1 or > 2 ||
-                request.PagesJpegBase64.Any(page => string.IsNullOrWhiteSpace(page) || page.Length > ((MaximumPageBytes + 2) / 3) * 4 + 8) ||
-                request.PagesJpegBase64.Sum(page => (long)page.Length) > ((MaximumTotalPageBytes + 2) / 3) * 4 + 16)
-                return Results.ValidationProblem(new Dictionary<string, string[]>
-                {
-                    ["pagesJpegBase64"] = ["Provide one JPEG page, or two when the driver explicitly supports duplex, within the diagnostic size limit."]
-                });
-
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
             var lockedPrinters = await db.PrinterDevices.FromSqlInterpolated(
                 $"SELECT * FROM \"PrinterDevices\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {printerId} FOR UPDATE")
@@ -192,6 +184,40 @@ public static class PrinterDiagnosticEndpoints
                 });
             }
 
+            var cooldownCutoff = now - PerPrinterDiagnosticCooldown;
+            var recentPrinterAttempt = await db.PrinterDiagnosticAttempts.AsNoTracking()
+                .Where(item => item.TenantId == tenantId && item.PrinterDeviceId == printerId)
+                .OrderByDescending(item => item.CreatedUtc)
+                .Select(item => (DateTimeOffset?)item.CreatedUtc)
+                .FirstOrDefaultAsync(ct);
+            if (recentPrinterAttempt is DateTimeOffset lastPrinterAttempt &&
+                lastPrinterAttempt > cooldownCutoff)
+            {
+                var retryAfterSeconds = Math.Max(1, (int)Math.Ceiling(
+                    (lastPrinterAttempt + PerPrinterDiagnosticCooldown - now).TotalSeconds));
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "printer_diagnostic_cooldown",
+                    retryAfterSeconds,
+                    message = "A diagnostic was recently run on this printer. Wait for the cooldown to expire before printing another test copy."
+                });
+            }
+
+            var dailyLimitStart = new DateTimeOffset(now.UtcDateTime.Date, TimeSpan.Zero);
+            var diagnosticsToday = await db.PrinterDiagnosticAttempts.AsNoTracking()
+                .CountAsync(item => item.TenantId == tenantId && item.CreatedUtc >= dailyLimitStart, ct);
+            if (diagnosticsToday >= MaximumDiagnosticsPerShopPerUtcDay)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "printer_diagnostic_daily_limit",
+                    maximumPerUtcDay = MaximumDiagnosticsPerShopPerUtcDay,
+                    message = "This shop has reached its daily printer diagnostic limit. Try again after 00:00 UTC."
+                });
+            }
+
             if (!PrinterDiagnosticRules.TryResolveSettings(
                     printer.CapabilitiesJson, out var settings, out var failureReason))
             {
@@ -201,7 +227,7 @@ public static class PrinterDiagnosticEndpoints
 
             if (!PrinterDiagnosticRules.MatchesResolvedSettings(
                     settings, request.PaperSize, request.ColourMode, request.IsDuplex,
-                    request.PagesJpegBase64.Count) ||
+                    settings.PageCount) ||
                 !string.Equals(request.TemplateVersion, TemplateVersion, StringComparison.Ordinal))
             {
                 await transaction.RollbackAsync(ct);
@@ -212,37 +238,22 @@ public static class PrinterDiagnosticEndpoints
                 });
             }
 
-            var pageImages = new List<byte[]>(request.PagesJpegBase64.Count);
-            long totalBytes = 0;
-            try
-            {
-                foreach (var encodedPage in request.PagesJpegBase64)
-                {
-                    var bytes = Convert.FromBase64String(encodedPage);
-                    if (bytes.Length is < 100 or > MaximumPageBytes)
-                        throw new InvalidDataException("A diagnostic page is empty or exceeds the image size limit.");
-                    totalBytes = checked(totalBytes + bytes.Length);
-                    if (totalBytes > MaximumTotalPageBytes)
-                        throw new InvalidDataException("The diagnostic pages exceed the total image size limit.");
-                    pageImages.Add(bytes);
-                }
-            }
-            catch (FormatException)
-            {
-                await transaction.RollbackAsync(ct);
-                return Results.BadRequest(new { code = "diagnostic_image_invalid", message = "The diagnostic page image is not valid base64." });
-            }
-            catch (InvalidDataException exception)
-            {
-                await transaction.RollbackAsync(ct);
-                return Results.BadRequest(new { code = "diagnostic_image_invalid", message = exception.Message });
-            }
-
             byte[]? pdfBytes = null;
             string? storageKey = null;
             try
             {
-                pdfBytes = PrinterDiagnosticPdfBuilder.CreatePdf(pageImages, settings.PaperSize);
+                var outputType = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual
+                    ? PrivatePrintingOutputPolicy.TestVirtual
+                    : PrinterTypePolicy.Physical;
+                pdfBytes = PrinterDiagnosticPdfBuilder.CreatePdf(
+                    settings,
+                    new PrinterDiagnosticArtworkMetadata(
+                        printer.DisplayName,
+                        printer.QueueName!,
+                        printer.ConnectionType,
+                        outputType,
+                        settings.CapabilityEvidence),
+                    now);
                 var jobId = Guid.NewGuid();
                 var documentId = Guid.NewGuid();
                 var attemptId = Guid.NewGuid();
@@ -254,10 +265,6 @@ public static class PrinterDiagnosticEndpoints
                 var stored = await storage.ValidateAndStoreStreamingAsync(
                     tenantId, documentId, fileName, pdfStream, pdfBytes.LongLength, ct);
                 storageKey = stored.StorageKey;
-
-                var outputType = printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual
-                    ? PrivatePrintingOutputPolicy.TestVirtual
-                    : PrinterTypePolicy.Physical;
 
                 var job = new PrintJob
                 {
@@ -365,10 +372,8 @@ public static class PrinterDiagnosticEndpoints
             {
                 if (pdfBytes is not null)
                     System.Security.Cryptography.CryptographicOperations.ZeroMemory(pdfBytes);
-                foreach (var page in pageImages)
-                    System.Security.Cryptography.CryptographicOperations.ZeroMemory(page);
             }
-        }).WithMetadata(new RequestSizeLimitAttribute(12 * 1024 * 1024));
+        }).WithMetadata(new RequestSizeLimitAttribute(16 * 1024));
 
         shop.MapPost("/printer-diagnostics/{attemptId:guid}/confirm", async (
             Guid attemptId,
@@ -626,8 +631,7 @@ public sealed record PrinterDiagnosticStartRequest(
     string PaperSize,
     string ColourMode,
     bool IsDuplex,
-    string IdempotencyKey,
-    IReadOnlyList<string> PagesJpegBase64);
+    string IdempotencyKey);
 
 public sealed record PrinterDiagnosticConfirmationRequest(string Decision, string? Notes);
 
