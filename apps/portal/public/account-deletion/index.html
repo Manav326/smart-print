@@ -46,6 +46,7 @@ button{border:0;border-radius:11px;min-height:46px;padding:0 18px;background:var
 (() => {
 "use strict";
 let accessToken = null;
+let refreshToken = null;
 let googleIdentityLoaded = false;
 const byId = id => document.getElementById(id);
 const setStatus = (id, message, kind) => { const node=byId(id); node.textContent=message||""; node.className="status"+(kind?" "+kind:""); };
@@ -59,10 +60,12 @@ const api = async (path, options) => {
  const response=await fetch(path,Object.assign({cache:"no-store",credentials:"same-origin",headers:{"Accept":"application/json"}},options||{}));
  return responseBody(response);
 };
-function enterDeleteMode(auth){
- if(!auth||!auth.accessToken) throw new Error("SmartPrint did not return a valid account session.");
+async function enterDeleteMode(auth){
+ if(!auth||!auth.accessToken||!auth.refreshToken) throw new Error("SmartPrint did not return a valid account session.");
+ const profile=await api("/api/v1/customer/me",{headers:{"Authorization":"Bearer "+auth.accessToken,"Accept":"application/json"}});
  accessToken=auth.accessToken;
- byId("signedInAs").textContent="Signed in as "+(auth.email||"your SmartPrint customer account");
+ refreshToken=auth.refreshToken;
+ byId("signedInAs").textContent="Signed in as "+(profile.email||auth.email||"your SmartPrint customer account");
  byId("loginPanel").hidden=true; byId("deletePanel").hidden=false; setStatus("loginStatus","",""); updateDeleteButton();
 }
 function updateDeleteButton(){
@@ -73,7 +76,7 @@ byId("passwordForm").addEventListener("submit",async event=>{
  const password=byId("password").value; byId("password").value="";
  try{
   const auth=await api("/api/v1/auth/customer-login",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({email:byId("email").value.trim(),password})});
-  enterDeleteMode(auth);
+  await enterDeleteMode(auth);
  }catch(error){setStatus("loginStatus",error instanceof Error?error.message:"Sign-in failed. Please try again.","error");}
  finally{byId("passwordButton").disabled=false;}
 });
@@ -100,8 +103,8 @@ async function prepareGoogleSignIn(){
     if(!result||!result.credential){setStatus("loginStatus","Google did not return an account credential.","error");return;}
     setStatus("loginStatus","Verifying your Google account…","");
     try{
-     const auth=await api("/api/v1/auth/google/customer",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({credential:result.credential,nonce:challenge.nonce})});
-     enterDeleteMode(auth);
+     const auth=await api("/api/v1/auth/google/customer-existing",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({credential:result.credential,nonce:challenge.nonce})});
+     await enterDeleteMode(auth);
     }catch(error){setStatus("loginStatus",error instanceof Error?error.message:"Google sign-in failed.","error");byId("retryGoogle").hidden=false;}
    },
    error_callback:()=>{setStatus("loginStatus","Google sign-in was cancelled or could not be started.","error");byId("retryGoogle").hidden=false;}
@@ -117,15 +120,20 @@ byId("deleteButton").addEventListener("click",async()=>{
  byId("deleteButton").disabled=true; byId("signOutButton").disabled=true; setStatus("deleteStatus","Deleting your SmartPrint account…","");
  try{
   await api("/api/v1/customer/account",{method:"DELETE",headers:{"Authorization":"Bearer "+accessToken,"Accept":"application/json"}});
-  accessToken=null; byId("deletePanel").hidden=true; byId("completePanel").hidden=false;
+  accessToken=null; refreshToken=null; byId("deletePanel").hidden=true; byId("completePanel").hidden=false;
  }catch(error){
   setStatus("deleteStatus",error instanceof Error?error.message:"Account deletion failed. Your account remains unchanged.","error");
   byId("signOutButton").disabled=false; updateDeleteButton();
  }
 });
 byId("signOutButton").addEventListener("click",()=>{
- accessToken=null; byId("deletePanel").hidden=true; byId("loginPanel").hidden=false; byId("password").value=""; byId("confirmWord").value=""; byId("understand").checked=false; updateDeleteButton();
+ const tokenToRevoke=refreshToken;
+ accessToken=null; refreshToken=null;
+ byId("deletePanel").hidden=true; byId("loginPanel").hidden=false; byId("password").value=""; byId("confirmWord").value=""; byId("understand").checked=false; updateDeleteButton();
  setStatus("loginStatus","You have signed out of this deletion session.","");
+ if(tokenToRevoke){
+  void api("/api/v1/auth/logout",{method:"POST",headers:{"Content-Type":"application/json","Accept":"application/json"},body:JSON.stringify({refreshToken:tokenToRevoke})}).catch(()=>{});
+ }
 });
 void prepareGoogleSignIn();
 })();
