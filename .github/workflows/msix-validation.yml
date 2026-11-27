@@ -120,6 +120,15 @@ jobs:
           if ($service.StartName -notmatch "LocalService$") { throw "MSIX Agent is not running as NT AUTHORITY\LocalService." }
           if ($service.State -ne "Running") { throw "MSIX Agent did not start automatically." }
 
+          # Packaged-service registration must preserve the existing EXE's
+          # crash-recovery contract. Do not silently accept SCM's default
+          # no-action policy for a production print queue.
+          $failureActions = (& sc.exe qfailure QRtoPrintSmartPrintAgent 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0) { throw "Could not query packaged Agent Service Control Manager recovery actions: $failureActions" }
+          if ($failureActions -notmatch "RESTART") { throw "Packaged Agent has no SCM restart recovery action. This is a printing reliability release blocker." }
+          $failureFlag = (& sc.exe qfailureflag QRtoPrintSmartPrintAgent 2>&1 | Out-String)
+          if ($LASTEXITCODE -ne 0 -or $failureFlag -notmatch "1") { throw "Packaged Agent does not enable recovery for non-crash service failures: $failureFlag" }
+
           $pipe = [System.IO.Pipes.NamedPipeClientStream]::new(".", "QRtoPrint.SmartPrint.Agent.Control", [System.IO.Pipes.PipeDirection]::InOut)
           try {
             $pipe.Connect(10000)
