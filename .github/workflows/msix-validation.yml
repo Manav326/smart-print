@@ -321,15 +321,19 @@ jobs:
           $queueRoot = Join-Path $env:ProgramData "QRtoPrint\LocalQueue"
           if (-not (Test-Path -LiteralPath $queueRoot -PathType Container)) { throw "The protected LocalService print queue directory was not created." }
           $queueAcl = Get-Acl -LiteralPath $queueRoot
-          $localServiceAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "LOCAL SERVICE" -and $_.FileSystemRights.ToString() -match "FullControl" })
-          $systemAccess = @($queueAcl.Access | Where-Object { $_.IdentityReference -match "SYSTEM" -and $_.FileSystemRights.ToString() -match "FullControl" })
-          $unexpectedFullControl = @($queueAcl.Access | Where-Object {
-            $_.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
-            $_.FileSystemRights.ToString() -match "FullControl" -and
-            $_.IdentityReference -notmatch "LOCAL SERVICE|SYSTEM"
+          $queueAclEntries = foreach ($entry in $queueAcl.Access) {
+            $sid = try { $entry.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value } catch { $entry.IdentityReference.Value }
+            [pscustomobject]@{ Sid = $sid; Rule = $entry }
+          }
+          $localServiceAccess = @($queueAclEntries | Where-Object { $_.Sid -eq "S-1-5-19" -and $_.Rule.FileSystemRights.ToString() -match "FullControl" })
+          $systemAccess = @($queueAclEntries | Where-Object { $_.Sid -eq "S-1-5-18" -and $_.Rule.FileSystemRights.ToString() -match "FullControl" })
+          $unexpectedFullControl = @($queueAclEntries | Where-Object {
+            $_.Rule.AccessControlType -eq [System.Security.AccessControl.AccessControlType]::Allow -and
+            $_.Rule.FileSystemRights.ToString() -match "FullControl" -and
+            $_.Sid -notin @("S-1-5-19", "S-1-5-18")
           })
           if ($localServiceAccess.Count -eq 0 -or $systemAccess.Count -eq 0 -or $unexpectedFullControl.Count -gt 0) {
-            throw "The protected queue ACL must grant FullControl only to LocalService and SYSTEM; unexpected entries: $($unexpectedFullControl.IdentityReference -join ', ')"
+            throw "The protected queue ACL must grant FullControl only to LocalService and SYSTEM; unexpected SIDs: $($unexpectedFullControl.Sid -join ', ')"
           }
 
           # Exercise a real unexpected process exit, not just the SCM configuration text.
