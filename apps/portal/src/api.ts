@@ -1738,6 +1738,20 @@ function waitForCustomerStagePoll(ms:number,signal:AbortSignal):Promise<void> {
   });
 }
 
+/** Bounded, jittered polling keeps slow private handoffs observable without hammering the API. */
+function customerPrivateRelayPollDelay(
+  consecutivePendingChecks:number,
+  consecutiveErrors:number,
+  stageChanged:boolean
+):number {
+  if(consecutiveErrors>0){
+    const backoff=Math.min(30_000,2_000*Math.pow(2,Math.min(consecutiveErrors-1,4)));
+    return Math.round(backoff*(0.8+Math.random()*0.4));
+  }
+  const base=stageChanged?1_500:Math.min(12_000,1_500*Math.pow(1.7,Math.min(consecutivePendingChecks,5)));
+  return Math.round(base*(0.85+Math.random()*0.3));
+}
+
 async function pollCustomerPrivateRelayStages(
   sessionToken:string,
   ticket:CustomerLocalUploadTicket,
@@ -1810,20 +1824,29 @@ async function uploadCustomerPrivateRelay(
     const activeTransferLabel = existing.transferPath === "DIRECT_LAN"
       ? "direct shop-Wi-Fi"
       : "encrypted cloud-relay";
-    const deadline = Date.now() + 45_000;
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
-    while (Date.now() < deadline) {
-      await new Promise(resolve => window.setTimeout(resolve, 2_500));
+    let lastStage = existing.stage ?? "WAITING_FOR_AGENT";
+    let pendingChecks = 0;
+    let consecutiveErrors = 0;
+    while (true) {
+      await new Promise(resolve => window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(pendingChecks, consecutiveErrors, false)));
       let status:CustomerPrivateRelayStatus;
       try {
         status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+        consecutiveErrors = 0;
       } catch (exception) {
         if (exception instanceof ApiError && exception.status >= 400) throw exception;
+        consecutiveErrors += 1;
         continue;
       }
+      const currentStage = status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state);
+      const stageChanged = currentStage !== lastStage;
+      lastStage = currentStage;
+      pendingChecks = stageChanged ? 0 : pendingChecks + 1;
       lastStageMessage = status.stageMessage ?? status.message ?? lastStageMessage;
       onStage?.(
-        status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+        currentStage,
         lastStageMessage,
         status.stageUpdatedUtc
       );
@@ -1849,9 +1872,6 @@ async function uploadCustomerPrivateRelay(
         );
       }
     }
-    throw new LocalUploadOutcomeUnknownError(
-      "The original "+activeTransferLabel+" transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
-    );
   }
 
   if (!privateUpload) {
@@ -1884,20 +1904,29 @@ async function uploadCustomerPrivateRelay(
     if (exception instanceof ApiError && exception.status >= 400) throw exception;
   }
 
-  const deadline = Date.now() + 45_000;
   let lastStageMessage=existing.stageMessage??existing.message??"Waiting for the shop computer";
-  while (Date.now() < deadline) {
+  let lastStage=existing.stage??"WAITING_FOR_AGENT";
+  let pendingChecks=0;
+  let consecutiveErrors=0;
+  while (true) {
     let status: CustomerPrivateRelayStatus;
     try {
       status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+      consecutiveErrors=0;
     } catch (exception) {
       if (exception instanceof ApiError && exception.status >= 400) throw exception;
-      await new Promise(resolve => window.setTimeout(resolve, 5_000));
+      consecutiveErrors+=1;
+      await new Promise(resolve => window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
       continue;
     }
+    const currentStage=status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state);
+    const stageChanged=currentStage!==lastStage;
+    lastStage=currentStage;
+    pendingChecks=stageChanged?0:pendingChecks+1;
     lastStageMessage=status.stageMessage??status.message??lastStageMessage;
     onStage?.(
-      status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+      currentStage,
       lastStageMessage,
       status.stageUpdatedUtc
     );
@@ -1922,12 +1951,9 @@ async function uploadCustomerPrivateRelay(
         status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
       );
     }
-    await new Promise(resolve => window.setTimeout(resolve, 5_000));
+    await new Promise(resolve => window.setTimeout(resolve,
+      customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,stageChanged)));
   }
-
-  throw new LocalUploadOutcomeUnknownError(
-    "The shop computer is at this stage: "+lastStageMessage+". Processing may still be active. Retry this same file to refresh the original ticket; SmartPrint will not create a duplicate upload."
-  );
 }
 
 function createStreamingLocalMultipartBody(
