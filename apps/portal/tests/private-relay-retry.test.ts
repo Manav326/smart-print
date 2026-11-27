@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   customerPrivateRelayPollDelay,
+  hasReachedCustomerPrivateRelayStatusErrorLimit,
   shouldReconcileCustomerPrivateRelayPostError,
   shouldRetryCustomerPrivateRelayStatusError
 } from "../src/private-relay-retry.ts";
@@ -33,6 +34,14 @@ test("only transient and completion-reconciliation status errors are retried",()
     assert.equal(shouldRetryCustomerPrivateRelayStatusError({status}),false);
   assert.equal(shouldRetryCustomerPrivateRelayStatusError({status:409,code:"other_conflict"}),false);
   assert.equal(shouldRetryCustomerPrivateRelayStatusError(new TypeError("fetch failed")),true);
+  assert.equal(shouldRetryCustomerPrivateRelayStatusError(new Error("programming error")),false);
+});
+
+test("status reconciliation stops at exactly eight consecutive failures",()=>{
+  for(let count=0;count<8;count++)
+    assert.equal(hasReachedCustomerPrivateRelayStatusErrorLimit(count),false);
+  assert.equal(hasReachedCustomerPrivateRelayStatusErrorLimit(8),true);
+  assert.equal(hasReachedCustomerPrivateRelayStatusErrorLimit(9),true);
 });
 
 test("ambiguous relay POST outcomes are reconciled but definitive rejections are not retried",()=>{
