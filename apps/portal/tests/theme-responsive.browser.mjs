@@ -716,10 +716,24 @@ async function exerciseWorkspaceSections(page, route, viewport, themeLabel) {
     const chooseAccountItem = async (label, expectedTitle) => {
       await openAccountMenu();
       await page.locator("#shop-account-menu").getByRole("button", { name: label, exact: true }).click();
-      await page.waitForFunction(
-        title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
-        expectedTitle
-      );
+      try {
+        await page.waitForFunction(
+          title => document.querySelector(".page-heading h1")?.textContent?.trim() === title,
+          expectedTitle,
+          { timeout: 8000 }
+        );
+      } catch (error) {
+        const diagnostic = {
+          expectedTitle,
+          url: page.url(),
+          heading: await page.locator(".page-heading h1").textContent().catch(() => "heading unavailable"),
+          activeNavigation: await page.locator(".sidebar .nav-item.active").allTextContents().catch(() => []),
+          menuVisible: await page.locator("#shop-account-menu").isVisible().catch(() => false),
+          menuText: await page.locator("#shop-account-menu").innerText().catch(() => "menu unavailable")
+        };
+        await page.screenshot({ path: join(artifactDirectory, `account-menu-navigation-${route.label}-${themeLabel}-${viewport.width}.png`), fullPage: true, animations: "disabled" }).catch(() => {});
+        throw new Error(`Account menu navigation did not reach its expected workspace section: ${JSON.stringify(diagnostic)}. Original: ${error instanceof Error ? error.message : String(error)}`);
+      }
       await assertNoHorizontalOverflow(page, route, viewport);
       await assertRouteContrast(page, route);
       results.push({ check: `${route.label} / account / ${label} / ${themeLabel} / ${viewport.width}px`, passed: true });
