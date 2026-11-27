@@ -41,4 +41,26 @@ public sealed class AgentLoopIntervalsTests
     {
         Assert.Equal(expected, AgentLoopIntervals.ResolvePrinterLaneConcurrency(configured));
     }
+
+    [Theory]
+    [InlineData(1, 2000)]
+    [InlineData(2, 4000)]
+    [InlineData(3, 8000)]
+    [InlineData(4, 16000)]
+    [InlineData(5, 30000)]
+    [InlineData(20, 30000)]
+    public void PrivateRelayRetryBackoffIsBoundedAndExponential(int failures, int expectedMilliseconds)
+    {
+        Assert.Equal(expectedMilliseconds,
+            AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(failures));
+    }
+
+    [Fact]
+    public void PrivateRelayRetryBackoffUsesBoundedJitter()
+    {
+        Assert.Equal(1600, AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(1, 0));
+        Assert.Equal(2000, AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(1, 0.5));
+        Assert.Equal(2400, AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(1, 1));
+        Assert.Equal(30000, AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(5, 1));
+    }
 }

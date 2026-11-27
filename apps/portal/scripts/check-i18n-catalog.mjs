@@ -167,7 +167,7 @@ const requiredScreenCoverage = {
     "Please confirm", "Confirm", "Enter details", "Welcome, {name}", "Batch · {name}", "Batch · {count} files", "First job · {job}",
     "Select a file to view its status. Pay once for all accepted files.",
     "Private filenames are kept only on this device. A filename that is not available locally is shown as “Private file”; the shop does not receive or restore the original name.",
-    "Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop.",
+    "Only files with a current quote are included in this displayed total. Prices are being refreshed for the highlighted files. Review any change before continuing.",
     "This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them.",
     "Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.",
     "Send batch to shop",

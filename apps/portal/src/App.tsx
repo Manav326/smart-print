@@ -4993,7 +4993,7 @@ function smartPrintNativeHeadline(status:string):string {
     case "CANCELLED": return "Cancelled";
     case "FAILED": return "Could not print";
     case "REJECTED": return "Not accepted";
-    case "QUOTE_EXPIRED": return "Price needs refreshing";
+    case "QUOTE_EXPIRED": return "Price refresh needed";
     default: return "Request in progress";
   }
 }
@@ -5155,9 +5155,13 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
   function rememberCustomerStatus(candidate:CustomerJobStatus) {
     rememberBatchStatuses({[candidate.id]:candidate});
-    setJobStatus(current=>
-      !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
-        ?candidate:current);
+    // Background responses for a previously selected file update its batch row,
+    // but must never replace the currently selected file's status panel.
+    if(uploaded?.job.id===candidate.id){
+      setJobStatus(current=>
+        !current||current.id!==candidate.id||Date.parse(candidate.updatedUtc)>=Date.parse(current.updatedUtc)
+          ?candidate:current);
+    }
     if(candidate.pricingVersion&&candidate.quotedAmountMinor>0) {
       const paperSize=(["A4","A3","A5","LETTER","LEGAL"].includes(candidate.paperSize)
         ?candidate.paperSize:"A4") as CustomerPrintRequestSettings["paperSize"];
@@ -5861,7 +5865,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             : "This batch already contains a Private Printing file. Keep Private Printing selected for every additional file."
         : exception instanceof LocalUploadOutcomeUnknownError
         ? privatePrinting
-          ? "The shop computer is still preparing your secure file. Tap Retry to check its status."
+          ? exception.message
           : "Your original print request is saved. Tap Retry to check its status. The file may need to be sent again from the beginning; SmartPrint will not create a duplicate print job."
         : batchCheckoutLocked
           ? "Checkout has already started for this batch, so this unfinished file was not included. Start a new batch for this file."
@@ -5884,6 +5888,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   }
 
   function selectUploadedFile(item:UploadedPrintJob) {
+    if(busy)return;
     setUploaded(item);setQuote(quotesByJobId[item.job.id]??null);setJobStatus(null);setPayment(null);setPaymentReference("");setError("");
   }
 
@@ -5948,7 +5953,9 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       }
       const selectedQuote=uploaded?nextQuotes[uploaded.job.id]??null:null;
       setQuote(selectedQuote??Object.values(nextQuotes)[0]??null);
-      if(failures.length) setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
+      if(failures.length) {
+        setError(t("Could not quote: {files}. Retry the batch quote.").replace("{files}", failures.join(", ")));
+      }
       else if(!Object.keys(nextQuotes).length) setError(t("No files are waiting for a quote."));
     } catch(exception) {
       setError(exception instanceof ApiError?t(exception.message):t("The shop could not calculate the batch quote."));
@@ -6194,6 +6201,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     }
   }
   async function chooseFiles(next:File[], nativeGroupNames?:string[], nativePreviewTokens?:Array<string|null>, nativePrintKinds?:Array<string|null>, nativePhotoSettings?:Array<CustomerPhotoSettings|null>) {
+    if(busy)return;
     setNotices([]);
     if(batchLockedForPayment){
       setError(t("This batch already has a payment attempt. Start a new batch for additional files."));
@@ -6373,7 +6381,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
   const batchLockedForPayment=(batchPayment!==null&&batchPayment.status!=="REJECTED")||
     (payment!==null&&!payment.batchPayment&&["AWAITING_CUSTOMER_PAYMENT","CUSTOMER_REPORTED","CASH_AWAITING_PAYMENT","VERIFIED","PARTIALLY_REFUNDED"].includes(payment.status));
   const statusForBatchItem=(item:UploadedPrintJob)=>
-    uploaded?.job.id===item.job.id&&jobStatus?.status
+    uploaded?.job.id===item.job.id&&jobStatus?.id===item.job.id&&jobStatus.status
       ? jobStatus.status
       : batchStatuses[item.job.id]?.status??item.job.status;
   const quoteExpiredForBatchItem=(item:UploadedPrintJob)=>{
@@ -6454,6 +6462,31 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
     !entry.excluded&&!!entry.quote&&quoteExpiredForBatchItem(entry.item)&&
     shouldBlockQuoteRefreshForStatus(statusForBatchItem(entry.item))
   );
+  const expiredQuoteRefreshKey=quoteRows
+    .filter(entry=>{
+      const status=statusForBatchItem(entry.item);
+      return !entry.excluded&&
+        quoteExpiredForBatchItem(entry.item)&&
+        ["QUOTE_EXPIRED","AWAITING_CUSTOMER_APPROVAL","AWAITING_SHOP_APPROVAL","AWAITING_PAYMENT","PAYMENT_REJECTED"].includes(status)&&
+        !shouldBlockQuoteRefreshForStatus(status);
+    })
+    .map(entry=>entry.item.job.id)
+    .sort()
+    .join("|");
+  const automaticQuoteRefreshAttemptRef=useRef("");
+  useEffect(()=>{
+    if(!expiredQuoteRefreshKey){
+      automaticQuoteRefreshAttemptRef.current="";
+      return;
+    }
+    if(busy||batchLockedForPayment||hasAcceptedQuoteLocked||
+      automaticQuoteRefreshAttemptRef.current===expiredQuoteRefreshKey)return;
+    // Renew an expired quote in the background. The API preserves the current
+    // approval stage when the price is unchanged and requires fresh acceptance
+    // when it changes; payment creation remains a separate customer action.
+    automaticQuoteRefreshAttemptRef.current=expiredQuoteRefreshKey;
+    void getQuote();
+  },[expiredQuoteRefreshKey,busy,batchLockedForPayment,hasAcceptedQuoteLocked]);
   const batchQuoteTotalDisplay=acceptedQuoteEntries.length>0
     ?money(batchQuoteTotal,batchQuoteCurrency)
     :batchQuoteNeedsRefresh>0||hasAcceptedQuoteLocked?"—"
@@ -6546,24 +6579,24 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
       : <div className="customer-upload-modes">
       <div className="customer-upload-mode-heading"><strong>{t("How your files reach the shop")}</strong><small>{t("Choose a connection method. Your privacy setting above stays the same.")}</small></div>
       {localAgent?.endpoints.length
-        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Direct transfer over shop Wi-Fi")}</small></button>
+        ? <button type="button" aria-pressed={uploadMode==="LOCAL"} className={uploadMode==="LOCAL"?"customer-upload-mode selected":"customer-upload-mode"} disabled={busy} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("LOCAL");}}><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Direct transfer over shop Wi-Fi")}</small></button>
         : <button type="button" className="customer-upload-mode customer-upload-mode-unavailable" disabled aria-disabled="true"><strong>{t("Shop Wi-Fi · local transfer")}</strong><small>{t("Unavailable")}</small></button>}
-      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>{t("Encrypted online transfer · print when ready")}</small></button>}
+      {secureQueueFallbackEnabled&&<button type="button" aria-pressed={uploadMode==="CLOUD"} className={uploadMode==="CLOUD"?"customer-upload-mode selected":"customer-upload-mode"} disabled={busy} onClick={()=>{setUploadModeManuallySelected(true);setUploadMode("CLOUD");}}><strong>{cloudAssistedPrintingEnabled?"Cloud-assisted · HTTPS":"Secure queue · HTTPS"}</strong><small>{t("Encrypted online transfer · print when ready")}</small></button>}
     </div>}
     {customerUploadUnavailable&&<CustomerInlineNotice kind="warning" title={t("Secure upload unavailable")}>{t("No file was uploaded. Ask the shop to reconnect its print service, then retry.")}</CustomerInlineNotice>}
     {privatePrinting&&!localReady&&canOfferPrivatePrinting&&<CustomerInlineNotice kind="info" title={t("Encrypted online relay")}>{t("No shop Wi-Fi is needed. SmartPrint uses its encrypted online relay.")}</CustomerInlineNotice>}
     {batchLockedForPayment&&<CustomerInlineNotice kind="warning" title={t("This batch is locked")}>{t("Payment has started. Add more documents in a new batch.")}</CustomerInlineNotice>}
     <div className="customer-upload-picker-grid" aria-label={t("Choose documents or folders")}
-      onDragOver={event=>{if(!batchLockedForPayment)event.preventDefault();}}
-      onDrop={event=>{event.preventDefault();if(batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
+      onDragOver={event=>{if(!busy&&!batchLockedForPayment)event.preventDefault();}}
+      onDrop={event=>{event.preventDefault();if(busy||batchLockedForPayment)return;void chooseFiles(Array.from(event.dataTransfer.files||[]));}}>
       <label className="customer-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={busy||batchLockedForPayment} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FileUp size={21}/></span>
         <strong>{nativeAppMode?t("Select files"):t("Select documents or images")}</strong>
         <small>{t("PDF, JPG or PNG")}</small>
       </label>
       <label className="customer-upload-zone folder-upload-zone">
-        <input type="file" multiple disabled={batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
+        <input type="file" multiple disabled={busy||batchLockedForPayment} accept={nativeAppMode?"application/x-smartprint-folder-selection":undefined} {...({webkitdirectory:"true",directory:"true"} as any)} onChange={event=>{const selected=Array.from(event.currentTarget.files||[]);void chooseFiles(selected,consumeSmartPrintNativePickerGroups(),consumeSmartPrintNativePdfPreviews(),consumeSmartPrintNativePrintKinds(),consumeSmartPrintNativePhotoSettings());event.currentTarget.value="";}}/>
         <span className="customer-upload-icon"><FolderOpen size={21}/></span>
         <strong>{nativeAppMode?t("Choose folders"):t("Add a folder")}</strong>
         <small>{nativeAppMode?t("Select multiple folders"):t("One folder at a time")}</small>
@@ -6588,20 +6621,20 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               ? <div className="customer-folder-defaults">
                 <div><span>{t("ID sheet")}</span><strong className="customer-paper-default">{t("A4 portrait · 1 copy · Single-sided")}</strong></div>
                 <div><span>{t("Print mode")}</span><div className="customer-choice-row">
-                  <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                  <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                  <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
                 </div></div>
               </div>
               : <div className="customer-folder-defaults">
               <div><span>{t("Colour")}</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Mono"} className={defaults.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                <button type="button" aria-pressed={defaults.colourMode==="Colour"} className={defaults.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,colourMode:"Colour"}}))}>{t("Colour")}</button>
               </div></div>
               <div><span>{t("Sides")}</span><div className="customer-choice-row">
-                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
-                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>{t("Double")}</button>
+                <button type="button" aria-pressed={!defaults.isDuplex} className={!defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:false}}))}>{t("Single")}</button>
+                <button type="button" aria-pressed={defaults.isDuplex} className={defaults.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setGroupSettings(current=>({...current,[group.name]:{...defaults,isDuplex:true}}))}>{t("Double")}</button>
               </div></div>
-              <label className="customer-folder-copies"><span>{t("Copies · all files")}</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
+              <label className="customer-folder-copies"><span>{t("Copies · all files")}</span><input type="text" disabled={busy} inputMode="numeric" pattern="[0-9]*" maxLength={3} value={defaults.copies}
                  onChange={event=>{
                    const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
@@ -6611,19 +6644,19 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                    setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),copies}}));
                  }}/></label>
               <div><span>{t("Paper")}</span><strong className="customer-paper-default">{defaults.advancedEnabled?defaults.paperSize:"A4"}</strong></div>
-              <label className="customer-advanced-toggle"><input type="checkbox" checked={defaults.advancedEnabled} onChange={event=>{
+              <label className="customer-advanced-toggle"><input type="checkbox" disabled={busy} checked={defaults.advancedEnabled} onChange={event=>{
                  const advancedEnabled=event.currentTarget.checked;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),advancedEnabled}}));
                }}/><span>{t("Advanced settings")}</span></label>
             </div>}
             {!isIdStudioGroup&&defaults.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-              <label><span>{t("Paper size")}</span><select value={defaults.paperSize} onChange={event=>{
+              <label><span>{t("Paper size")}</span><select disabled={busy} value={defaults.paperSize} onChange={event=>{
                  const paperSize=event.currentTarget.value as CustomerGroupSettings["paperSize"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),paperSize}}));
                }}>
                 <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
               </select></label>
-              <label><span>{t("Orientation")}</span><select value={defaults.orientation} onChange={event=>{
+              <label><span>{t("Orientation")}</span><select disabled={busy} value={defaults.orientation} onChange={event=>{
                  const orientation=event.currentTarget.value as CustomerGroupSettings["orientation"];
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),orientation}}));
                }}>
@@ -6631,7 +6664,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
               </select></label>
               {nupOptions.length>0&&group.files.some(candidate=>
                 isCustomerPdf(candidate)&&!isSmartPrintIdDocument(candidate)&&!isSmartPrintPhotoDocument(candidate)
-              )&&<label><span>{t("Pages per sheet")}</span><select value={defaults.pagesPerSheet??1} onChange={event=>{
+              )&&<label><span>{t("Pages per sheet")}</span><select disabled={busy} value={defaults.pagesPerSheet??1} onChange={event=>{
                  const pagesPerSheet=Number(event.currentTarget.value)||1;
                  setGroupSettings(current=>({...current,[group.name]:{...(current[group.name]??defaults),pagesPerSheet}}));
                }}>
@@ -6649,11 +6682,11 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             const own={...defaults,...savedOwn};
             const index=files.findIndex(candidate=>customerFileFingerprint(candidate)===fingerprint);
             return <div className={selectedFileIndex===index?"customer-folder-file-row selected":"customer-folder-file-row"} key={fingerprint}>
-              <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
-              {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={t("Use {setting} settings for {name}",{setting:own.custom?"folder":"custom",name:selected.name})} className={own.custom?"customer-file-custom active":"customer-file-custom"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?t("Custom"):t("Folder")}</button>}
+              <button type="button" aria-pressed={selectedFileIndex===index} title={selected.name} className="customer-folder-file-name" disabled={busy} onClick={()=>setSelectedFileIndex(index)}><FileText size={15}/><span><strong>{selected.name}</strong><small>{formatBytes(selected.size)}</small></span><PrintKindTag printKind={photoSettingsByFileFingerprint[fingerprint]?"PHOTO":isSmartPrintIdDocument(selected)?"ID_DOCUMENT":"DOCUMENT"}/></button>
+              {!isSmartPrintIdDocument(selected)&&<button type="button" aria-pressed={own.custom} aria-label={t("Use {setting} settings for {name}",{setting:own.custom?"folder":"custom",name:selected.name})} className={own.custom?"customer-file-custom active":"customer-file-custom"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...defaults,...(current[fingerprint]??{}),custom:!own.custom,...(!own.custom?{copies:defaults.copies,colourMode:defaults.colourMode,isDuplex:defaults.isDuplex,advancedEnabled:defaults.advancedEnabled,paperSize:defaults.paperSize,orientation:defaults.orientation,pagesPerSheet:defaults.pagesPerSheet}:{})}}))}>{own.custom?t("Custom"):t("Folder")}</button>}
               <button type="button" className="customer-file-remove" aria-label={t("Remove {name} from this selection",{name:selected.name})} title={t("Remove from this selection")} disabled={busy} onClick={()=>removeSelectedFile(fingerprint)}><X size={13}/><span>{t("Remove")}</span></button>
               {own.custom&&!isSmartPrintIdDocument(selected)&&<div className="customer-file-overrides">
-                <label className="customer-folder-copies"><span>{t("Copies")}</span><input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
+                <label className="customer-folder-copies"><span>{t("Copies")}</span><input type="text" disabled={busy} inputMode="numeric" pattern="[0-9]*" maxLength={3} value={own.copies}
                    onChange={event=>{
                      const copies=event.currentTarget.value.replace(/\D/g,"").slice(0,3);
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
@@ -6663,32 +6696,32 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,copies}}));
                    }}/></label>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>{t("B&W")}</button>
-                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>{t("Colour")}</button>
+                  <button type="button" aria-pressed={own.colourMode==="Mono"} className={own.colourMode==="Mono"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Mono"}}))}>{t("B&W")}</button>
+                  <button type="button" aria-pressed={own.colourMode==="Colour"} className={own.colourMode==="Colour"?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,colourMode:"Colour"}}))}>{t("Colour")}</button>
                 </div>
                 <div className="customer-choice-row">
-                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
-                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>{t("Double")}</button>
+                  <button type="button" aria-pressed={!own.isDuplex} className={!own.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:false}}))}>{t("Single")}</button>
+                  <button type="button" aria-pressed={own.isDuplex} className={own.isDuplex?"customer-choice selected":"customer-choice"} disabled={busy} onClick={()=>setFileSettings(current=>({...current,[fingerprint]:{...own,custom:true,isDuplex:true}}))}>{t("Double")}</button>
                 </div>
                 <div><span>{t("Paper")}</span><strong className="customer-paper-default">{own.advancedEnabled?own.paperSize:"A4"}</strong></div>
-                <label className="customer-advanced-toggle"><input type="checkbox" checked={own.advancedEnabled} onChange={event=>{
+                <label className="customer-advanced-toggle"><input type="checkbox" disabled={busy} checked={own.advancedEnabled} onChange={event=>{
                    const advancedEnabled=event.currentTarget.checked;
                    setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,advancedEnabled}}));
                  }}/><span>{t("Advanced settings")}</span></label>
                 {own.advancedEnabled&&<div className="customer-file-overrides customer-folder-advanced">
-                  <label><span>{t("Paper size")}</span><select value={own.paperSize} onChange={event=>{
+                  <label><span>{t("Paper size")}</span><select disabled={busy} value={own.paperSize} onChange={event=>{
                      const paperSize=event.currentTarget.value as CustomerFileSettings["paperSize"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,paperSize}}));
                    }}>
                     <option value="A4">A4</option><option value="A3">A3</option><option value="A5">A5</option><option value="LETTER">{t("Letter")}</option><option value="LEGAL">{t("Legal")}</option>
                   </select></label>
-                  <label><span>{t("Orientation")}</span><select value={own.orientation} onChange={event=>{
+                  <label><span>{t("Orientation")}</span><select disabled={busy} value={own.orientation} onChange={event=>{
                      const orientation=event.currentTarget.value as CustomerFileSettings["orientation"];
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,orientation}}));
                    }}>
                     <option value="AUTO">{t("Auto · follow document")}</option><option value="PORTRAIT">{t("Portrait")}</option><option value="LANDSCAPE">{t("Landscape")}</option>
                   </select></label>
-                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>{t("Pages per sheet")}</span><select value={own.pagesPerSheet??1} onChange={event=>{
+                  {nupOptions.length>0&&isCustomerPdf(selected)&&!isSmartPrintIdDocument(selected)&&!isSmartPrintPhotoDocument(selected)&&<label><span>{t("Pages per sheet")}</span><select disabled={busy} value={own.pagesPerSheet??1} onChange={event=>{
                      const pagesPerSheet=Number(event.currentTarget.value)||1;
                      setFileSettings(current=>({...current,[fingerprint]:{...(current[fingerprint]??own),custom:true,pagesPerSheet}}));
                    }}>
@@ -6782,7 +6815,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
 
         {Array.from(new Set(uploadedBatch.map(item=>item.job.batchGroupName??"Loose files"))).map(groupName=><section className="customer-uploaded-folder" key={groupName}>
           <strong>{groupName}</strong>
-          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} onClick={()=>selectUploadedFile(item)}>
+          {uploadedBatch.filter(item=>(item.job.batchGroupName??"Loose files")===groupName).map(item=><button type="button" key={item.job.id} aria-pressed={uploaded.job.id===item.job.id} className={uploaded.job.id===item.job.id?"customer-uploaded-batch-item active":"customer-uploaded-batch-item"} disabled={busy} onClick={()=>selectUploadedFile(item)}>
             <span className="batch-file-index"><FileText size={14}/></span><span className="batch-file-copy"><span className="batch-file-title-row"><strong>{resolveCustomerDocumentName(item,privateFileNamesByJobId)}</strong><PrintKindTag printKind={normalizedCustomerPrintKind(printKindsByJobId[item.job.id]??batchStatuses[item.job.id]?.printKind??item.job.printKind)}/></span><small>{(photoSettingsByJobId[item.job.id]||batchStatuses[item.job.id]?.printKind==="PHOTO"||item.job.printKind==="PHOTO")?`${photoSettingsByJobId[item.job.id]?.photoCount??batchStatuses[item.job.id]?.photoCount??item.job.photoCount??0} photos · ${photoSettingsByJobId[item.job.id]?.sizeCode??batchStatuses[item.job.id]?.photoSizeCode??item.job.photoSizeCode??""} · ${photoSettingsByJobId[item.job.id]?.photosPerPage??batchStatuses[item.job.id]?.photosPerPage??item.job.photosPerPage??"layout not recorded"} per A4 page · ${batchStatuses[item.job.id]?.pageCount??item.job.pageCount} A4 pages`:`${customerDocumentOutputSummary(item.job.pageCount,printSettingsByJobId[item.job.id]?.copies??item.job.copies,printSettingsByJobId[item.job.id]?.pagesPerSheet??item.job.pagesPerSheet??1,printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)} · ${printSettingsByJobId[item.job.id]?.colourMode??"Mono"} · ${(printSettingsByJobId[item.job.id]?.isDuplex??item.job.isDuplex??false)?"Double-sided":"Single-sided"} · ${printSettingsByJobId[item.job.id]?.paperSize??item.job.paperSize??"A4"} · ${(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="LANDSCAPE"?"Landscape":(printSettingsByJobId[item.job.id]?.orientation??item.job.orientation??"AUTO")==="PORTRAIT"?"Portrait":"Auto orientation"}`} · {(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor)>0?money(batchStatuses[item.job.id]?.quotedAmountMinor??item.job.quotedAmountMinor,item.job.currency):"Awaiting quote"}</small></span>
             <Status
               label={quoteExpiredForBatchItem(item)&&!["REJECTED","REFUNDED"].includes(statusForBatchItem(item))?"Quote expired":customerStatusLabel(batchStatuses[item.job.id]?.status??item.job.status??"UPLOADED")}
@@ -6827,7 +6860,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
             : entry.item.job.pageCount+" source "+(entry.item.job.pageCount===1?"page":"pages")+" · "+entry.item.job.copies+" "+(entry.item.job.copies===1?"copy":"copies")+" · quote not available yet";
           const lineState=entry.excluded
             ?"Excluded"
-            :needsFreshQuote?(entry.quote?"Quote expired":"Quote needed")
+            :needsFreshQuote?(entry.quote?"Price refresh needed":"Quote needed")
               :!entry.quote?customerStatusLabel(status)
                 :quoteExpired?"Quote locked · "+customerStatusLabel(status)
                   :"Included in total";
@@ -6855,12 +6888,12 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
           <div className="customer-batch-print-total"><span><strong>{t("Total output")}</strong><small>{t("Page sides and prepared A4 sheets, grouped by print type")}</small></span><strong>{batchQuoteBreakdown.totalOutputPagesAndSheets}</strong></div>
         </div>
       </details>}
-      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh > 0 ? t("Only files with a current quote are included in this displayed total. Calculate a fresh quote for the highlighted files before sending the batch to the shop.") + " " : ""}{t("This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them.")} <InfoTooltip label={t("How your quote is calculated")}><span>{t("Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.")}</span><span>{t("Standalone JPG/PNG documents count as one page each.")}</span><span>{t("ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.")}</span><span>{t("Photo printing is priced per finished photo; the A4 page count is shown for planning.")}</span><span>{t("Duplex printing can place two output sides on one physical sheet.")}</span><span>{t("Rejected or refunded files are excluded from the total.")}</span></InfoTooltip></p>
+      <p className="customer-payment-model-note customer-quote-explanation">{batchQuoteNeedsRefresh > 0 ? t("Only files with a current quote are included in this displayed total. Prices are being refreshed for the highlighted files. Review any change before continuing.") + " " : ""}{t("This is a quote, not a payment. You will pay once for the accepted files after the shop confirms them.")} <InfoTooltip label={t("How your quote is calculated")}><span>{t("Normal PDF/document pages are original pages. For N-up printing, pages per sheet groups source pages onto output sides; the quote counts those output sides after copies.")}</span><span>{t("Standalone JPG/PNG documents count as one page each.")}</span><span>{t("ID cards are counted as prepared A4 sheets and use the dedicated ID-card rate.")}</span><span>{t("Photo printing is priced per finished photo; the A4 page count is shown for planning.")}</span><span>{t("Duplex printing can place two output sides on one physical sheet.")}</span><span>{t("Rejected or refunded files are excluded from the total.")}</span></InfoTooltip></p>
     </section>}
     {canSendBatch&&<button className="customer-flow-button" disabled={busy} onClick={()=>void acceptQuote()}>{busy?<span className="button-spinner"/> : t("Send batch to shop")}</button>}
-      {jobStatus?.status==="QUOTE_EXPIRED"&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};if(uploaded)delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:uploaded?[uploaded]:[]);}}>{t("Request a fresh quote")}</button>}
+      {uploaded&&quoteExpiredForBatchItem(uploaded)&&!shouldBlockQuoteRefreshForStatus(statusForBatchItem(uploaded))&&!batchLockedForPayment&&!hasSelectedLegacyIndividualPayment&&<button className="customer-flow-button" disabled={busy} onClick={()=>{setQuote(null);setQuotesByJobId(current=>{const next={...current};delete next[uploaded.job.id];return next;});void getQuote(uploadedBatch.length?uploadedBatch:[uploaded]);}}>{t("Refresh price")}</button>}
     {jobStatus&&<div className="customer-job-state" role="status" aria-live="polite"><div className="customer-job-state-top"><Status label={customerStatusLabel(jobStatus.status)} tone={customerStatusTone(jobStatus.status)}/><button className="customer-refresh-status" disabled={busy} onClick={()=>void refreshJobStatus()}>{busy?<span className="button-spinner"/>:"Refresh status"}</button></div>
-      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?t("Virtual printer test completed · no physical print was made"):t("Development test PDF generated · no physical print was made")):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?t("Your print is ready — your document has been removed from the shop computer"):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?t("Your print is ready — removing your document from the shop computer"):nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?t("Your request is with the shop"):jobStatus.status==="AWAITING_PAYMENT"?t("Your quote is ready for payment"):jobStatus.status==="LOCAL_QUEUE_CLAIMED"?t("Shop computer is preparing your file"):jobStatus.status==="LOCAL_QUEUE_READY"?t("Your file is ready for printing"):jobStatus.status==="PRINT_AUTHORISED"?t("Waiting for the shop computer"):jobStatus.status==="PRINT_SUBMITTING"?t("Your document is being sent to the printer"):jobStatus.status==="SPOOLER_ACCEPTED"?t("The printer queue accepted your document"):jobStatus.status==="PRINTING"?t("Your document is printing"):jobStatus.status==="OUTPUT_UNCONFIRMED"?t("The shop is checking your print"):jobStatus.status==="COMPLETED"?t("Your print is ready"):jobStatus.status==="PDF_EXPORTED"?t("Your PDF is ready"):jobStatus.status==="REFUNDED"?t("This file was fully refunded"):jobStatus.status==="CANCELLED"?t("This request was cancelled"):jobStatus.status==="FAILED"?t("This request could not be completed"):jobStatus.status==="PAID_AUTHORISED"?t("Your payment is verified"):jobStatus.status==="REJECTED"?t("The shop could not accept this request"):jobStatus.status==="QUOTE_EXPIRED"?t("Your quote has expired"):t("Your request is being reviewed")}</strong>
+      <strong>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?t("Virtual printer test completed · no physical print was made"):t("Development test PDF generated · no physical print was made")):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"&&jobStatus.privateDocumentPurgedUtc?t("Your print is ready — your document has been removed from the shop computer"):jobStatus.privatePrinting&&jobStatus.status==="COMPLETED"?t("Your print is ready — removing your document from the shop computer"):nativeAppMode?smartPrintNativeHeadline(jobStatus.status):jobStatus.status==="AWAITING_SHOP_APPROVAL"?t("Your request is with the shop"):jobStatus.status==="AWAITING_PAYMENT"?t("Your quote is ready for payment"):jobStatus.status==="LOCAL_QUEUE_CLAIMED"?t("Shop computer is preparing your file"):jobStatus.status==="LOCAL_QUEUE_READY"?t("Your file is ready for printing"):jobStatus.status==="PRINT_AUTHORISED"?t("Waiting for the shop computer"):jobStatus.status==="PRINT_SUBMITTING"?t("Your document is being sent to the printer"):jobStatus.status==="SPOOLER_ACCEPTED"?t("The printer queue accepted your document"):jobStatus.status==="PRINTING"?t("Your document is printing"):jobStatus.status==="OUTPUT_UNCONFIRMED"?t("The shop is checking your print"):jobStatus.status==="COMPLETED"?t("Your print is ready"):jobStatus.status==="PDF_EXPORTED"?t("Your PDF is ready"):jobStatus.status==="REFUNDED"?t("This file was fully refunded"):jobStatus.status==="CANCELLED"?t("This request was cancelled"):jobStatus.status==="FAILED"?t("This request could not be completed"):jobStatus.status==="PAID_AUTHORISED"?t("Your payment is verified"):jobStatus.status==="REJECTED"?t("The shop could not accept this request"):jobStatus.status==="QUOTE_EXPIRED"?t("Your price needs refreshing"):t("Your request is being reviewed")}</strong>
       <small className="customer-job-updated">{t("Last updated · {date}",{date:formatIstDateTime(jobStatus.updatedUtc)})}</small>
       <p>{jobStatus.status==="TEST_OUTPUT_READY"?(jobStatus.outputMode==="UNSUPPORTED_VIRTUAL"?t("The authorised virtual Windows queue completed the test through the normal spooler path. This is not physical fulfilment and is not ready for collection."):t("This was a test only. No physical pages were printed."))
         :jobStatus.status==="AWAITING_SHOP_APPROVAL"?t("The shop is reviewing your files. No payment has been collected.")
@@ -6880,7 +6913,7 @@ function CustomerPrintFlow({dark,publicCode,sessionToken,paymentOptions,localAge
         :jobStatus.status==="CANCELLED"?t("This request was cancelled.")
         :jobStatus.status==="FAILED"?t("Printing could not be completed. Please speak to the shop before submitting again.")
         :jobStatus.status==="REJECTED"?t("The shop could not accept this file. Please ask the shop for help.")
-        :jobStatus.status==="QUOTE_EXPIRED"?t("The price has expired. Please request a fresh quote.")
+        :jobStatus.status==="QUOTE_EXPIRED"?t("We are checking the current price. Review any change before continuing.")
         :t("Your request is being processed. Refresh to check again.")}</p>
       {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&!jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-pending" role="status" aria-live="polite"><Clock3 size={16}/><span><strong>{t("Removing the shop copy")}</strong>{t("The authorised test output is ready. The shop copy is being securely removed.")}</span></div>}
       {jobStatus.privatePrinting&&jobStatus.status==="TEST_OUTPUT_READY"&&jobStatus.privateDocumentPurgedUtc&&<div className="customer-private-purge-status customer-private-purge-complete" role="status" aria-live="polite"><ShieldCheck size={16}/><span><strong>{t("Shop copy removed")}</strong>{t("The test output is not physical fulfilment and is not ready for collection.")}</span></div>}

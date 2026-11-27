@@ -1,11 +1,17 @@
 import { sha256Blob } from "./streaming-file-hash";
-import { preparePrivateQsp2Upload, type PrivateQsp2UploadFactory } from "./private-qsp2-upload";
+import { preparePrivateQsp2Upload, type PrivateQsp2UploadAttempt, type PrivateQsp2UploadFactory } from "./private-qsp2-upload";
 import { isUncompletedLocalUploadTicketExpired } from "./local-upload-routing";
 import { UPLOAD_LIMITS } from "./upload-limits.generated";
 import { identifySupportedDocument } from "./document-content-policy";
 import { getLocalPreviewEndpointCandidates, isPrivateLocalPreviewEndpoint } from "./local-preview-routing";
 import { getLocalAgentStatus, isDesktopApp, writeDesktopSession } from "./desktop-bridge";
 import { authStorageKey } from "./portal-routing";
+import {
+  customerPrivateRelayPollDelay,
+  shouldReconcileCustomerPrivateRelayPostError,
+  shouldRetryCustomerPrivateRelayStatusError,
+  hasReachedCustomerPrivateRelayStatusErrorLimit
+} from "./private-relay-retry";
 export interface AuthTokens {
   tokenType: string;
   accessToken: string;
@@ -298,6 +304,12 @@ export class LocalUploadOutcomeUnknownError extends Error {
     super(message);
     this.name = "LocalUploadOutcomeUnknownError";
   }
+}
+
+function privateRelayStatusUnavailableError():LocalUploadOutcomeUnknownError {
+  return new LocalUploadOutcomeUnknownError(
+    "The shop's status service is temporarily unavailable after eight consecutive checks. Your original Private Printing ticket is preserved. Reconnect and retry this same file to continue; no new print request, cloud storage or plaintext fallback was created."
+  );
 }
 
 function validateUploadFileSize(file: File): void {
@@ -1702,7 +1714,7 @@ function createLocalUploadGrantToken(): string {
 }
 
 type CustomerPrivateRelayStatus =
-  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
+  | { state: "PENDING"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; uploadInProgress?: boolean; message?: string }
   | { state: "FAILED" | "EXPIRED"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string }
   | { state: "READY"; stage?: string; stageMessage?: string; stageUpdatedUtc?: string | null; transferPath?: "DIRECT_LAN" | "CLOUD_RELAY" | null; message?: string; uploadResult: UploadedPrintJob };
 
@@ -1746,19 +1758,34 @@ async function pollCustomerPrivateRelayStages(
   signal?:AbortSignal
 ):Promise<void> {
   if(!signal)return;
+  let lastStage:string|null=null;
+  let pendingChecks=0;
+  let consecutiveErrors=0;
   while(!signal.aborted){
+    let stageChanged=false;
     try {
       const status=await getCustomerPrivateRelayStatus(sessionToken,ticket,grantToken,signal);
+      consecutiveErrors=0;
+      const currentStage=status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state);
+      stageChanged=currentStage!==lastStage;
+      lastStage=currentStage;
+      pendingChecks=stageChanged?0:pendingChecks+1;
       onStage?.(
-        status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state),
+        currentStage,
         status.stageMessage??status.message??"Checking the secure shop handoff",
         status.stageUpdatedUtc
       );
       if(status.state!=="PENDING")return;
-    } catch {
+    } catch(exception) {
       if(signal.aborted)return;
+      if(!shouldRetryCustomerPrivateRelayStatusError(exception))return;
+      consecutiveErrors+=1;
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))return;
     }
-    await waitForCustomerStagePoll(1200,signal);
+    await waitForCustomerStagePoll(
+      customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,stageChanged),
+      signal
+    );
   }
 }
 
@@ -1772,8 +1799,23 @@ async function uploadCustomerPrivateRelay(
   onProgress?: CustomerUploadProgressCallback
 ): Promise<UploadedPrintJob> {
   // A direct LAN request may have completed even if its response was lost.
-  // Check the canonical ticket before attempting a second transport.
-  const existing = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+  // Check the canonical ticket before attempting a second transport. Retry only
+  // transient status-read failures; never retry a rejected ticket or grant.
+  let existing:CustomerPrivateRelayStatus;
+  let initialStatusErrors=0;
+  while(true){
+    try {
+      existing=await getCustomerPrivateRelayStatus(sessionToken,ticket,grantToken);
+      break;
+    } catch(exception) {
+      if(!shouldRetryCustomerPrivateRelayStatusError(exception))throw exception;
+      initialStatusErrors+=1;
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(initialStatusErrors))
+        throw privateRelayStatusUnavailableError();
+      await new Promise(resolve=>window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(0,initialStatusErrors,false)));
+    }
+  }
   onStage?.(
     existing.stage ?? (existing.state === "PENDING" ? "WAITING_FOR_AGENT" : existing.state),
     existing.stageMessage ?? existing.message ?? "Checking the secure shop handoff",
@@ -1804,26 +1846,34 @@ async function uploadCustomerPrivateRelay(
 
   // A direct Agent claim already owns this ticket. Do not start a cloud relay
   // concurrently; reconcile that same local handoff first to prevent duplicate
-  // queue staging after a lost LAN response.
+  // queue staging after a lost LAN response. This has not started a second encrypted transfer.
   if (existing.state === "PENDING" &&
-      (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY")) {
-    const activeTransferLabel = existing.transferPath === "DIRECT_LAN"
-      ? "direct shop-Wi-Fi"
-      : "encrypted cloud-relay";
-    const deadline = Date.now() + 45_000;
+      (existing.transferPath === "DIRECT_LAN" || existing.transferPath === "CLOUD_RELAY" || existing.uploadInProgress)) {
     let lastStageMessage = existing.stageMessage ?? existing.message ?? "The shop computer is receiving the encrypted file";
-    while (Date.now() < deadline) {
-      await new Promise(resolve => window.setTimeout(resolve, 2_500));
+    let lastStage = existing.stage ?? "WAITING_FOR_AGENT";
+    let pendingChecks = 0;
+    let consecutiveErrors = 0;
+    while (true) {
+      await new Promise(resolve => window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(pendingChecks, consecutiveErrors, false)));
       let status:CustomerPrivateRelayStatus;
       try {
         status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+        consecutiveErrors = 0;
       } catch (exception) {
-        if (exception instanceof ApiError && exception.status >= 400) throw exception;
+        if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
+        consecutiveErrors += 1;
+        if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))
+          throw privateRelayStatusUnavailableError();
         continue;
       }
+      const currentStage = status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state);
+      const stageChanged = currentStage !== lastStage;
+      lastStage = currentStage;
+      pendingChecks = stageChanged ? 0 : pendingChecks + 1;
       lastStageMessage = status.stageMessage ?? status.message ?? lastStageMessage;
       onStage?.(
-        status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+        currentStage,
         lastStageMessage,
         status.stageUpdatedUtc
       );
@@ -1848,10 +1898,10 @@ async function uploadCustomerPrivateRelay(
           status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
         );
       }
+      // The prior upload or LAN claim has ended without accepting a relay.
+      // It is now safe to resume the same ticket with a new encrypted attempt.
+      if(status.state === "PENDING" && !status.transferPath && !status.uploadInProgress)break;
     }
-    throw new LocalUploadOutcomeUnknownError(
-      "The original "+activeTransferLabel+" transfer is still being reconciled: "+lastStageMessage+". Retry this same file to check its existing ticket; SmartPrint has not started a second encrypted transfer."
-    );
   }
 
   if (!privateUpload) {
@@ -1860,44 +1910,92 @@ async function uploadCustomerPrivateRelay(
     );
   }
 
-  try {
-    const attempt = await privateUpload.createAttempt();
-    await apiRequest<{ accepted: boolean; duplicateRequest?: boolean }>(
+  let ambiguousRelayPost=false;
+  let relayPostRetryCount=0;
+  let unclaimedPendingChecks=0;
+  const postPrivateRelayAttempt=async(attempt:PrivateQsp2UploadAttempt)=>{
+    await apiRequest<{accepted:boolean;duplicateRequest?:boolean}>(
       `/api/v1/public/sessions/current/local-upload-tickets/${encodeURIComponent(ticket.id)}/private-relay`,
       {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/vnd.smartprint.qsp2",
-          "X-Print-Session": sessionToken,
-          "X-Print-Upload-Grant": grantToken,
-          "X-Print-Encrypted-Format": "QSP2",
-          "X-Print-Encrypted-Key": attempt.wrappedKey,
-          "X-Print-Encrypted-Size": String(attempt.encryptedSizeBytes)
+        method:"POST",
+        headers:{
+          "Content-Type":"application/vnd.smartprint.qsp2",
+          "X-Print-Session":sessionToken,
+          "X-Print-Upload-Grant":grantToken,
+          "X-Print-Encrypted-Format":"QSP2",
+          "X-Print-Encrypted-Key":attempt.wrappedKey,
+          "X-Print-Encrypted-Size":String(attempt.encryptedSizeBytes)
         },
-        body: attempt.body,
-        duplex: "half"
-      } as RequestInit & { duplex: "half" }
+        body:attempt.body,
+        duplex:"half"
+      } as RequestInit & {duplex:"half"}
     );
-  } catch (exception) {
-    // A lost HTTP response does not prove that the ciphertext was not stored.
-    // Poll the same ticket/grant before deciding that the transfer failed.
-    if (exception instanceof ApiError && exception.status >= 400) throw exception;
+  };
+  const initialRelayAttempt=await privateUpload.createAttempt();
+  try {
+    await postPrivateRelayAttempt(initialRelayAttempt);
+  } catch(exception) {
+    // Do not repeat a rejected payload. Ambiguous outcomes are reconciled against
+    // the canonical ticket before a single guarded retry is considered.
+    if(!shouldReconcileCustomerPrivateRelayPostError(exception))throw exception;
+    ambiguousRelayPost=true;
   }
 
-  const deadline = Date.now() + 45_000;
   let lastStageMessage=existing.stageMessage??existing.message??"Waiting for the shop computer";
-  while (Date.now() < deadline) {
+  let lastStage=existing.stage??"WAITING_FOR_AGENT";
+  let pendingChecks=0;
+  let consecutiveErrors=0;
+  while (true) {
     let status: CustomerPrivateRelayStatus;
     try {
       status = await getCustomerPrivateRelayStatus(sessionToken, ticket, grantToken);
+      consecutiveErrors=0;
     } catch (exception) {
-      if (exception instanceof ApiError && exception.status >= 400) throw exception;
-      await new Promise(resolve => window.setTimeout(resolve, 5_000));
+      if (!shouldRetryCustomerPrivateRelayStatusError(exception)) throw exception;
+      consecutiveErrors+=1;
+      if(hasReachedCustomerPrivateRelayStatusErrorLimit(consecutiveErrors))
+        throw privateRelayStatusUnavailableError();
+      await new Promise(resolve => window.setTimeout(resolve,
+        customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,false)));
       continue;
     }
+    if(status.state==="PENDING"){
+      if(status.transferPath){
+        ambiguousRelayPost=false;
+        unclaimedPendingChecks=0;
+      }else if(status.uploadInProgress){
+        unclaimedPendingChecks=0;
+      }else if(ambiguousRelayPost&&relayPostRetryCount===0){
+        unclaimedPendingChecks+=1;
+        if(unclaimedPendingChecks>=2){
+          // The server confirms on two separate reads that this ticket has no
+          // accepted relay or live LAN claim. Retry once with a fresh QSP2 key/
+          // nonce; the API's ticket row lock makes a concurrent first commit safe.
+          relayPostRetryCount+=1;
+          ambiguousRelayPost=false;
+          unclaimedPendingChecks=0;
+          let retryAttempt:PrivateQsp2UploadAttempt;
+          try {
+            retryAttempt=await privateUpload.createAttempt();
+          }catch {
+            throw new LocalUploadOutcomeUnknownError("The original Private Printing ticket is preserved, but a fresh encrypted retry could not be prepared. Retry this same file to reconcile the existing request; no cloud or plaintext fallback will be used.");
+          }
+          try {
+            await postPrivateRelayAttempt(retryAttempt);
+          }catch(postException){
+            if(!shouldReconcileCustomerPrivateRelayPostError(postException))throw postException;
+            ambiguousRelayPost=true;
+          }
+        }
+      }
+    }
+    const currentStage=status.stage??(status.state==="PENDING"?"WAITING_FOR_AGENT":status.state);
+    const stageChanged=currentStage!==lastStage;
+    lastStage=currentStage;
+    pendingChecks=stageChanged?0:pendingChecks+1;
     lastStageMessage=status.stageMessage??status.message??lastStageMessage;
     onStage?.(
-      status.stage ?? (status.state === "PENDING" ? "WAITING_FOR_AGENT" : status.state),
+      currentStage,
       lastStageMessage,
       status.stageUpdatedUtc
     );
@@ -1922,12 +2020,9 @@ async function uploadCustomerPrivateRelay(
         status.state === "FAILED" ? "private_relay_validation_failed" : "private_relay_expired"
       );
     }
-    await new Promise(resolve => window.setTimeout(resolve, 5_000));
+    await new Promise(resolve => window.setTimeout(resolve,
+      customerPrivateRelayPollDelay(pendingChecks,consecutiveErrors,stageChanged)));
   }
-
-  throw new LocalUploadOutcomeUnknownError(
-    "The shop computer is at this stage: "+lastStageMessage+". Processing may still be active. Retry this same file to refresh the original ticket; SmartPrint will not create a duplicate upload."
-  );
 }
 
 function createStreamingLocalMultipartBody(
@@ -2098,6 +2193,14 @@ export async function uploadCustomerDocumentLocally(
           "private_relay_expired"
         );
       }
+      if (expiredStatus?.state === "PENDING" && expiredStatus.transferPath) {
+        // The original encrypted transfer was accepted or claimed. Resume its
+        // durable status reconciliation automatically; never ask the customer
+        // to click again or create another encrypted payload.
+        return uploadCustomerPrivateRelay(
+          sessionToken, file, ticket, grantToken, null, onStage, onProgress
+        );
+      }
       throw new LocalUploadOutcomeUnknownError("Your secure print request is still attached to its original ticket. SmartPrint will check it again when the shop computer reconnects.");
     }
     // Keep the original ticket/grant: its monthly quota and batch capacity are
@@ -2160,8 +2263,15 @@ export async function uploadCustomerDocumentLocally(
         "private_relay_validation_failed"
       );
     }
+    if (completed.state === "PENDING" && completed.transferPath) {
+      // The ticket already has a live encrypted transfer. Keep reconciling it
+      // instead of returning an error that forces a second customer action.
+      return uploadCustomerPrivateRelay(
+        sessionToken, file, ticket, grantToken, null, onStage, onProgress
+      );
+    }
     throw new LocalUploadOutcomeUnknownError(
-      "This private print request is already being checked by the shop computer. Retry to refresh its status; SmartPrint will not create another upload."
+      "This private print request is already being checked by the shop computer. SmartPrint will not create another upload."
     );
   }
 

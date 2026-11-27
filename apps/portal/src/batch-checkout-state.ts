@@ -12,8 +12,6 @@ export function shouldBlockBatchCheckoutForExpiredQuote(
 
 
 const quoteRefreshBlockedStatuses = new Set([
-  "AWAITING_SHOP_APPROVAL",
-  "AWAITING_PAYMENT",
   "AWAITING_CUSTOMER_PAYMENT",
   "CUSTOMER_REPORTED",
   "CASH_AWAITING_PAYMENT",
@@ -36,7 +34,7 @@ const quoteRefreshBlockedStatuses = new Set([
   "CANCELLED"
 ]);
 
-/** Prevents a new quote from replacing an order once acceptance, payment or fulfilment has started. */
+/** Prevents quote replacement after a payment attempt or fulfilment has started. */
 export function shouldBlockQuoteRefreshForStatus(status: string | null | undefined): boolean {
   return typeof status === "string" && quoteRefreshBlockedStatuses.has(status.toUpperCase());
 }

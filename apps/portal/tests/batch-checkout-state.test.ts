@@ -20,9 +20,15 @@ test("an unexpired quote never blocks checkout", () => {
   }
 });
 
-test("quote refresh cannot replace an accepted, paid, refunded, or fulfilled order", () => {
+test("quote refresh can renew an expired quote before payment starts", () => {
+  for (const status of ["AWAITING_SHOP_APPROVAL", "AWAITING_PAYMENT"]) {
+    assert.equal(shouldBlockQuoteRefreshForStatus(status), false, status);
+  }
+});
+
+test("quote refresh cannot replace a payment-started, paid, refunded, or fulfilled order", () => {
   for (const status of [
-    "AWAITING_SHOP_APPROVAL", "AWAITING_PAYMENT", "AWAITING_CUSTOMER_PAYMENT",
+    "AWAITING_CUSTOMER_PAYMENT",
     "CUSTOMER_REPORTED", "CASH_AWAITING_PAYMENT", "PAYMENT_REPORTED", "VERIFIED",
     "PARTIALLY_REFUNDED", "PAID_AUTHORISED", "LOCAL_QUEUE_CLAIMED", "LOCAL_QUEUE_READY",
     "PRINT_AUTHORISED", "PRINT_SUBMITTING", "SPOOLER_ACCEPTED", "PRINTING",

@@ -33,4 +33,33 @@ public sealed class PrintJobQuoteRulesTests
     {
         Assert.False(PrintJobQuoteRules.CanCreateQuote(null));
     }
+
+    [Theory]
+    [InlineData("AWAITING_CUSTOMER_APPROVAL", "AWAITING_CUSTOMER_APPROVAL")]
+    [InlineData("AWAITING_SHOP_APPROVAL", "AWAITING_SHOP_APPROVAL")]
+    [InlineData("AWAITING_PAYMENT", "AWAITING_PAYMENT")]
+    public void UnchangedPricingCardPreservesTheExistingApprovalStage(string previous, string expected)
+    {
+        Assert.Equal(expected, PrintJobQuoteRules.ResolveStatusAfterQuote(previous, true, false, true));
+    }
+
+    [Theory]
+    [InlineData("AWAITING_PAYMENT", true)]
+    [InlineData("AWAITING_CUSTOMER_APPROVAL", true)]
+    [InlineData("AWAITING_SHOP_APPROVAL", true)]
+    [InlineData("PAYMENT_REJECTED", true)]
+    public void ChangedShopPricingCardAlwaysRequiresCustomerAcceptance(string previous, bool instantPaymentEnabled)
+    {
+        // Even when the calculated amount is unchanged, a new pricing-card
+        // version requires the customer to review and accept the renewed quote.
+        Assert.Equal("AWAITING_CUSTOMER_APPROVAL",
+            PrintJobQuoteRules.ResolveStatusAfterQuote(previous, true, true, instantPaymentEnabled));
+    }
+
+    [Fact]
+    public void NewQuoteStillHonoursTheShopInstantPaymentPreference()
+    {
+        Assert.Equal("AWAITING_PAYMENT", PrintJobQuoteRules.ResolveStatusAfterQuote(null, false, false, true));
+        Assert.Equal("AWAITING_CUSTOMER_APPROVAL", PrintJobQuoteRules.ResolveStatusAfterQuote(null, false, false, false));
+    }
 }

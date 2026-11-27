@@ -43,7 +43,7 @@ const statusMessages: Record<string, string> = {
   CANCELLED: "This request was cancelled.",
   FAILED: "Printing could not be completed. Please speak to the shop.",
   REJECTED: "The shop could not accept this file. Please ask the shop for help.",
-  QUOTE_EXPIRED: "Your quote has expired · Request a new quote.",
+  QUOTE_EXPIRED: "We are checking the current price. Review any change before continuing.",
   LOCAL_QUEUE_CLAIMED: "The shop computer has picked up your request and is preparing your file.",
   LOCAL_QUEUE_READY: "Your file is safely stored on the shop computer and ready for the shop to print.",
   VERIFIED: "Payment received. The shop is preparing your print."
