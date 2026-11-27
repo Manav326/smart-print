@@ -903,19 +903,19 @@ class MainActivity : AppCompatActivity() {
     ): NavigationBarView {
         val created = if (useRail) NavigationRailView(this) else BottomNavigationView(this)
         created.apply {
-            menu.add(Menu.NONE, HOME, 0, "Home").apply {
+            menu.add(Menu.NONE, HOME, 0, AndroidCustomerLocale.translate(this@MainActivity, "Home")).apply {
                 setIcon(R.drawable.ic_nav_home)
                 setContentDescription("Home")
             }
-            menu.add(Menu.NONE, FILES, 1, "Files").apply {
+            menu.add(Menu.NONE, FILES, 1, AndroidCustomerLocale.translate(this@MainActivity, "Files")).apply {
                 setIcon(R.drawable.ic_nav_files)
-                setContentDescription("My Files")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "My Files"))
             }
-            menu.add(Menu.NONE, SCAN_PRINT, 2, "Print").apply {
+            menu.add(Menu.NONE, SCAN_PRINT, 2, AndroidCustomerLocale.translate(this@MainActivity, "Print")).apply {
                 setIcon(R.drawable.ic_nav_scan_print)
-                setContentDescription("Print at a shop")
+                setContentDescription(AndroidCustomerLocale.translate(this@MainActivity, "Print at a shop"))
             }
-            menu.add(Menu.NONE, ACTIVITY, 3, "Activity").apply {
+            menu.add(Menu.NONE, ACTIVITY, 3, AndroidCustomerLocale.translate(this@MainActivity, "Activity")).apply {
                 setIcon(R.drawable.ic_nav_activity)
                 setContentDescription("Activity")
             }
@@ -1279,7 +1279,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(14), dp(14), dp(14), dp(14))
         }
         val displayName = EditText(this).apply {
-            hint = "Name"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, "Name")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_CAP_WORDS
             visibility = if (accountCreateMode) View.VISIBLE else View.GONE
             maxLines = 1
@@ -1289,7 +1289,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(11), dp(12), dp(11))
         }
         val email = EditText(this).apply {
-            hint = "Email address"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, "Email address")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS
             maxLines = 1
             setTextColor(getColor(R.color.qp_text))
@@ -1298,7 +1298,7 @@ class MainActivity : AppCompatActivity() {
             setPadding(dp(12), dp(11), dp(12), dp(11))
         }
         val password = EditText(this).apply {
-            hint = if (accountCreateMode) "Password · 12+ chars" else "Password"
+            hint = AndroidCustomerLocale.translate(this@MainActivity, if (accountCreateMode) "Password · 12+ chars" else "Password")
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD
             maxLines = 1
             setTextColor(getColor(R.color.qp_text))
