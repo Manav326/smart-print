@@ -77,7 +77,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
     <section className="platform-data-page">
       <div className="platform-data-intro">
         <div>
-          <div className="platform-plan-kicker"><Activity size={14}/> DATA &amp; NETWORK INTELLIGENCE</div>
+          <div className="platform-plan-kicker"><Activity size={14}/> {t("DATA &amp; NETWORK INTELLIGENCE")}</div>
           <h2>{t("Where SmartPrint data moves")}</h2>
           <p>{t("Measured original-document payload across cloud transfer and shop Wi-Fi paths. Each network leg is counted separately from unique files.")}</p>
         </div>
@@ -98,7 +98,7 @@ export default function PlatformDataNetworkSection({ tokens }: { tokens: AuthTok
 
       {error && <div className="inline-error" role="alert">{error}</div>}
       {loading && !report ? (
-        <div className="panel platform-loading"><span className="button-spinner"/> Loading measured transfer data…</div>
+        <div className="panel platform-loading"><span className="button-spinner"/>{t("Loading measured transfer data…")}</div>
       ) : report ? (
         <>
           <div className="platform-data-window">
