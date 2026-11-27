@@ -225,9 +225,43 @@ async function preparePage(context, route) {
                         verifiedCollectionsByMethod: [],
                         refundsRecordedByMethod: []
                       }
-                    : path.endsWith("/pricing") || path.endsWith("/payment-settings") || path.endsWith("/subscription")
-                      ? null
-                      : [];
+                    : path.endsWith("/subscription")
+                      ? {
+                          generatedUtc: "2026-11-27T00:00:00.000Z",
+                          subscription: {
+                            id: "e2e-shop-subscription",
+                            planCode: "TRIAL",
+                            status: "Trial",
+                            billingInterval: "Monthly",
+                            periodStartUtc: "2026-11-01T00:00:00.000Z",
+                            periodEndUtc: "2026-12-01T00:00:00.000Z",
+                            createdUtc: "2026-11-01T00:00:00.000Z"
+                          },
+                          plan: null,
+                          entitlements: {
+                            maxPrinters: 3,
+                            maxAgentDevices: 2,
+                            maxQrStations: 3,
+                            maxMonthlyPrintJobs: 500,
+                            maxDocumentBytes: 52428800,
+                            cloudAssistedPrintingEnabled: true,
+                            whiteLabelEnabled: false,
+                            advancedReportsEnabled: false,
+                            isLegacyUnconfigured: false,
+                            isAccessActive: true
+                          },
+                          usage: {
+                            printerCount: 1,
+                            agentDeviceCount: 1,
+                            qrStationCount: 0,
+                            monthlyPrintJobCount: 8,
+                            monthlyPeriodStartUtc: "2026-11-01T00:00:00.000Z",
+                            monthlyPeriodEndUtc: "2026-12-01T00:00:00.000Z"
+                          }
+                        }
+                      : path.endsWith("/pricing") || path.endsWith("/payment-settings")
+                        ? null
+                        : [];
       await request.fulfill({
         status: 200,
         contentType: "application/json",
