@@ -72,7 +72,7 @@ public sealed class Worker(
     // notification listener is restarting; idle shops no longer poll every 4 seconds.
     private async Task RunPrivateRelayLoopAsync(CancellationToken cancellationToken)
     {
-        var retryDelay = TimeSpan.FromSeconds(5);
+        var consecutiveFailures = 0;
         while (!cancellationToken.IsCancellationRequested)
         {
             var pollSucceeded = false;
@@ -100,13 +100,15 @@ public sealed class Worker(
                 // The per-Agent PostgreSQL signal is shared by private uploads,
                 // paid-document assignment and authorised print dispatch.
                 SignalPrintWork();
-                retryDelay = TimeSpan.FromSeconds(5);
+                consecutiveFailures = 0;
                 continue;
             }
 
-            try { await Task.Delay(retryDelay, cancellationToken); }
+            consecutiveFailures = Math.Min(consecutiveFailures + 1, 16);
+            var retryDelayMilliseconds = AgentLoopIntervals.ResolvePrivateRelayRetryDelayMilliseconds(
+                consecutiveFailures, Random.Shared.NextDouble());
+            try { await Task.Delay(TimeSpan.FromMilliseconds(retryDelayMilliseconds), cancellationToken); }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { break; }
-            retryDelay = TimeSpan.FromSeconds(Math.Min(60, retryDelay.TotalSeconds * 2));
         }
     }
 
