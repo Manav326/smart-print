@@ -1176,7 +1176,7 @@ class MainActivity : AppCompatActivity() {
                 dialog.dismiss()
                 if (profileVisible) showProfile() else when (navigation.selectedItemId) {
                     FILES -> showFiles()
-                    SCAN_PRINT -> showScanPrint()
+                    SCAN_PRINT -> if (portalUrl != null) showPrint() else showScanPrint()
                     ACTIVITY -> showActivity()
                     else -> showHome()
                 }
