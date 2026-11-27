@@ -351,13 +351,13 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
                 <span className="platform-plan-draft-pill">{t("Draft")}</span>
               </div>
               <div className="platform-plan-meta-grid">
-                <Field label="Plan code" hint="Stable uppercase identifier">
+                <Field label={t("Plan code")} hint={t("Stable uppercase identifier")}>
                   <input value={code} onChange={event => setCode(event.target.value)} placeholder={t("e.g. STARTER")} maxLength={40}/>
                 </Field>
-                <Field label="Plan name">
+                <Field label={t("Plan name")}>
                   <input value={name} onChange={event => setName(event.target.value)} placeholder={t("Plan name")} maxLength={100}/>
                 </Field>
-                <Field label="Description" wide>
+                <Field label={t("Description")} wide>
                   <textarea value={description} onChange={event => setDescription(event.target.value)} placeholder={t("What this subscription includes")} rows={2} maxLength={500}/>
                 </Field>
               </div>
@@ -374,16 +374,16 @@ export default function PlatformPlansSection({ tokens }: { tokens: AuthTokens })
               <section className="panel platform-plan-panel">
                 <div className="platform-plan-panel-heading">
                   <div>
-                    <span className="platform-plan-panel-kicker">{selectedPlan.isSystemPlan ? "PROTECTED SYSTEM PLAN" : "PLAN DETAILS"}</span>
+                    <span className="platform-plan-panel-kicker">{selectedPlan.isSystemPlan ? t("PROTECTED SYSTEM PLAN") : t("PLAN DETAILS")}</span>
                     <h3>{selectedPlan.name}</h3>
                     <p>{selectedPlan.code} · {t("created {date}").replace("{date}", formatIstDate(selectedPlan.createdUtc))}</p>
                   </div>
                   {selectedPlan.isSystemPlan ? <span className="platform-plan-protected"><LockKeyhole size={13}/> {t("Protected")}</span> : <span className={active ? "platform-plan-state active" : "platform-plan-state inactive"}>{active ? t("Active") : t("Inactive")}</span>}
                 </div>
                 <div className="platform-plan-meta-grid">
-                  <Field label="Plan name"><input value={name} onChange={event => setName(event.target.value)} disabled={isSystemPlan} maxLength={100}/></Field>
-                  <Field label="Plan code"><input value={selectedPlan.code} disabled/></Field>
-                  <Field label="Description" wide><textarea value={description} onChange={event => setDescription(event.target.value)} disabled={isSystemPlan} rows={2} maxLength={500}/></Field>
+                  <Field label={t("Plan name")}><input value={name} onChange={event => setName(event.target.value)} disabled={isSystemPlan} maxLength={100}/></Field>
+                  <Field label={t("Plan code")}><input value={selectedPlan.code} disabled/></Field>
+                  <Field label={t("Description")} wide><textarea value={description} onChange={event => setDescription(event.target.value)} disabled={isSystemPlan} rows={2} maxLength={500}/></Field>
                 </div>
                 {!isSystemPlan && (
                   <div className="platform-plan-editor-actions platform-plan-metadata-actions">
@@ -504,9 +504,9 @@ function PlanVersionEditor({ form, onChange }: {
 
       <div className="platform-plan-subheading"><div><h4>{t("Product capabilities")}</h4><p>{t("Saved centrally and intended to be evaluated by the server.")}</p></div></div>
       <div className="platform-plan-feature-grid">
-        <FeatureToggle icon={<Cloud size={16}/>} label="Cloud-assisted printing" description="Allow secure cloud transfer for print jobs" checked={form.cloudAssistedPrintingEnabled} onChange={value => onChange("cloudAssistedPrintingEnabled", value)}/>
-        <FeatureToggle icon={<Sparkles size={16}/>} label="White-label experience" description="Remove or replace Smart Print platform branding" checked={form.whiteLabelEnabled} onChange={value => onChange("whiteLabelEnabled", value)}/>
-        <FeatureToggle icon={<FileText size={16}/>} label="Advanced reports" description="Enable expanded shop reporting capabilities" checked={form.advancedReportsEnabled} onChange={value => onChange("advancedReportsEnabled", value)}/>
+        <FeatureToggle icon={<Cloud size={16}/>} label={t("Cloud-assisted printing")} description={t("Allow secure cloud transfer for print jobs")} checked={form.cloudAssistedPrintingEnabled} onChange={value => onChange("cloudAssistedPrintingEnabled", value)}/>
+        <FeatureToggle icon={<Sparkles size={16}/>} label={t("White-label experience")} description={t("Remove or replace Smart Print platform branding")} checked={form.whiteLabelEnabled} onChange={value => onChange("whiteLabelEnabled", value)}/>
+        <FeatureToggle icon={<FileText size={16}/>} label={t("Advanced reports")} description={t("Enable expanded shop reporting capabilities")} checked={form.advancedReportsEnabled} onChange={value => onChange("advancedReportsEnabled", value)}/>
       </div>
     </div>
   );
