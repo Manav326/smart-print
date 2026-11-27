@@ -698,7 +698,6 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         {
             entity.ToTable("PrinterDiagnosticAttempts");
             entity.HasKey(x => x.Id);
-            entity.HasAlternateKey(x => new { x.TenantId, x.Id });
             entity.Property(x => x.TemplateVersion).HasMaxLength(24).IsRequired();
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
             entity.Property(x => x.OwnerDecision).HasMaxLength(32);

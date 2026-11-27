@@ -151,14 +151,6 @@ public static class PrinterDiagnosticEndpoints
             }
 
             var now = DateTimeOffset.UtcNow;
-            var readinessFailure = await ValidatePrinterReadyAsync(
-                db, environment, tenantId, printer, now, ct);
-            if (readinessFailure is not null)
-            {
-                await transaction.RollbackAsync(ct);
-                return readinessFailure;
-            }
-
             var storedIdempotencyKey = $"PD:{printerId:N}:{idempotencyKey}";
             var duplicate = await (
                 from attempt in db.PrinterDiagnosticAttempts.AsNoTracking()
@@ -170,6 +162,8 @@ public static class PrinterDiagnosticEndpoints
             ).SingleOrDefaultAsync(ct);
             if (duplicate is not null)
             {
+                // Idempotent retries return the accepted attempt even if its Agent
+                // or printer went offline after the original request was committed.
                 await transaction.CommitAsync(ct);
                 return Results.Ok(new
                 {
@@ -180,6 +174,14 @@ public static class PrinterDiagnosticEndpoints
                     duplicate.CreatedUtc,
                     DuplicateRequest = true
                 });
+            }
+
+            var readinessFailure = await ValidatePrinterReadyAsync(
+                db, environment, tenantId, printer, now, ct);
+            if (readinessFailure is not null)
+            {
+                await transaction.RollbackAsync(ct);
+                return readinessFailure;
             }
 
             var unresolvedAttempt = await db.PrinterDiagnosticAttempts.AsNoTracking()
@@ -405,8 +407,12 @@ public static class PrinterDiagnosticEndpoints
                 });
 
             await using var transaction = await db.Database.BeginTransactionAsync(ct);
-            var attempt = await db.PrinterDiagnosticAttempts.SingleOrDefaultAsync(
-                item => item.Id == attemptId && item.TenantId == tenantId, ct);
+            // Serialize confirmations for this attempt. A transaction alone does not
+            // prevent two READ COMMITTED requests from both observing ConfirmedUtc=null.
+            var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
+                $"SELECT * FROM \"PrinterDiagnosticAttempts\" WHERE \"TenantId\" = {tenantId} AND \"Id\" = {attemptId} FOR UPDATE")
+                .ToListAsync(ct);
+            var attempt = lockedAttempts.SingleOrDefault();
             if (attempt is null)
             {
                 await transaction.RollbackAsync(ct);

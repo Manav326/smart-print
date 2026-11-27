@@ -199,6 +199,17 @@ public sealed class SpoolerOutputConfirmationPolicyTests
     public void FreshNonTransientAgentObservationReplacesThePreviousState(string? currentStatus, string? incomingStatus) =>
         Assert.False(SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(currentStatus, incomingStatus));
 
+    [Theory]
+    [InlineData("PRINTED", "OUTPUT_UNCONFIRMED", 2, 2, true)]
+    [InlineData("PRINTED", "PRINTER_UNAVAILABLE", 0, 0, true)]
+    [InlineData("PRINTED", "QUEUED", 1, 2, false)]
+    [InlineData("PRINTING", "OUTPUT_UNCONFIRMED", 2, 2, false)]
+    [InlineData("OUTPUT_UNCONFIRMED", "PRINTER_UNAVAILABLE", 2, 2, false)]
+    public void PreservesOnlyCompleteTerminalPrintedEvidence(
+        string currentStatus, string incomingStatus, int pagesPrinted, int totalPages, bool expected) =>
+        Assert.Equal(expected, SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+            currentStatus, incomingStatus, pagesPrinted, totalPages));
+
     [Fact]
     public void IncompletePageProgressCannotBeMarkedCompleteFromQueueAbsence()
     {

@@ -118,6 +118,16 @@ public sealed class PrinterDiagnosticRulesTests
     }
 
     [Fact]
+    public void PrintedEvidenceRemainsTerminalAfterTheAgentReportsTheQueueEntryMissing()
+    {
+        var now = DateTimeOffset.UtcNow;
+        Assert.True(PrinterDiagnosticRules.IsTerminalOutputObservation(
+            PrinterTypePolicy.Physical, "OUTPUT_UNCONFIRMED", "PRINTED",
+            now.AddMinutes(-1), now, "SPOOLER_JOB_NO_LONGER_VISIBLE",
+            123, 2, 2, null, now));
+    }
+
+    [Fact]
     public void MatchesResolvedSettingsAsAnImmutableServerDecision()
     {
         var settings = new PrinterDiagnosticSettings("A4", "Mono", false, 1, "EVIDENCE");

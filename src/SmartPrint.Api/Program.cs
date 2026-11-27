@@ -8745,7 +8745,13 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     job.SpoolerTotalPages = pageProgress.TotalPages;
     if (verifiedSpoolerAbsence)
     {
-        job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+        // A missing queue entry after Windows already reported every page PRINTED
+        // is not a regression in output evidence. Preserve PRINTED while recording
+        // the fresh Agent reconciliation time.
+        if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+                job.SpoolerStatus, "OUTPUT_UNCONFIRMED",
+                pageProgress.PagesPrinted, pageProgress.TotalPages))
+            job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
         job.SpoolerObservedUtc = now;
     }
     job.PrintDispatchLeaseExpiresUtc = null;
@@ -8789,8 +8795,14 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     job.SpoolerPagesPrinted = pageProgress.PagesPrinted;
     job.SpoolerTotalPages = pageProgress.TotalPages;
 
-    // A transient Agent query failure is not proof that a previously retained Windows job has cleared.
-    if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus))
+    // A transient query failure must not clear RETAINED, and a terminal PRINTED
+    // observation with complete page progress must never regress to a stale queue
+    // state or temporary printer error.
+    var preservePrinted = SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+        job.SpoolerStatus, request.SpoolerStatus,
+        pageProgress.PagesPrinted, pageProgress.TotalPages);
+    if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus) &&
+        !preservePrinted)
         job.SpoolerStatus = request.SpoolerStatus;
     job.SpoolerObservedUtc = now;
     job.UpdatedUtc = now;
