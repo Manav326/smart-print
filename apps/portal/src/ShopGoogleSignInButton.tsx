@@ -108,7 +108,7 @@ export default function ShopGoogleSignInButton({
       const tokens = await signInShopWithGoogle(credential, nonce);
       await onAuthenticated(tokens);
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Google sign-in could not be completed.");
+      setError(reason instanceof Error ? t(reason.message) : t("Google sign-in could not be completed."));
     } finally {
       setBusy(false);
     }
