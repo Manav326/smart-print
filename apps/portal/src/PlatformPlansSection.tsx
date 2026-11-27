@@ -98,7 +98,7 @@ function optionalInteger(value: string, label: string, allowZero: boolean): numb
 
 function toVersionInput(form: PlanForm): PlatformPlanVersionInput {
   const currency = form.currency.trim().toUpperCase();
-  if (!/^[A-Z]{3}$/.test(currency)) throw new Error(t("Enter a three-letter currency code."));
+  if (!/^[A-Z]{3}$/.test(currency)) throw new Error("Enter a three-letter currency code.");
   return {
     currency,
     monthlyPriceMinor: optionalMoneyMinor(form.monthlyPriceMinor, "Monthly price", currency),
