@@ -505,10 +505,10 @@ public static class PrinterDiagnosticEndpoints
             job.Status = nextStatus;
             job.UpdatedUtc = now;
             job.PrintDispatchLeaseExpiresUtc = null;
+            // Retain the diagnostic PDF only for the configured completed-document period.
+            job.OutputCompletedUtc = now;
             if (decision == "PRINTED_CORRECTLY")
                 job.OutputConfirmedUtc = now;
-            else if (decision == "OUTPUT_RECEIVED_CORRECTLY")
-                job.OutputCompletedUtc = now;
 
             db.PrintJobEvents.Add(new PrintJobEvent
             {
