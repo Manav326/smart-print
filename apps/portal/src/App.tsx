@@ -2856,7 +2856,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
   onConnect:()=>void;
   onReconnectAfterRevocation:()=>void;
 }) {
-  const { release, state: releaseState } = usePublicRelease();
+  const { release, state: releaseState, refresh } = usePublicRelease();
   const windowsInstallerUrl = release?.windowsAvailable && release.version
     ? getPublicDownloadPath("windows", release.version, release.downloadBaseUrl)
     : null;
@@ -2924,10 +2924,7 @@ function PrintAgentPage({agents,enrollmentCode,busy,onGenerate,onRevoke,desktop,
           downloadUrl={windowsInstallerUrl}
           fallbackDownloadUrl={windowsInstallerFallbackUrl}
           releaseState={releaseState}
-          onRefresh={async () => {
-            // The hook refresh is exposed through the same release metadata service.
-            window.location.reload();
-          }}
+          onRefresh={refresh}
         />
       </div>
       <div className="agent-security-note"><ShieldCheck size={16}/><span>Your setup code works once and expires after 10 minutes. You can disconnect a computer from this page if it is replaced or lost.</span></div>
