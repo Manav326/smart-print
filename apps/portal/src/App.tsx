@@ -34,7 +34,7 @@ import PlatformAdminAuthScreen from "./PlatformAdminAuthScreen";
 import { resolvePortalRoute, shopPathForSection, shopSectionFromPath } from "./portal-routing";
 import {
   ApiError, LocalUploadOutcomeUnknownError, LocalUploadPreflightError, hasPendingLocalCustomerUploadAttempt, isPlatformAdminSession, acceptCustomerQuote, applyShopPrintBatchReview, approveShopPrintJob, assignShopPrintJobPrinter, calculateCustomerQuote, getShopCustomerHistory, getShopCustomers, getShopReportSummary,
-  confirmShopPrintOutput, dispatchShopPrintJob, resumeShopUnprintedBatch,
+  confirmShopPrintOutput, confirmPrinterDiagnostic, getPrinterDiagnosticHistory, getPrinterDiagnosticProfile, startPrinterDiagnostic, dispatchShopPrintJob, resumeShopUnprintedBatch,
   createAgentEnrollmentCode, createCustomerSession, createStation,
   createShopPhotoJob, downloadShopDocument, replaceShopPhotoDocument, replaceShopPhotoDocumentLocally, getCustomerJobStatus, getShopAgentDevices, getShopJobEvents, getShopPrinters, getShopPrintJobsPage, getShopPrintBatchJobs, getShopPayments, loadShopData,
   logout, readStoredTokens, rejectShopPrintJob, rejectShopPayment, revokeAgentDevice,
@@ -42,7 +42,7 @@ import {
   updatePrinterActive, updateShopPaymentSettings, updateShopPricing, updateShopPrintJobSettings,
   updateShopOwnerAccount, updateShopProfile, updateStationEnabled, uploadCustomerDocument, uploadCustomerDocumentLocally,
   verifyShopPayment, retryShopPdfExport, retryShopPrivateTestOutput, recordShopPrintRefund, previewShopPrintRefund, type CustomerBatchPayment, type CustomerPayment, type CustomerPhotoPricing, type ShopPayment, type ShopPaymentSettings, type ShopRefund,
-  type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrintQuoteResult, type ShopJobEvent,
+  type AgentDevice, type AuthTokens, type CustomerJobStatus, type PrinterDevice, type PrinterDiagnosticAttempt, type PrinterDiagnosticProfile, type PrintQuoteResult, type ShopJobEvent,
   type QrStation, type ShopCustomer, type ShopCustomerHistory, type ShopCustomerPage, type ShopPricingProfile, type ShopPrintJob, type ShopProfile, type ShopReportSummary, type ShopSubscriptionSummary,
   type UploadedPrintJob, type CustomerPrintRequestSettings
 } from "./api";
@@ -52,6 +52,7 @@ import {
 } from "./desktop-bridge";
 import { identifyDocumentPreviewMediaType } from "./document-preview";
 import { verifiedPdfExportPath } from "./print-output";
+import { buildPrinterDiagnosticPages } from "./printer-diagnostic-document";
 import { canConfirmPhysicalOutput, canManuallyReconcileUncertainOutput, hasIncompleteSpoolerPageProgress, hasVerifiedAgentSpoolerObservation, isPhysicalOutputConfirmationStatus, isRetainedSpoolerJob } from "./spooler-output-confirmation";
 import { applyThemePreference, readDarkModePreference, readSidebarCollapsedPreference, saveDarkModePreference, saveSidebarCollapsedPreference } from "./ui-preferences";
 import ThemeToggleButton from "./ThemeToggleButton";
@@ -1754,7 +1755,7 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
             onOpenPhotoStudio={job=>void openShopPhotoStudioForJob(job)}
           />}
           {active === "Overview" && <Overview profile={profile} printers={printers} stations={stations} printJobs={printJobs} pricing={pricing} agentDevices={agentDevices} paymentSettings={paymentSettings} onNavigate={navAction}/>}
-          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter} onOpenAgent={() => navAction("Print Agent")}/>} 
+          {active === "Printers" && <PrintersPage printers={printers} agents={agentDevices} token={tokens.accessToken} maxPrinters={subscription?.entitlements.maxPrinters} subscriptionActive={subscription?.entitlements.isAccessActive} busyResourceId={busyResourceId} onToggle={togglePrinter} onOpenAgent={() => navAction("Print Agent")}/>} 
           {active === "QR Stations" && <StationsPage stations={stations} profile={profile} busyResourceId={busyResourceId} onAdd={() => setModal("station")} onToggle={toggleStation} onGenerate={createFreshStationCode}/>}
           {active === "Print Agent" && <PrintAgentPage agents={agentDevices} enrollmentCode={enrollmentCode} busy={agentBusy} onGenerate={generateAgentCode} onRevoke={revokeAgent} desktop={isDesktopApp()} localAgentStatus={localAgentStatus} localAgentConflict={localAgentConflict} localAgentRevoked={localAgentRevoked} localAgentNeedsRepair={localAgentNeedsRepair} localAgentEnrollmentIssue={localAgentEnrollmentIssue} localAgentOwnershipChecking={localAgentOwnershipChecking} onConnect={()=>void connectLocalComputer()} onReconnectAfterRevocation={()=>void connectLocalComputer(false,agentDevices,true)}/>}
           {active === "Pricing" && pricing && <PricingPage pricing={pricing} onSave={savePricing} busy={busy}/>}
@@ -2413,10 +2414,11 @@ function PrinterCapabilityPanel({printer}:{printer:PrinterDevice}) {
 }
 
 function PrintersPage({
-  printers, agents, maxPrinters, subscriptionActive, busyResourceId, onToggle, onOpenAgent
+  printers, agents, token, maxPrinters, subscriptionActive, busyResourceId, onToggle, onOpenAgent
 }: {
   printers: PrinterDevice[];
   agents: AgentDevice[];
+  token: string;
   maxPrinters?: number | null;
   subscriptionActive?: boolean;
   busyResourceId: string | null;
@@ -2562,6 +2564,14 @@ function PrintersPage({
                     <span>Print Agent · {agent?.deviceName || t("Not linked")}</span>
                   </div>
                   <PrinterCapabilityPanel printer={printer}/>
+                  {(printer.outputMode === "PHYSICAL" ||
+                    (printer.outputMode === "UNSUPPORTED_VIRTUAL" && isAuthorisedVirtual)) && (
+                    <PrinterDiagnosticControls
+                      printer={printer}
+                      token={token}
+                      disabled={!isSelected || !canSelect || !agentOnline}
+                    />
+                  )}
                   {possibleDuplicates.length > 0 && (
                     <div className="printer-duplicate-warning" role="note">
                       <strong>{t("Same Windows port")}</strong>
@@ -2649,6 +2659,192 @@ function PrintersPage({
     </>
   );
 }
+
+
+function PrinterDiagnosticControls({
+  printer, token, disabled
+}: {
+  printer: PrinterDevice;
+  token: string;
+  disabled: boolean;
+}) {
+  const { locale } = useLocale();
+  const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
+  const [history, setHistory] = useState<PrinterDiagnosticAttempt[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const preparedRequestRef = useRef<{
+    templateVersion: string;
+    paperSize: string;
+    colourMode: string;
+    isDuplex: boolean;
+    idempotencyKey: string;
+    pagesJpegBase64: string[];
+  } | null>(null);
+  const pendingAttempt = history.find(item => !item.confirmedUtc) ?? null;
+  const currentAttempt = pendingAttempt ?? history[0] ?? null;
+  const virtualTest = printer.outputMode === "UNSUPPORTED_VIRTUAL";
+
+  async function refreshHistory() {
+    const results = await getPrinterDiagnosticHistory(token, printer.id);
+    setHistory(results);
+  }
+
+  useEffect(() => {
+    let active = true;
+    void getPrinterDiagnosticHistory(token, printer.id)
+      .then(results => { if (active) setHistory(results); })
+      .catch(reason => { if (active) setError(reason instanceof Error ? reason.message : t("Could not load printer diagnostic history.")); });
+    return () => { active = false; };
+  }, [token, printer.id]);
+
+  useEffect(() => {
+    if (!pendingAttempt) return;
+    let active = true;
+    const poll = window.setInterval(() => {
+      void getPrinterDiagnosticHistory(token, printer.id)
+        .then(results => { if (active) setHistory(results); })
+        .catch(() => { /* Keep the last confirmed cloud state and retry on the next interval. */ });
+    }, 5000);
+    return () => {
+      active = false;
+      window.clearInterval(poll);
+    };
+  }, [token, printer.id, pendingAttempt?.id, pendingAttempt?.confirmedUtc]);
+
+  async function runDiagnostic() {
+    if (busy || disabled || pendingAttempt) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      let request = preparedRequestRef.current;
+      if (!request) {
+        const profile = await getPrinterDiagnosticProfile(token, printer.id);
+        const pagesJpegBase64 = await buildPrinterDiagnosticPages(profile);
+        const idempotencyKey = idempotencyKeyRef.current ??
+          (typeof crypto !== "undefined" && "randomUUID" in crypto
+            ? crypto.randomUUID()
+            : `diag-${Date.now()}-${Math.random().toString(36).slice(2, 14)}`);
+        idempotencyKeyRef.current = idempotencyKey;
+        request = {
+          templateVersion: profile.templateVersion,
+          paperSize: profile.paperSize,
+          colourMode: profile.colourMode,
+          isDuplex: profile.isDuplex,
+          idempotencyKey,
+          pagesJpegBase64
+        };
+        preparedRequestRef.current = request;
+      }
+      const started = await startPrinterDiagnostic(token, printer.id, request);
+      preparedRequestRef.current = null;
+      idempotencyKeyRef.current = null;
+      setMessage(started.duplicateRequest
+        ? t("This diagnostic request was already accepted. Checking its current state.")
+        : t("One-copy diagnostic submitted to the paired SmartPrint Agent."));
+      await refreshHistory();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("The printer diagnostic could not be started."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function confirmResult(decision: string) {
+    if (!currentAttempt || confirming) return;
+    setConfirming(true);
+    setError("");
+    try {
+      await confirmPrinterDiagnostic(token, currentAttempt.id, decision);
+      setMessage(t("Your printer diagnostic result has been recorded."));
+      await refreshHistory();
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : t("The diagnostic result could not be saved."));
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  const execution = currentAttempt?.job;
+  const staged = !!execution?.localQueueReceivedUtc && execution.printDispatchAttempts > 0;
+  const inSubmission = execution?.status === "PRINT_SUBMITTING" || execution?.status === "PRINT_AUTHORISED";
+  const canConfirm = !!currentAttempt && staged && !inSubmission && !currentAttempt.confirmedUtc;
+  const stateLabel = execution?.status
+    ? t(execution.status.replaceAll("_", " ").toLowerCase())
+    : t("Waiting for the paired Agent");
+  const decisionLabel = (decision: string | null) => {
+    if (!decision) return "";
+    const labels: Record<string, string> = {
+      PRINTED_CORRECTLY: "Printed correctly",
+      PRINTED_WITH_ISSUE: "Printed with an issue",
+      NOTHING_PRINTED: "Nothing printed",
+      OUTPUT_RECEIVED_CORRECTLY: "Output received correctly",
+      OUTPUT_RECEIVED_WITH_ISSUE: "Output received with an issue",
+      NO_OUTPUT_RECEIVED: "No output received"
+    };
+    return t(labels[decision] ?? decision.replaceAll("_", " ").toLowerCase());
+  };
+
+  return (
+    <div className="printer-diagnostic-panel">
+      <div className="printer-diagnostic-heading">
+        <div>
+          <strong>{t("Printer diagnostic")}</strong>
+          <span>{t("Runs one branded test copy through the same protected Agent and Windows spooler path.")}</span>
+        </div>
+        <button
+          type="button"
+          className="subtle-button"
+          disabled={busy || disabled || !!pendingAttempt}
+          onClick={() => void runDiagnostic()}
+        >
+          {busy ? <span className="button-spinner"/> : <Activity size={15}/>}
+          {preparedRequestRef.current ? t("Retry same diagnostic") : t("Run one-copy test")}
+        </button>
+      </div>
+      {currentAttempt && (
+        <div className="printer-diagnostic-state" role="status">
+          <span><strong>{t("Latest test")}</strong> · {stateLabel}</span>
+          <span>{execution?.spoolerStatus || t("Spooler status not reported")}</span>
+          {execution?.failureCode && <span>{t("Reason")}: {execution.failureCode}</span>}
+          {currentAttempt.confirmedUtc && <span>{decisionLabel(currentAttempt.ownerDecision)}</span>}
+        </div>
+      )}
+      {canConfirm && (
+        <div className="printer-diagnostic-confirmation">
+          <strong>{t("Check the actual output, then confirm what happened.")}</strong>
+          {virtualTest ? (
+            <div className="printer-diagnostic-actions">
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("OUTPUT_RECEIVED_CORRECTLY")}>{t("Output received correctly")}</button>
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("OUTPUT_RECEIVED_WITH_ISSUE")}>{t("Received with issue")}</button>
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("NO_OUTPUT_RECEIVED")}>{t("No output received")}</button>
+            </div>
+          ) : (
+            <div className="printer-diagnostic-actions">
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("PRINTED_CORRECTLY")}>{t("Printed correctly")}</button>
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("PRINTED_WITH_ISSUE")}>{t("Printed with issue")}</button>
+              <button type="button" className="subtle-button" disabled={confirming} onClick={() => void confirmResult("NOTHING_PRINTED")}>{t("Nothing printed")}</button>
+            </div>
+          )}
+          {confirming && <span className="field-hint">{t("Saving your confirmation…")}</span>}
+        </div>
+      )}
+      {pendingAttempt && !canConfirm && (
+        <p className="field-hint">{staged
+          ? t("The Agent has received the test. Waiting for the current spooler attempt to finish before asking for your result.")
+          : t("The diagnostic is queued. Keep the paired Windows computer and Print Agent online; this panel checks the result automatically.")}</p>
+      )}
+      {message && <p className="inline-success" role="status">{message}</p>}
+      {error && <p className="inline-error" role="alert">{error}</p>}
+      {history.length > 1 && <span className="field-hint">{history.length} {t("diagnostic records retained for this printer")}</span>}
+    </div>
+  );
+}
+
 function QrStationArtworkPreview({station,profile}:{station:QrStation;profile:ShopProfile|null}) {
   const { locale } = useLocale();
   const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
