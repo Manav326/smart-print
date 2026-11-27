@@ -28,6 +28,10 @@ on:
         description: Exact MSIX package Publisher identity from Partner Center, including CN=
         required: true
         type: string
+      app_display_name:
+        description: Exact app display name reserved in Partner Center
+        required: true
+        type: string
       publisher_display_name:
         description: Exact publisher display name shown in Partner Center
         required: true
@@ -52,6 +56,7 @@ jobs:
       SMARTPRINT_PUBLIC_BASE_URL: ${{ vars.SMARTPRINT_PUBLIC_BASE_URL || 'https://example.invalid' }}
       MSIX_PACKAGE_NAME: ${{ inputs.package_name || 'SmartPrint.Test' }}
       MSIX_PUBLISHER: ${{ inputs.publisher || 'CN=SmartPrint MSIX CI' }}
+      MSIX_APP_DISPLAY_NAME: ${{ inputs.app_display_name || 'Smart Print' }}
       MSIX_PUBLISHER_DISPLAY_NAME: ${{ inputs.publisher_display_name || 'SmartPrint CI' }}
       MSIX_VERSION: ${{ inputs.version || '0.1.0.0' }}
     steps:
@@ -117,7 +122,7 @@ jobs:
         run: |
           if ([string]::IsNullOrWhiteSpace($env:PFX_BASE64) -or [string]::IsNullOrWhiteSpace($env:PFX_PASSWORD)) { throw "Production MSIX build requires WINDOWS_CODESIGN_PFX_BASE64 and WINDOWS_CODESIGN_PFX_PASSWORD repository secrets." }
           if ($env:SMARTPRINT_PUBLIC_BASE_URL -eq "https://example.invalid") { throw "Production MSIX build requires the SMARTPRINT_PUBLIC_BASE_URL repository variable." }
-          if ($env:MSIX_PACKAGE_NAME -eq "SmartPrint.Test" -or $env:MSIX_PUBLISHER -eq "CN=SmartPrint MSIX CI" -or $env:MSIX_PUBLISHER_DISPLAY_NAME -eq "SmartPrint CI") { throw "Production MSIX build requires the exact Partner Center package identity, Publisher and publisher display name." }
+          if ($env:MSIX_PACKAGE_NAME -eq "SmartPrint.Test" -or $env:MSIX_PUBLISHER -eq "CN=SmartPrint MSIX CI" -or $env:MSIX_PUBLISHER_DISPLAY_NAME -eq "SmartPrint CI" -or $env:MSIX_APP_DISPLAY_NAME -eq "Smart Print") { throw "Production MSIX build requires the exact Partner Center package identity, Publisher and publisher display name." }
           if ($env:MSIX_VERSION -notmatch '^\d+\.\d+\.\d+\.\d+$') { throw "Production MSIX version must contain four numeric parts, e.g. 0.1.97.0." }
           $pfxPath = Join-Path $env:RUNNER_TEMP "smartprint-msix-ci.pfx"
           [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:PFX_BASE64))
@@ -154,6 +159,7 @@ jobs:
             OutputPath = "artifacts/SmartPrint-Windows-Store.msix"
             PackageName = $env:MSIX_PACKAGE_NAME
             Publisher = $env:MSIX_PUBLISHER
+            AppDisplayName = $env:MSIX_APP_DISPLAY_NAME
             Version = $env:MSIX_VERSION
             PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
             IconPath = "apps/desktop/src-tauri/icons/icon.ico"
@@ -270,6 +276,7 @@ jobs:
             OutputPath = "artifacts/SmartPrint-Windows-Store-Upgrade.msix"
             PackageName = $env:MSIX_PACKAGE_NAME
             Publisher = "CN=SmartPrint MSIX CI"
+            AppDisplayName = "Smart Print"
             Version = "0.1.1.0"
             PublicApiOrigin = $env:SMARTPRINT_PUBLIC_BASE_URL
             IconPath = "apps/desktop/src-tauri/icons/icon.ico"
