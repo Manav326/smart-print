@@ -6794,6 +6794,35 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
 });
 
+agentApi.MapPost("/jobs/diagnostics/reconcile", async (
+    AgentPrinterDiagnosticReconciliationRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    if (request.JobIds is null || request.JobIds.Count is < 1 or > 100 ||
+        request.JobIds.Any(id => id == Guid.Empty) ||
+        request.JobIds.Distinct().Count() != request.JobIds.Count)
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["jobIds"] = ["Provide between 1 and 100 unique diagnostic job IDs."]
+        });
+
+    var ids = request.JobIds.ToArray();
+    var confirmed = await db.PrinterDiagnosticAttempts.AsNoTracking()
+        .Where(attempt => attempt.TenantId == device.TenantId &&
+            attempt.AgentDeviceId == device.Id &&
+            ids.Contains(attempt.PrintJobId) &&
+            attempt.ConfirmedUtc != null)
+        .Select(attempt => attempt.PrintJobId)
+        .ToListAsync(ct);
+
+    return Results.Ok(new AgentPrinterDiagnosticReconciliationResponse(confirmed));
+});
+
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
     SmartPrintDbContext db,
