@@ -12,8 +12,6 @@ export function shouldBlockBatchCheckoutForExpiredQuote(
 
 
 const quoteRefreshBlockedStatuses = new Set([
-  "AWAITING_SHOP_APPROVAL",
-  "AWAITING_PAYMENT",
   "AWAITING_CUSTOMER_PAYMENT",
   "CUSTOMER_REPORTED",
   "CASH_AWAITING_PAYMENT",
