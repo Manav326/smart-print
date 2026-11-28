@@ -52,6 +52,29 @@ All physical office-printer families reuse the same existing job, rendering, aut
 
 Never promote L1–L3 evidence to L4. Every matrix row must retain `NOT_RUN`, `BLOCKED`, `PASS` or `FAIL` with the evidence artifact and exact environment. Do not infer support for all models in a vendor family from one model.
 
+
+## Automated qualification coverage in CI
+
+The Windows CI lane must exercise the real installed Windows spooler and the same Agent executor used by shops. The current qualification baseline includes:
+
+| Family / route | Automated test that is possible in hosted CI | What the result proves | What it does not prove |
+|---|---|---|---|
+| USB office queue | Port/output classification tests; real Windows queue inventory and driver capability probe; shared spooler executor contract | SmartPrint handles an installed Windows queue and driver metadata without relying on the physical connector type | No USB cable, device firmware, paper feed or physical USB printer is present on the hosted runner |
+| Wi-Fi / Ethernet (Standard TCP/IP) | IP_ port classification, physical queue identity and common Windows spooler execution tests | Network-port metadata is not confused with IPP and the existing Windows queue route is retained | No physical LAN printer, router, Wi-Fi roaming, sleep/wake or DHCP address-change behavior is certified |
+| Windows shared queue | UNC path classification, queue identity and service-permission policy tests; hosted Windows queue fixtures | A shared queue is not mistaken for a file sink and remains a distinct Windows queue identity | A real remote print server, cross-machine share connection and shop-specific ACLs still need a controlled Windows test host |
+| WSD | WSD port classification and physical-vs-virtual identity tests; Android IPP receiver integration where Windows installs the receiver behind a WSD port | WSD metadata is handled without automatically treating every WSD queue as virtual or physical | A physical WSD printer's discovery, sleep/wake and firmware behavior is not certified |
+| IPP | Real Android IppVirtual receiver, Windows-installed IPP queue and production WindowsPrintExecutor submission; Windows spooler terminal job observation | A real IPP endpoint receives a document through Windows spooler and SmartPrint's production Agent executor | It is a virtual receiver, not physical paper output or broad model compatibility |
+| IPPS | ipps:// classification and fail-closed identity policy tests | IPPS is distinguished from generic HTTPS and remains in the IPP family | No physical IPPS endpoint/certificate chain is validated by the current virtual receiver test |
+| PDF / virtual | Real Microsoft Print to PDF queue, restricted virtual output policy, virtual IPP receiver and owner diagnostic workflow | PDF export and test-only virtual output stay separate from customer physical fulfilment | No physical output is implied |
+
+The Agent test suite also covers isolated worker crashes, timeouts, capability-probe backoff, queue visibility when capability probing fails, spooler authorization immediately before submission, and uncertain submission without blind replay. These tests are transport-independent because all supported physical families converge on the same installed Windows queue and Agent execution path.
+
+The Epson L360 vendor-driver qualification is an optional, stronger driver-specific lane. It runs only when an exact vendor package has been verified and supplied/downloaded; a skipped Epson lane must be reported as **not run**, never as a pass. Other physical model/driver combinations require their own evidence.
+
+### Physical hardware gate
+
+Hosted CI cannot truthfully simulate a USB cable, real paper path, ink/toner, tray, duplex unit, WSD device firmware, physical network outage or a remote shop print server. Those checks remain L4 and must be run on representative shop hardware. Until then, the product may say **Windows queue tested** or **IPP endpoint tested**, but must not say **physical printer verified**.
+
 ## Optimized discovery and background chores
 
 - Keep inventory sync and capability probing separate. Publish queue visibility first; enrich capabilities asynchronously using the existing probe runner.
