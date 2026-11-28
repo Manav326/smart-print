@@ -120,17 +120,48 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
             Assert.Equal(1, authorizationBoundaryCalls);
             Assert.Equal(documentName, receipt.DocumentName);
 
+            const uint jobStatusPaused = 0x00000001;
+            const uint jobStatusError = 0x00000002;
+            const uint jobStatusOffline = 0x00000020;
+            const uint jobStatusPaperOut = 0x00000040;
+            const uint jobStatusPrinted = 0x00000080;
+            const uint jobStatusPrinting = 0x00000010;
+            const uint jobStatusSpooling = 0x00000008;
+            const uint jobStatusUserIntervention = 0x00000400;
+            const uint jobStatusRetained = 0x00002000;
+            const uint jobStatusFaultMask = jobStatusPaused | jobStatusError | jobStatusOffline |
+                jobStatusPaperOut | jobStatusUserIntervention;
+            const uint jobStatusActiveMask = jobStatusPrinting | jobStatusSpooling;
+
             WindowsSpoolerJob? terminalJob = null;
+            WindowsSpoolerJob? lastObservedJob = null;
             var deadline = DateTime.UtcNow.AddSeconds(90);
             while (DateTime.UtcNow < deadline)
             {
                 var current = executor.GetJob(queueName!, receipt.JobId);
                 if (current is not null)
                 {
-                    if (current.Status is "ERROR" or "OFFLINE" or "PAPEROUT" or "USERINTERVENTION")
-                        Assert.Fail($"Windows spooler reported {current.Status} for Android IPP job {receipt.JobId}.");
+                    lastObservedJob = current;
+                    Assert.Equal(documentName, current.DocumentName);
 
-                    if ((current.Status is "PRINTED" or "RETAINED") && current.PagesPrinted >= 1)
+                    var faultFlags = current.StatusFlags & jobStatusFaultMask;
+                    if (faultFlags != 0)
+                    {
+                        Assert.Fail(
+                            $"Windows spooler reported a fault for Android IPP job {receipt.JobId}. " +
+                            $"Status={current.Status}; flags=0x{current.StatusFlags:X8}; " +
+                            $"faultFlags=0x{faultFlags:X8}; pages={current.PagesPrinted}/{current.TotalPages}.");
+                    }
+
+                    var printedFlagSet = (current.StatusFlags & jobStatusPrinted) != 0;
+                    var noLongerActive = (current.StatusFlags & jobStatusActiveMask) == 0;
+                    var retainedFlagSet = (current.StatusFlags & jobStatusRetained) != 0;
+                    var statusConfirmsCompletion =
+                        string.Equals(current.Status, "PRINTED", StringComparison.Ordinal) ||
+                        (string.Equals(current.Status, "RETAINED", StringComparison.Ordinal) && retainedFlagSet);
+
+                    if (statusConfirmsCompletion && printedFlagSet && noLongerActive &&
+                        current.PagesPrinted >= 1 && current.TotalPages >= 1)
                     {
                         terminalJob = current;
                         break;
@@ -141,7 +172,16 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
             }
 
             if (terminalJob is null)
-                Assert.Fail($"Windows did not observe a completed Android IPP spooler job. Queue={queueName}; jobId={receipt.JobId}.");
+            {
+                var lastState = lastObservedJob is null
+                    ? "job was not visible in the Windows queue"
+                    : $"lastStatus={lastObservedJob.Status}; flags=0x{lastObservedJob.StatusFlags:X8}; " +
+                      $"pages={lastObservedJob.PagesPrinted}/{lastObservedJob.TotalPages}";
+                Assert.Fail(
+                    $"Windows did not observe a confirmed printed terminal state for Android IPP job {receipt.JobId}. " +
+                    $"Queue={queueName}; {lastState}.");
+            }
+
             Assert.True(terminalJob!.PagesPrinted >= 1, "The Windows spooler did not report a printed page.");
             Assert.True(terminalJob.TotalPages >= 1, "The Windows spooler did not report the expected page count.");
         }
