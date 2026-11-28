@@ -11,7 +11,9 @@ public sealed class PrinterSelectionRulesTests
     [InlineData("PHYSICAL", "Busy")]
     [InlineData("PDF_EXPORT", "Ready")]
     [InlineData("PDF_EXPORT", "Busy")]
-    public void AllowsReadyOutputsOnAnOnlineAgent(string outputMode, string status)
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready")]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Busy")]
+    public void AllowsSupportedReadyOutputModesOnAnOnlineAgent(string outputMode, string status)
     {
         Assert.True(PrinterSelectionRules.CanSelect(
             outputMode,
@@ -20,7 +22,8 @@ public sealed class PrinterSelectionRulesTests
             agentOnline: true,
             agentRevoked: false,
             agentLastSeenUtc: Now.AddSeconds(-30),
-            now: Now, virtualTestGrantActive: false, isProduction: false));
+            now: Now,
+            isPlatformHeld: false));
     }
 
     [Theory]
@@ -28,59 +31,56 @@ public sealed class PrinterSelectionRulesTests
     [InlineData("Paused")]
     [InlineData("Error")]
     [InlineData("Unknown")]
-    public void KeepsNonReadyQueuesVisibleButDoesNotAllowSelection(string status)
+    public void KeepsNonReadyWindowsQueuesVisibleButDoesNotAllowSelection(string status)
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", status, Now, true, false, Now, Now, false, false));
+            "PHYSICAL", status, Now, true, false, Now, Now, false));
+        Assert.False(PrinterSelectionRules.CanSelect(
+            "UNSUPPORTED_VIRTUAL", status, Now, true, false, Now, Now, false));
     }
 
     [Theory]
-    [InlineData("UNSUPPORTED_VIRTUAL")]
     [InlineData("UNKNOWN")]
     [InlineData("")]
-    public void DoesNotAllowUnsupportedOrUnknownOutputModes(string outputMode)
+    public void DoesNotAllowUnknownOutputModes(string outputMode)
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            outputMode, "Ready", Now, true, false, Now, Now, false, false));
+            outputMode, "Ready", Now, true, false, Now, Now, false));
     }
 
     [Theory]
-    [InlineData(true, "Ready", true)]
-    [InlineData(true, "Busy", true)]
-    [InlineData(true, "Offline", false)]
-    [InlineData(false, "Ready", false)]
-    public void VirtualQueueRequiresAnActiveGrantAndFreshReadyStatus(
-        bool grantActive, string status, bool expected)
+    [InlineData("PHYSICAL")]
+    [InlineData("PDF_EXPORT")]
+    [InlineData("UNSUPPORTED_VIRTUAL")]
+    public void PlatformHoldBlocksEveryOutputMode(string outputMode)
     {
-        Assert.Equal(expected, PrinterSelectionRules.CanSelect(
-            "UNSUPPORTED_VIRTUAL", status, Now.AddSeconds(-30), true, false,
-            Now.AddSeconds(-30), Now, grantActive, false));
         Assert.False(PrinterSelectionRules.CanSelect(
-            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddSeconds(-30), true, false,
-            Now.AddSeconds(-30), Now, true, true));
+            outputMode, "Ready", Now, true, false, Now, Now, isPlatformHeld: true));
     }
 
     [Fact]
     public void RejectsAnOfflineOrRevokedAgent()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", Now, false, false, Now, Now, false, false));
+            "PHYSICAL", "Ready", Now, false, false, Now, Now, false));
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", Now, true, true, Now, Now, false, false));
+            "PHYSICAL", "Ready", Now, true, true, Now, Now, false));
     }
 
     [Fact]
     public void RejectsAnAgentHeartbeatOlderThanTwoMinutes()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", Now, true, false, Now.AddMinutes(-2).AddTicks(-1), Now, false, false));
+            "PHYSICAL", "Ready", Now, true, false, Now.AddMinutes(-2).AddTicks(-1), Now, false));
     }
 
     [Fact]
     public void RejectsAPhysicalQueueReportOlderThanTwoMinutes()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, false, Now, Now, false, false));
+            "PHYSICAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, false, Now, Now, false));
+        Assert.False(PrinterSelectionRules.CanSelect(
+            "UNSUPPORTED_VIRTUAL", "Ready", Now.AddMinutes(-2).AddTicks(-1), true, false, Now, Now, false));
     }
 
     [Theory]
@@ -91,27 +91,27 @@ public sealed class PrinterSelectionRulesTests
     public void PdfExportDoesNotDependOnWindowsQueueStatusOrInventoryTimestamp(string status)
     {
         Assert.True(PrinterSelectionRules.CanSelect(
-            "PDF_EXPORT", status, null, true, false, Now, Now, false, false));
+            "PDF_EXPORT", status, null, true, false, Now, Now, false));
         Assert.True(PrinterSelectionRules.CanSelect(
-            "PDF_EXPORT", status, Now.AddMinutes(-30), true, false, Now, Now, false, false));
+            "PDF_EXPORT", status, Now.AddMinutes(-30), true, false, Now, Now, false));
     }
 
     [Fact]
     public void PdfExportStillRequiresItsPairedAgentToBeOnline()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PDF_EXPORT", "Ready", null, false, false, Now, Now, false, false));
+            "PDF_EXPORT", "Ready", null, false, false, Now, Now, false));
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PDF_EXPORT", "Ready", null, true, false, Now.AddMinutes(-3), Now, false, false));
+            "PDF_EXPORT", "Ready", null, true, false, Now.AddMinutes(-3), Now, false));
     }
 
     [Fact]
     public void RejectsMissingAgentOrQueueTimestamps()
     {
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", Now, true, false, null, Now, false, false));
+            "PHYSICAL", "Ready", Now, true, false, null, Now, false));
         Assert.False(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", null, true, false, Now, Now, false, false));
+            "PHYSICAL", "Ready", null, true, false, Now, Now, false));
     }
 
     [Fact]
@@ -119,6 +119,6 @@ public sealed class PrinterSelectionRulesTests
     {
         var boundary = Now.AddMinutes(-2);
         Assert.True(PrinterSelectionRules.CanSelect(
-            "PHYSICAL", "Ready", boundary, true, false, boundary, Now, false, false));
+            "PHYSICAL", "Ready", boundary, true, false, boundary, Now, false));
     }
 }

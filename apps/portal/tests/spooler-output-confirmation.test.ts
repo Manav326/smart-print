@@ -107,7 +107,7 @@ test("only fresh zero-page physical queue absences with a local copy can be resu
   ), false);
 });
 
-test("authorised virtual test output can resume only with its original approved queue", () => {
+test("authorised virtual test output can resume on its original available queue without a shop-level grant", () => {
   const eligible = [
     "OUTPUT_UNCONFIRMED","UNSUPPORTED_VIRTUAL","TEST_VIRTUAL","OUTPUT_UNCONFIRMED",
     "SPOOLER_JOB_NO_LONGER_VISIBLE",17,0,8,submittedUtc,observedUtc,null,null,
@@ -157,7 +157,9 @@ test("Order Journey and Print Queue use the same physical-output eligibility and
     assert.match(source, expected);
     assert.match(source, /canManuallyReconcileUncertainOutput\(\s*job\.status/);
   }
-  assert.match(orderJourney, /originalPrinter\.outputMode===\"UNSUPPORTED_VIRTUAL\"&&job\.outputType===\"TEST_VIRTUAL\"&&originalPrinter\.virtualTestGrantActive===true/);
+  assert.match(orderJourney, /originalPrinter\.outputMode===\"UNSUPPORTED_VIRTUAL\"&&job\.outputType===\"TEST_VIRTUAL\"/);
+  assert.doesNotMatch(orderJourney, /virtualTestGrantActive/);
+  assert.match(orderJourney, /isPrinterAvailableForShop\(originalPrinter,agents\)/);
 });
 
 test("initial Agent acceptance receipts cannot supply terminal PRINTED proof", () => {

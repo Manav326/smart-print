@@ -197,7 +197,7 @@ const requiredScreenCoverage = {
     "Shop access is currently restricted. Review your account status or contact SmartPrint support for assistance."
   ],
   "PlatformOperationsSection.tsx": [
-    "Loading platform settings…", "Loading discovered virtual queues…"
+    "Loading platform settings…", "Loading printers…"
   ],
   "PlatformPlansSection.tsx": [
     "Plan code", "Stable uppercase identifier", "Description", "PROTECTED SYSTEM PLAN", "PLAN DETAILS",

@@ -109,7 +109,7 @@ public static class AgentPrinterSyncRules
         long selectedCount,
         int? maximum) =>
         subscriptionActive &&
-        (outputMode is "PHYSICAL" or "PDF_EXPORT") &&
+        (outputMode is "PHYSICAL" or "PDF_EXPORT" or "UNSUPPORTED_VIRTUAL") &&
         (status is "Ready" or "Busy") &&
         (maximum is null || selectedCount < maximum.Value);
 

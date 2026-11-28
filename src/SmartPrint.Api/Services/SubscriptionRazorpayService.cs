@@ -736,6 +736,15 @@ public sealed class SubscriptionRazorpayService(
         RazorpayPaymentDetails remotePayment,
         CancellationToken cancellationToken)
     {
+        // Serialize capture activation before inspecting the payment state. The caller's
+        // DbContext may already track this payment from order creation or an earlier
+        // request; after waiting for another capture transaction, those tracked values
+        // can be stale even though the database row lock has been released.
+        var tenantLockKey = $"tenant-subscription:{payment.TenantId:N}";
+        await db.Database.ExecuteSqlInterpolatedAsync(
+            $"SELECT pg_advisory_xact_lock(3, hashtext({tenantLockKey}))", cancellationToken);
+        await db.Entry(payment).ReloadAsync(cancellationToken);
+
         if (payment.Status == "CAPTURED")
         {
             if (!string.Equals(payment.RazorpayPaymentId, remotePayment.PaymentId, StringComparison.Ordinal))
@@ -786,12 +795,6 @@ public sealed class SubscriptionRazorpayService(
             return new ShopSubscriptionPaymentVerificationResponse(
                 payment.Status, null, payment.VerifiedUtc, false);
         }
-
-        // Serialize activation with both browser confirmations, webhook deliveries and
-        // platform-admin grants. This reuses the platform grant's tenant lock.
-        var tenantLockKey = $"tenant-subscription:{payment.TenantId:N}";
-        await db.Database.ExecuteSqlInterpolatedAsync(
-            $"SELECT pg_advisory_xact_lock(3, hashtext({tenantLockKey}))", cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var previousSubscription = await db.TenantSubscriptions

@@ -6,10 +6,6 @@ param(
 
     [Parameter(Mandatory = $true)]
     [ValidateNotNullOrEmpty()]
-    [string]$GrantId,
-
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
     [string]$AgentVersion,
 
     [ValidateRange(30, 900)]
@@ -47,11 +43,12 @@ Write-Host "Queue : $($printer.Name)"
 Write-Host "Driver: $($printer.DriverName)"
 Write-Host "Port  : $($printer.PortName)"
 Write-Host "Status: $($printer.PrinterStatus)"
-Write-Host "Grant : $GrantId"
+Write-Host "Access : Available by default unless a platform hold is active"
 Write-Host ""
 Write-Host "1. Keep this window open."
-Write-Host "2. In SmartPrint, start exactly one owner-authorised virtual-printer diagnostic for this queue."
-Write-Host "3. Do not submit a Windows test page or print from another application."
+Write-Host "2. Confirm Platform Operations shows this queue as Available (not On hold)." 
+Write-Host "3. In the shop portal, start exactly one virtual-printer diagnostic for this queue."
+Write-Host "4. Do not submit a Windows test page or print from another application."
 Write-Host ""
 
 $null = Read-Host "Press Enter when you are ready to start the SmartPrint diagnostic"
@@ -120,7 +117,8 @@ $report = [ordered]@{
     machine = $env:COMPUTERNAME
     windowsVersion = [Environment]::OSVersion.Version.ToString()
     agentVersion = $AgentVersion
-    grantId = $GrantId
+    platformAccessPolicy = "DEFAULT_ALLOW_EXPLICIT_PLATFORM_HOLD"
+    holdState = "MANUALLY_VERIFIED_AVAILABLE_BEFORE_TEST"
     queue = [ordered]@{
         name = $printer.Name
         driver = $printer.DriverName

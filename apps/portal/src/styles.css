@@ -5124,3 +5124,76 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
   .printer-diagnostic-actions{display:grid;grid-template-columns:1fr}
   .printer-diagnostic-actions .subtle-button{width:100%}
 }
+
+
+/* Printer details expand in-place so inventory cards stay compact by default. */
+.printer-card-details,
+.platform-printer-details{margin-top:10px;border-top:1px solid var(--border);padding-top:8px;min-width:0}
+.printer-card-details>summary,
+.platform-printer-details>summary{display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;list-style:none;color:var(--accent);font-size:10px;font-weight:700;min-height:28px}
+.printer-card-details>summary::-webkit-details-marker,
+.platform-printer-details>summary::-webkit-details-marker{display:none}
+.printer-card-details>summary::after,
+.platform-printer-details>summary::after{content:"+";font-size:15px;line-height:1;color:var(--muted)}
+.printer-card-details[open]>summary::after,
+.platform-printer-details[open]>summary::after{content:"−"}
+.printer-expanded-details{display:flex;flex-direction:column;gap:12px;padding-top:9px;min-width:0}
+.printer-expanded-facts,
+.platform-printer-detail-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px 14px;min-width:0}
+.printer-expanded-facts>div,
+.platform-printer-detail-grid>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.printer-expanded-facts span,
+.platform-printer-detail-grid span{font-size:9px;color:var(--muted)}
+.printer-expanded-facts strong,
+.platform-printer-detail-grid strong{font-size:10px;color:var(--text);font-weight:650;overflow-wrap:anywhere}
+.printer-hold-notice{display:flex;flex-direction:column;gap:4px;padding:10px 11px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2);font-size:10px;color:var(--text)}
+.printer-hold-notice>strong{font-size:10px}
+.printer-hold-notice>small{font-size:9px;color:var(--muted)}
+.printer-card-details .printer-capability-panel{margin-top:0}
+.printer-card-details .printer-diagnostic-panel{margin-top:0}
+
+/* Platform printer inventory: searchable, paginated and hold-only admin actions. */
+.platform-printer-access{display:flex;flex-direction:column;gap:14px;min-width:0}
+.platform-printer-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.platform-printer-search{display:flex;align-items:center;gap:7px;flex:1 1 320px;min-width:0}
+.platform-printer-search input{flex:1;min-width:0;min-height:36px;padding:8px 10px;border:1px solid var(--border);border-radius:9px;background:var(--surface);color:var(--text);font:inherit;font-size:11px}
+.platform-printer-filters{display:flex;align-items:center;gap:4px;padding:3px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.platform-printer-filters button{border:0;border-radius:7px;background:transparent;color:var(--muted);padding:7px 10px;font-size:10px;font-weight:650;cursor:pointer}
+.platform-printer-filters button.active{background:var(--surface);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.08)}
+.platform-printer-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,360px),1fr));gap:10px;min-width:0}
+.platform-printer-card{display:flex;flex-direction:column;gap:10px;min-width:0;padding:13px;border:1px solid var(--border);border-radius:13px;background:var(--surface)}
+.platform-printer-card.is-held{border-color:var(--border)}
+.platform-printer-card-top{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;min-width:0}
+.platform-printer-card-title{display:flex;flex-direction:column;gap:4px;min-width:0}
+.platform-printer-card-title>strong{font-size:11px;line-height:1.45;color:var(--text);overflow-wrap:anywhere}
+.platform-printer-card-title>span{font-size:9px;line-height:1.4;color:var(--muted);overflow-wrap:anywhere}
+.platform-printer-card-title>small{font-size:9px;color:var(--muted);overflow-wrap:anywhere}
+.platform-printer-state{flex:0 0 auto;padding:5px 8px;border-radius:999px;background:var(--surface-2);color:var(--text);font-size:9px;font-weight:700}
+.platform-printer-state.held{color:var(--danger,var(--text))}
+.platform-printer-state.allowed{color:var(--success,var(--text))}
+.platform-printer-compact-meta{display:flex;flex-wrap:wrap;gap:5px 10px;color:var(--muted);font-size:9px}
+.platform-printer-compact-meta span{overflow-wrap:anywhere}
+.platform-printer-detail-grid{padding:10px 0}
+.platform-printer-detail-grid code{font-size:9px;overflow-wrap:anywhere;word-break:break-all}
+.platform-printer-history{display:flex;flex-direction:column;gap:7px;border-top:1px solid var(--border);padding-top:9px}
+.platform-printer-history>strong{font-size:10px;color:var(--text)}
+.platform-printer-history>div{display:flex;flex-direction:column;gap:3px;padding:7px 8px;border-radius:8px;background:var(--surface-2)}
+.platform-printer-history>div>span{font-size:9px;font-weight:700;color:var(--text)}
+.platform-printer-history>div>small{font-size:9px;line-height:1.5;color:var(--muted);overflow-wrap:anywhere}
+.platform-printer-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:auto}
+.platform-printer-hold-button{color:var(--danger,var(--text))}
+.platform-printer-action-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.platform-printer-action-form label{display:flex;flex-direction:column;gap:5px}
+.platform-printer-action-form label span{font-size:9px;color:var(--muted)}
+.platform-printer-action-form input{min-height:34px;width:100%;padding:7px 9px;border:1px solid var(--border);border-radius:8px;background:var(--surface);color:var(--text);font:inherit;font-size:10px}
+.platform-printer-action-form>div{display:flex;justify-content:flex-end;gap:7px}
+.platform-printer-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;color:var(--muted);font-size:10px}
+.platform-printer-pagination>div{display:flex;align-items:center;gap:9px}
+@media(max-width:640px){
+  .printer-expanded-facts,.platform-printer-detail-grid{grid-template-columns:minmax(0,1fr)}
+  .platform-printer-toolbar{align-items:stretch}
+  .platform-printer-search{flex-basis:100%}
+  .platform-printer-filters{width:100%;justify-content:stretch}
+  .platform-printer-filters button{flex:1}
+  .platform-printer-pagination{align-items:flex-start}
+}

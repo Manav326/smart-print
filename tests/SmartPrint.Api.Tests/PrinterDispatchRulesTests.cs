@@ -18,22 +18,21 @@ public sealed class PrinterDispatchRulesTests
     [InlineData("PHYSICAL", "Offline", false)]
     [InlineData("PHYSICAL", "Paused", false)]
     [InlineData("PHYSICAL", "Error", false)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Busy", true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Offline", false)]
     public void AppliesOutputModeSpecificDispatchability(string outputMode, string status, bool expected)
     {
-        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status, false, false));
+        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(outputMode, status));
     }
 
     [Theory]
-    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, false, false)]
-    [InlineData("UNSUPPORTED_VIRTUAL", "Busy", true, false, true)]
-    [InlineData("UNSUPPORTED_VIRTUAL", "Ready", false, true, false)]
-    [InlineData("UNSUPPORTED_VIRTUAL", "Offline", true, false, false)]
-    [InlineData("PHYSICAL", "Ready", false, true, true)]
-    public void VirtualQueueDispatchRequiresGrantAndNonProduction(
-        string outputMode, string status, bool grantActive, bool isProduction, bool expected)
+    [InlineData("PHYSICAL", "Ready")]
+    [InlineData("PDF_EXPORT", "Ready")]
+    [InlineData("UNSUPPORTED_VIRTUAL", "Ready")]
+    public void PlatformHoldBlocksEveryOutputMode(string outputMode, string status)
     {
-        Assert.Equal(expected, PrinterDispatchRules.IsDispatchableStatus(
-            outputMode, status, grantActive, isProduction));
+        Assert.False(PrinterDispatchRules.IsDispatchableStatus(outputMode, status, isPlatformHeld: true));
     }
 
     [Fact]

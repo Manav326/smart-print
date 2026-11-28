@@ -244,8 +244,10 @@ export interface PrinterDevice {
   isDefault: boolean;
   agentDeviceId?: string | null;
   lastSeenUtc?: string | null;
-  /** True only while a current platform-admin grant authorises this exact virtual queue identity. */
-  virtualTestGrantActive?: boolean;
+  /** Platform restriction is independent of the shop owner's selection. */
+  isPlatformHeld?: boolean;
+  platformHoldReason?: string | null;
+  platformHeldUtc?: string | null;
   identityFingerprint?: string | null;
 }
 
@@ -3417,6 +3419,87 @@ export interface PlatformOperationalSettingsInput {
   allowPaidJobClaimsWhenSuspended: boolean;
   allowPrivatePrintingVirtualOutput: boolean;
   reason: string;
+}
+
+export interface PrinterPlatformAccessHistory {
+  id: string;
+  action: "HOLD" | "RELEASE" | string;
+  reason: string;
+  identityFingerprint: string | null;
+  createdUtc: string;
+  actorName: string;
+}
+
+export interface PlatformPrinterAccessItem {
+  tenantId: string;
+  shopName: string;
+  shopSlug: string;
+  id: string;
+  displayName: string;
+  manufacturer: string;
+  model: string;
+  connectionType: string;
+  outputMode: "PHYSICAL" | "PDF_EXPORT" | "UNSUPPORTED_VIRTUAL" | string;
+  connectionAddress: string | null;
+  queueName: string | null;
+  agentDeviceId: string | null;
+  agentName: string | null;
+  agentOnline: boolean;
+  agentLastSeenUtc: string | null;
+  identityFingerprint: string | null;
+  status: string;
+  lastSeenUtc: string | null;
+  isActive: boolean;
+  isDefault: boolean;
+  capabilitiesJson: string;
+  isPlatformHeld: boolean;
+  platformHoldReason: string | null;
+  platformHeldByName: string | null;
+  platformHeldUtc: string | null;
+  history: PrinterPlatformAccessHistory[];
+}
+
+export interface PlatformPrinterAccessPage {
+  items: PlatformPrinterAccessItem[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export function getPlatformPrinterAccess(
+  token: string,
+  query = "",
+  state: "all" | "available" | "held" = "all",
+  offset = 0,
+  limit = 50
+) {
+  const params = new URLSearchParams({
+    query,
+    state,
+    offset: String(offset),
+    limit: String(limit)
+  });
+  return apiRequest<PlatformPrinterAccessPage>(
+    "/api/v1/platform/printer-access?" + params.toString(),
+    {},
+    token
+  );
+}
+
+export function placePrinterOnPlatformHold(token: string, printerId: string, reason: string) {
+  return apiRequest<{ id: string; tenantId: string; isPlatformHeld: boolean; platformHoldReason: string; platformHeldUtc: string }>(
+    "/api/v1/platform/printer-access/" + printerId + "/hold",
+    { method: "POST", body: JSON.stringify({ reason }) },
+    token
+  );
+}
+
+export function releasePrinterPlatformHold(token: string, printerId: string, reason: string) {
+  return apiRequest<{ id: string; tenantId: string; isPlatformHeld: boolean; duplicateRequest: boolean }>(
+    "/api/v1/platform/printer-access/" + printerId + "/release",
+    { method: "POST", body: JSON.stringify({ reason }) },
+    token
+  );
 }
 
 export interface PlatformVirtualPrinterTestGrant {

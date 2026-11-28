@@ -4,15 +4,16 @@ import { formatIstDateTime } from "./date-time";
 import {
   getPlatformOperationalSettings,
   getPlatformOperationalSettingsHistory,
-  getPlatformVirtualPrinterTestQueues,
-  approvePlatformVirtualPrinterTestQueue,
-  revokePlatformVirtualPrinterTestGrant,
+  getPlatformPrinterAccess,
+  placePrinterOnPlatformHold,
+  releasePrinterPlatformHold,
   updatePlatformOperationalSettings,
   type AuthTokens,
   type PlatformOperationalSettings,
   type PlatformOperationalSettingsAudit,
   type PlatformOperationalSettingsInput,
-  type PlatformVirtualPrinterTestQueue
+  type PlatformPrinterAccessItem,
+  type PlatformPrinterAccessPage
 } from "./api";
 
 type NumericKey =
@@ -49,105 +50,268 @@ function toDraft(value: PlatformOperationalSettings): Draft {
   return draft as Draft;
 }
 
-function VirtualPrinterTestGrantPanel({ tokens }: { tokens: AuthTokens }) {
+function PrinterPlatformAccessPanel({ tokens }: { tokens: AuthTokens }) {
   const { locale } = useLocale();
   const t = (value: string) => translateUiText(locale, value);
-  const [queues, setQueues] = useState<PlatformVirtualPrinterTestQueue[]>([]);
-  const [reason, setReason] = useState("");
+  const [page, setPage] = useState<PlatformPrinterAccessPage | null>(null);
+  const [query, setQuery] = useState("");
+  const [appliedQuery, setAppliedQuery] = useState("");
+  const [filter, setFilter] = useState<"all" | "available" | "held">("all");
+  const [offset, setOffset] = useState(0);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState("");
+  const [actionItem, setActionItem] = useState<PlatformPrinterAccessItem | null>(null);
+  const [actionType, setActionType] = useState<"hold" | "release">("hold");
+  const [reason, setReason] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
+  const pageSize = 50;
 
-  async function reload() {
+  async function reload(
+    nextOffset = offset,
+    nextQuery = appliedQuery,
+    nextFilter = filter
+  ) {
     setLoading(true);
     setError("");
     try {
-      setQueues(await getPlatformVirtualPrinterTestQueues(tokens.accessToken));
+      const result = await getPlatformPrinterAccess(
+        tokens.accessToken, nextQuery, nextFilter, nextOffset, pageSize
+      );
+      setPage(result);
+      setOffset(nextOffset);
     } catch (exception) {
-      setError(exception instanceof Error ? t(exception.message) : t("Could not load virtual printer queues."));
+      setError(exception instanceof Error ? t(exception.message) : t("Could not load printer access."));
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { void reload(); }, [tokens.accessToken]);
+  useEffect(() => { void reload(0, "", "all"); }, [tokens.accessToken]);
 
-  async function approve(queue: PlatformVirtualPrinterTestQueue) {
-    if (reason.trim().length < 5) {
-      setError(t("Enter an approval reason of at least five characters."));
+  function openAction(item: PlatformPrinterAccessItem, action: "hold" | "release") {
+    setActionItem(item);
+    setActionType(action);
+    setReason("");
+    setError("");
+    setSuccess("");
+  }
+
+  async function submitAction() {
+    if (!actionItem || busyId) return;
+    const trimmedReason = reason.trim();
+    if (trimmedReason.length < 5) {
+      setError(t("Enter a reason of at least five characters."));
       return;
     }
-    setBusyId(queue.id);
+
+    setBusyId(actionItem.id);
     setError("");
     setSuccess("");
     try {
-      await approvePlatformVirtualPrinterTestQueue(tokens.accessToken, queue.tenantId, queue.id, reason.trim());
+      if (actionType === "hold") {
+        await placePrinterOnPlatformHold(tokens.accessToken, actionItem.id, trimmedReason);
+        setSuccess(t("Printer placed on hold. New use is blocked; shop selection is preserved."));
+      } else {
+        await releasePrinterPlatformHold(tokens.accessToken, actionItem.id, trimmedReason);
+        setSuccess(t("Printer hold released. The existing shop selection is restored."));
+      }
+      setActionItem(null);
       setReason("");
-      setSuccess(t("Virtual queue approved for this shop for seven days. The queue identity remains virtual."));
-      await reload();
+      await reload(offset, appliedQuery, filter);
     } catch (exception) {
-      setError(exception instanceof Error ? t(exception.message) : t("Could not approve this virtual printer."));
+      setError(exception instanceof Error ? t(exception.message) : t("The printer access change could not be saved."));
     } finally {
       setBusyId("");
     }
   }
 
-  async function revoke(queue: PlatformVirtualPrinterTestQueue, grantId: string) {
-    if (reason.trim().length < 5) {
-      setError(t("Enter a revocation reason of at least five characters."));
-      return;
-    }
-    const confirmed = window.confirm(
-      `Revoke virtual test access for ${queue.displayName} at ${queue.shopName}? New dispatch authorisations will be denied immediately. A job already authorised at the Windows spooler boundary may still be in progress and must be reconciled; revocation does not erase output already produced.`
-    );
-    if (!confirmed) return;
-    setBusyId(queue.id);
-    setError("");
-    setSuccess("");
-    try {
-      await revokePlatformVirtualPrinterTestGrant(tokens.accessToken, grantId, reason.trim());
-      setReason("");
-      setSuccess(t("Virtual printer grant revoked. New dispatches will be denied."));
-      await reload();
-    } catch (exception) {
-      setError(exception instanceof Error ? t(exception.message) : t("Could not revoke this virtual printer grant."));
-    } finally {
-      setBusyId("");
-    }
+  function applySearch() {
+    const nextQuery = query.trim();
+    setAppliedQuery(nextQuery);
+    void reload(0, nextQuery, filter);
   }
+
+  function applyFilter(nextFilter: "all" | "available" | "held") {
+    setFilter(nextFilter);
+    void reload(0, appliedQuery, nextFilter);
+  }
+
+  const total = page?.total ?? 0;
+  const currentPage = page ? Math.floor(page.offset / page.limit) + 1 : 1;
+  const pageCount = page ? Math.max(1, Math.ceil(page.total / page.limit)) : 1;
+  const rangeStart = total === 0 ? 0 : (page?.offset ?? 0) + 1;
+  const rangeEnd = Math.min((page?.offset ?? 0) + (page?.items.length ?? 0), total);
 
   return (
-    <section className="panel platform-ops-history">
+    <section className="panel platform-printer-access">
       <div className="platform-ops-heading">
-        <div><h3>{t("Shop-scoped virtual printer test access")}</h3><p>{t("Approve one discovered Windows virtual queue for one shop. Approval is bound to its Agent, queue, driver and port identity, expires after seven days by default, and never changes its printer type.")}</p></div>
-        <button className="subtle-button" onClick={() => void reload()} disabled={loading}><RefreshCw size={14}/> {t("Refresh")}</button>
+        <div>
+          <h3>{t("Printer access")}</h3>
+          <p>{t("All discovered printers are available by default. Place an explicit platform hold only when a printer must be restricted.")}</p>
+        </div>
+        <button className="subtle-button" onClick={() => void reload()} disabled={loading}>
+          <RefreshCw size={14}/> {t("Refresh")}
+        </button>
       </div>
-      <label className="platform-ops-reason"><span>{t("Approval / revocation reason")}</span><input value={reason} onChange={event => setReason(event.target.value)} maxLength={500} placeholder={t("Reason required for the audit history")}/></label>
+
+      <div className="platform-printer-toolbar">
+        <div className="platform-printer-search">
+          <input
+            value={query}
+            onChange={event => setQuery(event.target.value)}
+            onKeyDown={event => { if (event.key === "Enter") applySearch(); }}
+            placeholder={t("Search shop, printer, driver or port")}
+            aria-label={t("Search printers")}
+          />
+          <button className="subtle-button" onClick={applySearch} disabled={loading}>
+            {t("Search")}
+          </button>
+        </div>
+        <div className="platform-printer-filters" role="group" aria-label={t("Printer access filter")}>
+          {([
+            ["all", "All printers"],
+            ["available", "Available"],
+            ["held", "On hold"]
+          ] as const).map(([value, label]) => (
+            <button
+              type="button"
+              key={value}
+              className={filter === value ? "active" : ""}
+              aria-pressed={filter === value}
+              onClick={() => applyFilter(value)}
+              disabled={loading}
+            >
+              {t(label)}
+            </button>
+          ))}
+        </div>
+      </div>
+
       {error && <div className="inline-error" role="alert">{error}</div>}
       {success && <div className="inline-success" role="status">{success}</div>}
-      {loading ? <div className="platform-plan-empty">{t("Loading discovered virtual queues…")}</div> : queues.length === 0
-        ? <div className="platform-plan-empty">{t("No unsupported virtual Windows queues are currently discovered.")}</div>
-        : <div className="platform-ops-history-list">
-            {queues.map(queue => {
-              const activeGrant = queue.grants.find(grant => grant.isActive);
-              const latestGrant = queue.grants[0];
-              const queueFresh = !!queue.lastSeenUtc && Date.parse(queue.lastSeenUtc) >= Date.now() - 2 * 60 * 1000;
-              const ready = queue.isActive && queueFresh && queue.agentOnline && (queue.status === "Ready" || queue.status === "Busy");
-              return (
-                <article className="platform-ops-history-item" key={queue.tenantId + ":" + queue.id}>
-                  <div className="platform-ops-heading">
-                    <div><strong>{queue.shopName} · {queue.displayName}</strong><small>{queue.shopSlug} · {queue.model} · {queue.connectionType} · Queue state: {queue.status} · {queue.isActive ? "Enabled" : "Disabled"}</small><small>Windows queue: {queue.queueName || "Not reported"} · IPP endpoint / port: {queue.connectionAddress || "Not reported"}</small><small>Paired Agent: {queue.agentDeviceId || "Not paired"} · {queue.agentOnline ? "Online" : "Offline / stale"}{queue.agentLastSeenUtc ? " · last seen " + formatIstDateTime(queue.agentLastSeenUtc) : ""}</small><small>Queue inventory: {queueFresh ? "Fresh" : "Stale / not reported"} · Identity: <code title={queue.identityFingerprint || "Identity unavailable"}>{queue.identityFingerprint ? queue.identityFingerprint.slice(0, 16) + "…" : "Unavailable"}</code></small></div>
-                    <span className="neutral-chip">{activeGrant ? ready ? "Approved · ready" : "Grant active · unavailable" : "Not approved"}</span>
+
+      {loading && !page ? (
+        <div className="platform-plan-empty"><LoaderCircle size={16} className="platform-spin"/> {t("Loading printers…")}</div>
+      ) : !loading && page?.items.length === 0 ? (
+        <div className="platform-plan-empty">{t("No printers match this search.")}</div>
+      ) : (
+        <div className="platform-printer-grid">
+          {(page?.items ?? []).map(item => {
+            const outputLabel = item.outputMode === "PHYSICAL"
+              ? t("Physical output")
+              : item.outputMode === "PDF_EXPORT"
+                ? t("PDF export")
+                : t("Virtual output · digital test only");
+            const queueFresh = !!item.lastSeenUtc && Date.parse(item.lastSeenUtc) >= Date.now() - 120_000;
+            return (
+              <article className={"platform-printer-card" + (item.isPlatformHeld ? " is-held" : "")} key={item.tenantId + ":" + item.id}>
+                <div className="platform-printer-card-top">
+                  <div className="platform-printer-card-title">
+                    <strong>{item.shopName} · {item.displayName}</strong>
+                    <span>{outputLabel} · {item.model} · {item.connectionType}</span>
+                    <small>{item.agentName || t("Agent not paired")} · {item.agentOnline ? t("Agent online") : t("Agent offline")} · {t("Queue")} {item.status}</small>
                   </div>
-                  {activeGrant
-                    ? <div><small>Active grant · approved {formatIstDateTime(activeGrant.createdUtc)} by {activeGrant.approvedByName} · expires {formatIstDateTime(activeGrant.expiresUtc)}</small><small>Approval reason: {activeGrant.reason}</small><div className="platform-ops-save-row"><button className="subtle-button" disabled={!!busyId} onClick={() => void revoke(queue, activeGrant.id)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : "Revoke approval"}</button></div></div>
-                    : <div><small>{latestGrant?.revokedUtc ? "Last grant revoked: " + (latestGrant.revocationReason || latestGrant.reason) : !queue.isActive ? "This printer is disabled in the shop. Enable it before requesting a test grant." : !queue.agentOnline ? "The paired Windows Agent is offline or its heartbeat is stale." : !queueFresh ? "Waiting for a fresh Windows queue inventory report." : "No active approval. Queue must be Ready or Busy before approval."}</small><div className="platform-ops-save-row"><button className="primary-button" disabled={!!busyId || !ready || !queue.agentDeviceId || !queue.identityFingerprint} onClick={() => void approve(queue)}>{busyId === queue.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>} Approve for 7 days</button></div></div>}
-                  {queue.grants.length > 0 && <details><summary>Approval history · {queue.grants.length} record(s)</summary><ul>{queue.grants.map(grant => <li key={grant.id}><strong>{grant.isActive ? "Active" : grant.revokedUtc ? "Revoked" : "Inactive · expired or identity changed"}</strong> · {formatIstDateTime(grant.createdUtc)} · expires {formatIstDateTime(grant.expiresUtc)} · approved by {grant.approvedByName} · {grant.reason}{grant.revokedUtc ? ` · revoked ${formatIstDateTime(grant.revokedUtc)} by ${grant.revokedByName || "system"}: ${grant.revocationReason || "No reason recorded"}` : ""}</li>)}</ul></details>}
-                </article>
-              );
-            })}
-          </div>}
+                  <span className={"platform-printer-state" + (item.isPlatformHeld ? " held" : " allowed")}>
+                    {item.isPlatformHeld ? t("On hold") : t("Allowed")}
+                  </span>
+                </div>
+
+                <div className="platform-printer-compact-meta">
+                  <span>{item.shopSlug}</span>
+                  <span>{item.queueName || t("Queue name not reported")}</span>
+                  <span>{queueFresh ? t("Inventory fresh") : t("Inventory stale")}</span>
+                  {item.isActive && <span>{t("Selected by shop")}</span>}
+                </div>
+
+                <details className="platform-printer-details">
+                  <summary>{t("Details")}</summary>
+                  <div className="platform-printer-detail-grid">
+                    <div><span>{t("Output type")}</span><strong>{outputLabel}</strong></div>
+                    <div><span>{t("Windows driver")}</span><strong>{item.model || t("Not reported")}</strong></div>
+                    <div><span>{t("Windows queue")}</span><strong>{item.queueName || t("Not reported")}</strong></div>
+                    <div><span>{t("Connection port")}</span><strong>{item.connectionAddress || t("Not reported")}</strong></div>
+                    <div><span>{t("Paired Agent")}</span><strong>{item.agentName || t("Not paired")}</strong></div>
+                    <div><span>{t("Agent last seen")}</span><strong>{item.agentLastSeenUtc ? formatIstDateTime(item.agentLastSeenUtc) : t("Not reported")}</strong></div>
+                    <div><span>{t("Queue last discovered")}</span><strong>{item.lastSeenUtc ? formatIstDateTime(item.lastSeenUtc) : t("Not reported")}</strong></div>
+                    <div><span>{t("Shop selection")}</span><strong>{item.isActive ? t("Selected") : t("Not selected")}</strong></div>
+                    <div><span>{t("Default Windows queue")}</span><strong>{item.isDefault ? t("Yes") : t("No")}</strong></div>
+                    <div><span>{t("Queue identity")}</span><strong><code title={item.identityFingerprint || ""}>{item.identityFingerprint || t("Not reported")}</code></strong></div>
+                    {item.isPlatformHeld && (
+                      <>
+                        <div><span>{t("Hold reason")}</span><strong>{item.platformHoldReason || t("No reason recorded")}</strong></div>
+                        <div><span>{t("Held by")}</span><strong>{item.platformHeldByName || t("Platform administrator")}</strong></div>
+                        <div><span>{t("Held at")}</span><strong>{item.platformHeldUtc ? formatIstDateTime(item.platformHeldUtc) : t("Not reported")}</strong></div>
+                      </>
+                    )}
+                  </div>
+                  {item.history.length > 0 && (
+                    <div className="platform-printer-history">
+                      <strong>{t("Hold history")}</strong>
+                      {item.history.map(entry => (
+                        <div key={entry.id}>
+                          <span>{entry.action === "HOLD" ? t("Placed on hold") : t("Hold released")}</span>
+                          <small>{entry.reason} · {entry.actorName} · {formatIstDateTime(entry.createdUtc)}</small>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </details>
+
+                <div className="platform-printer-actions">
+                  {item.isPlatformHeld ? (
+                    <button type="button" className="primary-button" disabled={!!busyId} onClick={() => openAction(item, "release")}>
+                      {busyId === item.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>}
+                      {t("Release hold")}
+                    </button>
+                  ) : (
+                    <button type="button" className="subtle-button platform-printer-hold-button" disabled={!!busyId} onClick={() => openAction(item, "hold")}>
+                      {busyId === item.id ? <LoaderCircle size={14} className="platform-spin"/> : <AlertTriangle size={14}/>}
+                      {t("Place on hold")}
+                    </button>
+                  )}
+                </div>
+
+                {actionItem?.id === item.id && (
+                  <div className="platform-printer-action-form">
+                    <label>
+                      <span>{t(actionType === "hold" ? "Reason for hold" : "Reason for release")}</span>
+                      <input
+                        value={reason}
+                        onChange={event => setReason(event.target.value)}
+                        maxLength={500}
+                        placeholder={t("Enter an audit reason (at least 5 characters)")}
+                      />
+                    </label>
+                    <div>
+                      <button type="button" className="subtle-button" disabled={!!busyId} onClick={() => { setActionItem(null); setReason(""); }}>
+                        {t("Cancel")}
+                      </button>
+                      <button type="button" className="primary-button" disabled={!!busyId || reason.trim().length < 5} onClick={() => void submitAction()}>
+                        {busyId === item.id ? <LoaderCircle size={14} className="platform-spin"/> : <ShieldCheck size={14}/>}
+                        {t(actionType === "hold" ? "Confirm hold" : "Confirm release")}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </article>
+            );
+          })}
+        </div>
+      )}
+
+      <div className="platform-printer-pagination">
+        <span>{t("Showing")} {rangeStart}–{rangeEnd} {t("of")} {total}</span>
+        <div>
+          <button type="button" className="subtle-button" disabled={loading || offset === 0} onClick={() => void reload(Math.max(0, offset - pageSize))}>
+            {t("Previous")}
+          </button>
+          <span>{currentPage} / {pageCount}</span>
+          <button type="button" className="subtle-button" disabled={loading || offset + pageSize >= total} onClick={() => void reload(offset + pageSize)}>
+            {t("Next")}
+          </button>
+        </div>
+      </div>
     </section>
   );
 }
@@ -268,7 +432,7 @@ export default function PlatformOperationsSection({ tokens }: { tokens: AuthToke
             </div>
           </section>
 
-          <VirtualPrinterTestGrantPanel tokens={tokens}/>
+          <PrinterPlatformAccessPanel tokens={tokens}/>
 
           <section className="panel platform-ops-policy-note">
             <AlertTriangle size={17}/>

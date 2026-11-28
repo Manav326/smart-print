@@ -651,6 +651,13 @@ public static class PrinterDiagnosticEndpoints
         DateTimeOffset now,
         CancellationToken ct)
     {
+        if (!PrinterPlatformAccessPolicy.IsAvailable(printer.IsPlatformHeld))
+            return Results.Conflict(new
+            {
+                code = "printer_on_platform_hold",
+                message = "This printer is temporarily restricted by platform administration. Diagnostics are unavailable until the hold is released."
+            });
+
         if (!printer.IsActive || printer.AgentDeviceId is not Guid agentId ||
             string.IsNullOrWhiteSpace(printer.QueueName) ||
             printer.LastSeenUtc is null || printer.LastSeenUtc < now - TimeSpan.FromMinutes(2) ||
