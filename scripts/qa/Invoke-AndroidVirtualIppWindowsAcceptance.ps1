@@ -253,17 +253,12 @@ try {
     # character is CYRILLIC SMALL LETTER IE (U+0435), not ASCII "e".
     # Try the exact advertised resource first; retain ASCII as a fallback probe.
     Start-Service -Name Spooler
-    # The queue name is unique to this workflow attempt. Never remove queues
-    # discovered by endpoint/port alone: multiple valid queues may share ports.
+    # The queue name is unique to this workflow attempt. A collision is an
+    # invariant violation: preserve the existing queue and fail with evidence.
+    # Never delete a queue just to make a test pass.
     $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
     if ($existingQueue) {
-        Remove-Printer -Name $queueName -ErrorAction Stop
-        $removeDeadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
-        do {
-            Start-Sleep -Milliseconds 500
-            $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
-        } while ($existingQueue -and [DateTimeOffset]::UtcNow -lt $removeDeadline)
-        if ($existingQueue) { throw "Windows did not remove stale IPP queue '$queueName' before discovery." }
+        throw "Refusing to overwrite pre-existing queue '$queueName' (driver '$($existingQueue.DriverName)', port '$($existingQueue.PortName)')."
     }
     $advertisedResource = [string]::Concat("/p/vir", [char]0x0435, "ual")
     $ippResources = @($advertisedResource, "/p/virtual")
@@ -273,33 +268,61 @@ try {
         try {
             $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
             Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
+            # Add-Printer succeeded, so this test owns the queue and finally
+            # may clean up this exact queue name (never its shared port/driver).
+            $queueCreated = $true
             $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
             if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") {
                 throw "Windows selected unexpected driver '$($candidatePrinter.DriverName)'."
             }
             $printer = $candidatePrinter
             $ippResource = $candidateResource
-            $queueCreated = $true
             break
         } catch {
-            $exception = $_.Exception
-            $hresult = $exception.HResult.ToString("X8")
+            $errorRecord = $_
+            $exception = $errorRecord.Exception
+            $hresult = '0x{0:X8}' -f $exception.HResult
+            $nativeCode = $null
+            if ($exception -is [System.ComponentModel.Win32Exception]) {
+                $nativeCode = $exception.NativeErrorCode
+            }
             $visiblePrinters = @(Get-Printer -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
             $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.Description)] monitor=$($_.PortMonitor)" })
-            $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; category $($_.CategoryInfo.Category)); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
-            # Only the run-scoped queue is eligible for cleanup. Do not touch
-            # a pre-existing queue or shared port, even if its endpoint matches.
-            Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
+            $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+            $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); partialQueue=$([bool]$partialQueue); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
+            $diagnostic = [ordered]@{
+                resource = $candidateResource
+                url = $candidateUrl
+                message = $exception.Message
+                exceptionType = $exception.GetType().FullName
+                hresult = $hresult
+                nativeErrorCode = $nativeCode
+                fullyQualifiedErrorId = $errorRecord.FullyQualifiedErrorId
+                category = "$($errorRecord.CategoryInfo)"
+                targetObject = "$($errorRecord.TargetObject)"
+                scriptStackTrace = $errorRecord.ScriptStackTrace
+                partialQueue = if ($partialQueue) { [ordered]@{ name=$partialQueue.Name; driver=$partialQueue.DriverName; port=$partialQueue.PortName } } else { $null }
+                printers = $visiblePrinters
+                ports = $visiblePorts
+            }
+            $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8
+            # If Add-Printer failed, ownership is unproven. Do not remove a
+            # queue that may have been created concurrently by another actor.
+            if ($partialQueue) { break }
         }
     }
     if (-not $queueCreated -or $null -eq $printer) {
         $printEvents = @()
-        try {
-            $printEvents = @(Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-PrintService/Operational"; StartTime = [DateTime]::Now.AddMinutes(-15) } -MaxEvents 30 -ErrorAction Stop |
-                Select-Object TimeCreated, Id, LevelDisplayName, Message)
-        } catch { $printEvents = @("PrintService Operational log unavailable: $($_.Exception.Message)") }
+        foreach ($logName in @("Microsoft-Windows-PrintService/Admin", "Microsoft-Windows-PrintService/Operational")) {
+            try {
+                $printEvents += @(Get-WinEvent -FilterHashtable @{ LogName = $logName; StartTime = [DateTime]::Now.AddMinutes(-15) } -MaxEvents 30 -ErrorAction Stop |
+                    Select-Object @{Name="LogName";Expression={$logName}}, TimeCreated, Id, LevelDisplayName, Message)
+            } catch {
+                $printEvents += [ordered]@{ LogName=$logName; queryError=$_.Exception.Message }
+            }
+        }
         $eventEvidencePath = Join-Path $evidenceDirectory "windows-printservice-events.json"
-        $printEvents | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8
+        $printEvents | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8
         throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService events saved to $eventEvidencePath"
     }
     $driver = Get-PrinterDriver -Name $printer.DriverName -ErrorAction Stop
