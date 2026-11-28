@@ -53,6 +53,28 @@ public sealed class PrinterDiagnosticRulesTests
     }
 
     [Fact]
+    public void VirtualOutputUsesOneDigitalPageAndDoesNotApplyPhysicalDuplex()
+    {
+        const string json = """
+        {
+          "color": true,
+          "colorStatus": "supported",
+          "duplex": true,
+          "duplexStatus": "supported"
+        }
+        """;
+
+        Assert.True(PrinterDiagnosticRules.TryResolveSettings(
+            json, virtualOutput: true, out var settings, out var reason));
+        Assert.Empty(reason);
+        Assert.Equal("Colour", settings.ColourMode);
+        Assert.False(settings.IsDuplex);
+        Assert.Equal(1, settings.PageCount);
+        Assert.Contains("VIRTUAL_FILE_OUTPUT", settings.CapabilityEvidence);
+        Assert.Contains("DUPLEX_NOT_APPLICABLE", settings.CapabilityEvidence);
+    }
+
+    [Fact]
     public void RejectsDriverThatReportsMediaButNoRecognisedStandardPaper()
     {
         const string json = """{"paperSizesStatus":"supported","paperSizes":[{"name":"Custom 7x9"}]}""";
