@@ -32,7 +32,7 @@ $apkSha256 = "f1e64933fa0f69306e8c5cf885e0884be7265556a8c507c89846578d1ec4caed"
 $signerSha1 = "49fa922e98eda907944076fba7aba6251b546f29"
 $queueName = "SmartPrint Android Virtual IPP CI"
 $ippPort = 10631
-$ippResource = "/p/virtual"
+$ippResource = $null
 $evidenceDirectory = Join-Path (Get-Location) "artifacts/android-ipp-windows"
 $runnerTemp = if ($env:RUNNER_TEMP) { $env:RUNNER_TEMP } else { [IO.Path]::GetTempPath() }
 $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { Join-Path $env:LOCALAPPDATA "Android\Sdk" }
@@ -217,16 +217,37 @@ try {
     }
 
     # Directed discovery avoids mDNS multicast assumptions in a virtualized CI network.
+    # The developer's published service record uses rp=p/virеual (the e in
+    # that path is Cyrillic); try that exact resource first, then the ASCII
+    # spelling used by most IPP clients. Only a successful Windows IPP
+    # directed-discovery result is accepted.
     Start-Service -Name Spooler
-    Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
-    Add-Printer -Name $queueName -IppURL "http://127.0.0.1:$ippPort$ippResource" -KeepPrintedJobs
-    $queueCreated = $true
-    $printer = Get-Printer -Name $queueName -ErrorAction Stop
+    $ippResources = @("/p/vir" + [char]0x0435 + "ual", "/p/virtual")
+    $candidateFailures = @()
+    $printer = $null
+    foreach ($candidateResource in $ippResources) {
+        Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
+        try {
+            $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
+            Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
+            $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
+            if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") {
+                throw "Windows selected unexpected driver '$($candidatePrinter.DriverName)'."
+            }
+            $printer = $candidatePrinter
+            $ippResource = $candidateResource
+            $queueCreated = $true
+            break
+        } catch {
+            $candidateFailures += "$candidateResource => $($_.Exception.Message)"
+            Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
+        }
+    }
+    if (-not $queueCreated -or $null -eq $printer) {
+        throw "Windows could not discover IppVirtual through either advertised resource path: $($candidateFailures -join '; ')"
+    }
     $driver = Get-PrinterDriver -Name $printer.DriverName -ErrorAction Stop
     $port = Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
-    if ($printer.DriverName -notmatch "Microsoft IPP Class Driver") {
-        throw "Windows did not select Microsoft IPP Class Driver; actual driver was '$($printer.DriverName)'."
-    }
     if ([string]::IsNullOrWhiteSpace($printer.PortName)) {
         throw "Windows created the IPP queue without a usable port."
     }
