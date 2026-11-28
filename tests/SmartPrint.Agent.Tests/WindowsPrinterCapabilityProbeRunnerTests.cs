@@ -96,6 +96,25 @@ public sealed class WindowsPrinterCapabilityProbeRunnerTests
     }
 
     [Fact]
+    public async Task CapabilityWorkersAreBoundedToTwoConcurrentProcesses()
+    {
+        if (!OperatingSystem.IsWindows()) return;
+
+        var runner = new ConcurrencyTrackingRunner();
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            childProcessRunner: runner);
+
+        var tasks = Enumerable.Range(1, 6)
+            .Select(index => probe.ProbeAsync($"Queue {index}", $"Driver {index}", CancellationToken.None));
+        var results = await Task.WhenAll(tasks);
+
+        Assert.Equal(6, results.Length);
+        Assert.All(results, result => Assert.Contains("\"queueName\":", result));
+        Assert.Equal(2, runner.MaximumConcurrency);
+    }
+
+    [Fact]
     public async Task CancellationIsPropagatedInsteadOfCachedAsDriverFailure()
     {
         if (!OperatingSystem.IsWindows()) return;
@@ -133,6 +152,49 @@ public sealed class WindowsPrinterCapabilityProbeRunnerTests
             if (!pending.TryDequeue(out var result))
                 throw new InvalidOperationException("No fake capability response was configured.");
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class ConcurrencyTrackingRunner : IAgentChildProcessRunner
+    {
+        private int active;
+        private int maximumConcurrency;
+        public int MaximumConcurrency => Volatile.Read(ref maximumConcurrency);
+
+        public async Task<AgentChildProcessResult> ExecuteAsync(
+            string command,
+            string standardInput,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
+        {
+            var queueName = System.Text.Json.JsonDocument.Parse(standardInput)
+                .RootElement.GetProperty("queueName").GetString();
+            var current = Interlocked.Increment(ref active);
+            UpdateMaximum(current);
+            try
+            {
+                await Task.Delay(100, cancellationToken);
+                return new AgentChildProcessResult(
+                    0,
+                    System.Text.Json.JsonSerializer.Serialize(new { queueName, duplex = true }),
+                    string.Empty,
+                    false);
+            }
+            finally
+            {
+                Interlocked.Decrement(ref active);
+            }
+        }
+
+        private void UpdateMaximum(int value)
+        {
+            while (true)
+            {
+                var current = Volatile.Read(ref maximumConcurrency);
+                if (value <= current || Interlocked.CompareExchange(ref maximumConcurrency, value, current) == current)
+                    return;
+            }
         }
     }
 
