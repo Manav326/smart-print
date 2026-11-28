@@ -272,7 +272,7 @@ jobs:
       epson_l360_qa_required: ${{ inputs.epson_l360_driver_package_url != '' || vars.EPSON_L360_DRIVER_PACKAGE_URL != '' || steps.epson_l360_setup.outcome == 'success' }}
       epson_l360_qa_ready: ${{ steps.epson_l360_setup.outcome == 'success' && steps.epson_l360_capability_probe.outcome == 'success' && steps.epson_l360_shop_owner_ui.outcome == 'success' && steps.agent_tests.outcome == 'success' && steps.epson_l360_capture.outcome == 'success' && steps.epson_l360_artifact_upload.outcome == 'success' }}
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
       - name: Set up .NET
@@ -302,7 +302,8 @@ jobs:
             @{ Path = "scripts/qa/run-smartprint-headed-playwright.ps1"; Expected = "-RunCustomerUploadWorkflow" },
             @{ Path = "scripts/qa/desktop-open-smoke.ps1"; Expected = "-RequireDevTools" },
             @{ Path = "scripts/qa/windows-installer-lifecycle.ps1"; Expected = "-InstallerV1" },
-            @{ Path = "scripts/qa/test-published-apps.ps1"; Expected = "-InstallPublishedAndroidApk" }
+            @{ Path = "scripts/qa/test-published-apps.ps1"; Expected = "-InstallPublishedAndroidApk" },
+            @{ Path = "scripts/qa/Invoke-AndroidVirtualIppWindowsAcceptance.ps1"; Expected = "Invoke-AndroidVirtualIppWindowsAcceptance.ps1" }
           )
           foreach ($check in $helpChecks) {
             $helpOutput = & pwsh -NoProfile -File $check.Path -Help 2>&1 | Out-String
@@ -629,6 +630,33 @@ jobs:
           name: smart-print-agent-win-x64
           path: artifacts/agent/
           if-no-files-found: error
+          retention-days: 30
+
+      - name: Set up Java for the Android IPP receiver emulator
+        id: android_ipp_java
+        if: ${{ !cancelled() && steps.agent_tests.outcome == 'success' && steps.agent_publish.outcome == 'success' }}
+        uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Set up Android SDK command-line tools on the Windows Agent runner
+        id: android_ipp_sdk
+        if: ${{ !cancelled() && steps.android_ipp_java.outcome == 'success' }}
+        uses: android-actions/setup-android@v4
+        with:
+          packages: "platform-tools"
+      - name: Run real Windows Agent to Android IppVirtual receiver acceptance
+        id: android_ipp_acceptance
+        if: ${{ !cancelled() && steps.android_ipp_sdk.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/qa/Invoke-AndroidVirtualIppWindowsAcceptance.ps1
+      - name: Upload Windows-to-Android IPP receiver evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: smart-print-android-ipp-windows-e2e
+          path: artifacts/android-ipp-windows/
+          if-no-files-found: warn
           retention-days: 30
 
   windows_desktop:
