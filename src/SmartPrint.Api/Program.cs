@@ -1904,8 +1904,14 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
     await using var transaction = await db.Database.BeginTransactionAsync(ct);
     await entitlements.AcquireQuotaLockAsync(tenantId, TenantQuotaResource.Printer, ct);
 
-    var printer = await db.PrinterDevices.SingleOrDefaultAsync(
-        x => x.Id == printerId && x.TenantId == tenantId, ct);
+    var lockedPrinterRows = await db.PrinterDevices.FromSqlInterpolated(
+        $"""
+        SELECT * FROM "PrinterDevices"
+        WHERE "Id" = {printerId} AND "TenantId" = {tenantId}
+        FOR UPDATE
+        """)
+        .ToListAsync(ct);
+    var printer = lockedPrinterRows.SingleOrDefault();
     if (printer is null)
     {
         await transaction.RollbackAsync(ct);
@@ -1922,10 +1928,14 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
         });
     }
 
-    if (isActive && printer.IsPlatformHeld)
+    if (printer.IsPlatformHeld)
     {
         await transaction.RollbackAsync(ct);
-        return Results.Conflict(new { code = "printer_on_platform_hold", message = "This printer is temporarily restricted by platform administration." });
+        return Results.Conflict(new
+        {
+            code = "printer_on_platform_hold",
+            message = "This printer is on platform hold. Its existing shop selection must remain unchanged until the hold is released."
+        });
     }
 
     if (isActive && !printer.IsActive)
@@ -10358,6 +10368,23 @@ publicApi.MapPost("/sessions/current/jobs", async (
         return Results.Unauthorized();
     }
 
+    var uploadStationPrinterId = await db.QrStations.AsNoTracking()
+        .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
+        .Select(station => station.PrinterDeviceId)
+        .SingleOrDefaultAsync(ct);
+    if (uploadStationPrinterId is Guid uploadPrinterId &&
+        await db.PrinterDevices.AsNoTracking().AnyAsync(printer =>
+            printer.Id == uploadPrinterId &&
+            printer.TenantId == session.TenantId &&
+            printer.IsPlatformHeld, ct))
+    {
+        return Results.Conflict(new
+        {
+            code = "printer_on_platform_hold",
+            message = "This print station's default printer is temporarily unavailable. Please contact the shop."
+        });
+    }
+
     var privateBatchAlreadyExists = await db.PrintJobs.AsNoTracking().AnyAsync(job =>
         job.TenantId == session.TenantId && job.CustomerSessionId == session.Id &&
         job.BatchId == batchId && job.PrivatePrinting, ct) ||
@@ -10631,6 +10658,19 @@ publicApi.MapPost("/sessions/current/jobs", async (
         .Where(station => station.Id == session.QrStationId && station.TenantId == session.TenantId)
         .Select(station => station.PrinterDeviceId)
         .SingleOrDefaultAsync(ct);
+    if (stationDefaultPrinterId is Guid uploadDefaultPrinterId &&
+        await db.PrinterDevices.AsNoTracking().AnyAsync(printer =>
+            printer.Id == uploadDefaultPrinterId &&
+            printer.TenantId == session.TenantId &&
+            printer.IsPlatformHeld, ct))
+    {
+        return Results.Conflict(new
+        {
+            code = "printer_on_platform_hold",
+            message = "This print station's default printer is temporarily unavailable. Please contact the shop."
+        });
+    }
+
     var localAgentAvailable = await GetLocalAgentInfoAsync(
         db, session.TenantId, stationDefaultPrinterId, now, ct) is not null;
     if (!subscription.CloudAssistedPrintingEnabled && localAgentAvailable)
@@ -10764,6 +10804,27 @@ publicApi.MapPost("/sessions/current/jobs", async (
     try
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        if (stationDefaultPrinterId is Guid lockedDefaultPrinterId)
+        {
+            var lockedDefaultRows = await db.PrinterDevices.FromSqlInterpolated(
+                $"""
+                SELECT * FROM "PrinterDevices"
+                WHERE "Id" = {lockedDefaultPrinterId} AND "TenantId" = {session.TenantId}
+                FOR UPDATE
+                """)
+                .ToListAsync(ct);
+            var lockedDefaultPrinter = lockedDefaultRows.SingleOrDefault();
+            if (lockedDefaultPrinter is null || lockedDefaultPrinter.IsPlatformHeld)
+            {
+                await transaction.RollbackAsync(ct);
+                await storage.DeleteAsync(stored.StorageKey);
+                return Results.Conflict(new
+                {
+                    code = "printer_on_platform_hold",
+                    message = "This print station's default printer is temporarily unavailable. Please contact the shop."
+                });
+            }
+        }
         await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
@@ -12741,7 +12802,7 @@ publicApi.MapPost("/jobs/{jobId:guid}/quote", async (
             .SingleOrDefaultAsync(ct);
         var capabilities = job.PrinterDeviceId is Guid quotePrinterId
             ? await db.PrinterDevices.AsNoTracking()
-                .Where(printer => printer.Id == quotePrinterId && printer.TenantId == session.TenantId && printer.IsActive)
+                .Where(printer => printer.Id == quotePrinterId && printer.TenantId == session.TenantId && printer.IsActive && !printer.IsPlatformHeld)
                 .Select(printer => printer.CapabilitiesJson)
                 .SingleOrDefaultAsync(ct)
             : null;
@@ -14087,7 +14148,7 @@ publicApi.MapPost("/sessions/current/resume", async (
         .SingleAsync(ct);
     var printer = station.PrinterDeviceId is Guid printerId
         ? await db.PrinterDevices.AsNoTracking()
-            .Where(item => item.Id == printerId && item.TenantId == station.TenantId && item.IsActive)
+            .Where(item => item.Id == printerId && item.TenantId == station.TenantId && item.IsActive && !item.IsPlatformHeld)
             .Select(item => new { item.DisplayName, item.Manufacturer, item.Model, item.Status, item.CapabilitiesJson })
             .SingleOrDefaultAsync(ct)
         : null;
@@ -14132,6 +14193,19 @@ publicApi.MapPost("/stations/{publicCode}/sessions", async (
     if (station is null)
     {
         return Results.NotFound(new { code = "station_not_available", message = "This print station is unavailable. Please ask the shop operator for help." });
+    }
+
+    if (station.PrinterDeviceId is Guid stationPrinterId &&
+        await db.PrinterDevices.AsNoTracking().AnyAsync(printer =>
+            printer.Id == stationPrinterId &&
+            printer.TenantId == station.TenantId &&
+            printer.IsPlatformHeld, ct))
+    {
+        return Results.Conflict(new
+        {
+            code = "printer_on_platform_hold",
+            message = "This print station's default printer is temporarily unavailable. Please contact the shop."
+        });
     }
 
     var customerEntitlements = await entitlements.GetForTenantAsync(station.TenantId, ct);
