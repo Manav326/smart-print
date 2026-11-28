@@ -184,8 +184,10 @@ try {
         "-no-snapshot",
         "-wipe-data",
         "-gpu", "swiftshader",
-        "-memory", "2048",
-        "-cores", "2"
+        "-memory", "3072",
+        "-cores", "4",
+        "-no-metrics",
+        "-no-snapshot-save"
     ) + $emulatorAccelerationArgs
     $emulatorProcess = Start-Process -FilePath $emulator -ArgumentList $emulatorArgs -PassThru -WindowStyle Hidden -RedirectStandardOutput $emulatorLog -RedirectStandardError ($emulatorLog + ".err")
 
