@@ -433,7 +433,280 @@ mod tests {
     }
 }
 
+
+#[cfg(windows)]
+mod msix_webview2 {
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    const WEBVIEW2_CLIENT_ID: &str = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}";
+    const ERROR_INSUFFICIENT_BUFFER: u32 = 122;
+    const MB_OK: u32 = 0x0000_0000;
+    const MB_ICONINFORMATION: u32 = 0x0000_0040;
+    const MB_ICONERROR: u32 = 0x0000_0010;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn GetCurrentPackageFullName(package_full_name_length: *mut u32, package_full_name: *mut u16) -> u32;
+    }
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn MessageBoxW(hwnd: *mut std::ffi::c_void, text: *const u16, caption: *const u16, kind: u32) -> i32;
+    }
+
+    fn is_msix_packaged_process() -> bool {
+        let mut length = 0u32;
+        unsafe {
+            GetCurrentPackageFullName(&mut length, std::ptr::null_mut()) == ERROR_INSUFFICIENT_BUFFER
+        }
+    }
+
+    fn show_message(title: &str, message: &str, icon: u32) {
+        let title: Vec<u16> = title.encode_utf16().chain(std::iter::once(0)).collect();
+        let message: Vec<u16> = message.encode_utf16().chain(std::iter::once(0)).collect();
+        unsafe {
+            MessageBoxW(std::ptr::null_mut(), message.as_ptr(), title.as_ptr(), MB_OK | icon);
+        }
+    }
+
+    const HKEY_LOCAL_MACHINE: isize = -2_147_483_646;
+    const HKEY_CURRENT_USER: isize = -2_147_483_647;
+    const KEY_QUERY_VALUE: u32 = 0x0001;
+    const REG_SZ: u32 = 1;
+    const ERROR_SUCCESS: i32 = 0;
+
+    #[link(name = "advapi32")]
+    extern "system" {
+        #[link_name = "RegOpenKeyExW"]
+        fn reg_open_key_ex_w(
+            key: *mut std::ffi::c_void,
+            sub_key: *const u16,
+            options: u32,
+            desired_access: u32,
+            result: *mut *mut std::ffi::c_void,
+        ) -> i32;
+
+        #[link_name = "RegQueryValueExW"]
+        fn reg_query_value_ex_w(
+            key: *mut std::ffi::c_void,
+            value_name: *const u16,
+            reserved: *mut u32,
+            value_type: *mut u32,
+            data: *mut u8,
+            data_size: *mut u32,
+        ) -> i32;
+
+        #[link_name = "RegCloseKey"]
+        fn reg_close_key(key: *mut std::ffi::c_void) -> i32;
+    }
+
+    fn parse_registry_runtime_version(value: &str) -> bool {
+        let parts: Vec<&str> = value.trim_matches('\0').trim().split('.').collect();
+        parts.len() == 4
+            && parts.iter().all(|part| !part.is_empty() && part.bytes().all(|byte| byte.is_ascii_digit()))
+            && parts[0].parse::<u32>().map(|major| major > 0).unwrap_or(false)
+    }
+
+    fn registry_key_has_runtime(root_key: isize, sub_key: &str) -> bool {
+        let sub_key: Vec<u16> = sub_key.encode_utf16().chain(std::iter::once(0)).collect();
+        let value_name: Vec<u16> = "pv".encode_utf16().chain(std::iter::once(0)).collect();
+
+        unsafe {
+            let mut key = std::ptr::null_mut();
+            if reg_open_key_ex_w(
+                root_key as *mut std::ffi::c_void,
+                sub_key.as_ptr(),
+                0,
+                KEY_QUERY_VALUE,
+                &mut key,
+            ) != ERROR_SUCCESS {
+                return false;
+            }
+
+            let mut value_type = 0u32;
+            let mut data_size = 0u32;
+            let size_status = reg_query_value_ex_w(
+                key,
+                value_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                std::ptr::null_mut(),
+                &mut data_size,
+            );
+
+            if size_status != ERROR_SUCCESS || value_type != REG_SZ || data_size < 2 || data_size > 1024 {
+                reg_close_key(key);
+                return false;
+            }
+
+            let mut data = vec![0u16; (data_size as usize + 1) / 2];
+            let mut actual_size = data_size;
+            let read_status = reg_query_value_ex_w(
+                key,
+                value_name.as_ptr(),
+                std::ptr::null_mut(),
+                &mut value_type,
+                data.as_mut_ptr().cast::<u8>(),
+                &mut actual_size,
+            );
+            reg_close_key(key);
+
+            if read_status != ERROR_SUCCESS
+                || value_type != REG_SZ
+                || actual_size > data_size
+                || actual_size % 2 != 0
+            {
+                return false;
+            }
+
+            let units = &data[..(actual_size as usize / 2)];
+            let value_length = units.iter().position(|unit| *unit == 0).unwrap_or(units.len());
+            String::from_utf16(&units[..value_length])
+                .map(|version| parse_registry_runtime_version(&version))
+                .unwrap_or(false)
+        }
+    }
+
+    fn webview2_runtime_installed() -> bool {
+        let machine_key = format!(
+            r"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        );
+        let user_key = format!(
+            r"Software\Microsoft\EdgeUpdate\Clients\{}",
+            WEBVIEW2_CLIENT_ID
+        );
+        registry_key_has_runtime(HKEY_LOCAL_MACHINE, &machine_key)
+            || registry_key_has_runtime(HKEY_CURRENT_USER, &user_key)
+    }
+
+    pub fn ensure_runtime_for_msix() -> bool {
+        // The website EXE installer already installs WebView2 before launch.
+        // Keep its runtime behavior unchanged; this fallback is MSIX-only.
+        if !is_msix_packaged_process() || webview2_runtime_installed() {
+            return true;
+        }
+
+        show_message(
+            "Preparing Smart Print",
+            "Smart Print is preparing the required Microsoft WebView2 Runtime. This is a one-time setup on this PC. Please wait.",
+            MB_ICONINFORMATION,
+        );
+
+        let installer = match std::env::current_exe()
+            .ok()
+            .and_then(|path| path.parent().map(|parent| parent.join("MicrosoftEdgeWebView2RuntimeInstallerX64.exe")))
+        {
+            Some(path) if path.is_file() => path,
+            _ => {
+                show_message(
+                    "Smart Print setup could not continue",
+                    "The bundled Microsoft WebView2 Runtime installer is missing. Repair or reinstall Smart Print, then try again.",
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+        };
+
+        let status = match Command::new(&installer).args(["/silent", "/install"]).spawn() {
+            Ok(mut child) => {
+                let started = Instant::now();
+                loop {
+                    match child.try_wait() {
+                        Ok(Some(exit)) => break Ok(exit),
+                        Ok(None) if started.elapsed() < Duration::from_secs(600) => {
+                            std::thread::sleep(Duration::from_millis(500));
+                        }
+                        Ok(None) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break Err(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                "Microsoft WebView2 Runtime setup exceeded the 10-minute limit",
+                            ));
+                        }
+                        Err(error) => {
+                            let _ = child.kill();
+                            let _ = child.wait();
+                            break Err(error);
+                        }
+                    }
+                }
+            }
+            Err(error) => Err(error),
+        };
+
+        match status {
+            Ok(exit) if matches!(exit.code(), Some(0) | Some(3010)) => {}
+            Ok(exit) => {
+                show_message(
+                    "Smart Print could not prepare WebView2",
+                    &format!(
+                        "Microsoft WebView2 Runtime setup returned exit code {:?}. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
+                        exit.code()
+                    ),
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::TimedOut => {
+                show_message(
+                    "Smart Print WebView2 setup timed out",
+                    "Microsoft WebView2 Runtime setup did not finish within 10 minutes. Restart Smart Print and try again. If the problem continues, install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+            Err(error) => {
+                show_message(
+                    "Smart Print could not prepare WebView2",
+                    &format!(
+                        "Microsoft WebView2 Runtime setup could not start: {error}. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print."
+                    ),
+                    MB_ICONERROR,
+                );
+                return false;
+            }
+        }
+
+        if !webview2_runtime_installed() {
+            show_message(
+                "Smart Print could not prepare WebView2",
+                "Microsoft WebView2 Runtime is still unavailable. Install the Evergreen Runtime from https://developer.microsoft.com/microsoft-edge/webview2/ and reopen Smart Print.",
+                MB_ICONERROR,
+            );
+            return false;
+        }
+
+        true
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::parse_registry_runtime_version;
+
+        #[test]
+        fn accepts_a_real_webview2_runtime_version() {
+            assert!(parse_registry_runtime_version("140.0.3485.54"));
+        }
+
+        #[test]
+        fn rejects_empty_zero_and_malformed_webview2_runtime_versions() {
+            assert!(!parse_registry_runtime_version("0.0.0.0"));
+            assert!(!parse_registry_runtime_version(""));
+            assert!(!parse_registry_runtime_version("not-a-version"));
+            assert!(!parse_registry_runtime_version("140.0"));
+        }
+    }
+}
+
 fn main() {
+    #[cfg(windows)]
+    if !msix_webview2::ensure_runtime_for_msix() {
+        std::process::exit(1);
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             get_local_agent_status,

@@ -1,5 +1,8 @@
 # SmartPrint Store publishing setup
 
+> **Distribution-path note:** This document describes the existing Windows EXE/MSI distribution workflow. It does not describe the new MSIX package path. For Microsoft Store MSIX submission, use [MSIX printing parity and release gates](MSIX_PRINTING_PARITY.md) and [the restricted-capability justifications](MSIX_PACKAGED_SERVICES_JUSTIFICATION.md). Do not use the EXE/MSI `packageType` workflow to submit an MSIX; reserve/confirm the correct MSIX app identity and use the MSIX validation workflow's manual Partner-Center-identity build path (a temporary self-signed certificate matches the Publisher; Microsoft re-signs the certified Store package).
+
+
 This repository uses one versioned GitHub release to produce the website downloads and Store-ready binaries. Store submission is a separate, manually dispatched workflow with explicit confirmation and protected GitHub Environments.
 
 ## Release flow
@@ -25,9 +28,15 @@ A PR merge never submits an app to either public Store. A stable release build a
 
 SmartPrint's installer creates the `QRtoPrintSmartPrintAgent` Windows NT service. The current installer configures it to run as the built-in `NT AUTHORITY\LocalService` account (not `LocalSystem`), with automatic startup and service recovery. The Agent is required for SmartPrint's local printer integration. It is not a kernel-mode printer driver.
 
-**This must be disclosed in Partner Center.** On the MSI/EXE submission's Properties page, select the declaration that the app depends on non-Microsoft drivers or NT services, and explain the dependency in Notes for certification. Microsoft's policy says these dependencies are generally not allowed and are reviewed case by case; disclosure does not guarantee approval. Do not claim accessibility certification or any other declaration unless separately tested.
+**This must be disclosed in Partner Center in two places.** On the MSI/EXE submission's Properties page, set the product declaration `dependsOnDriversOrNT=true`. The current Store policy also requires the dependency to be disclosed at the beginning of the customer-facing product description and in Notes for certification. Microsoft's policy says dependencies on non-Microsoft drivers or NT services are generally not allowed; its case-by-case wording specifically references WHCP-certified drivers. SmartPrint's Agent is an application NT service, not a WHCP-certified kernel driver, so do not assume the driver exception applies or that disclosure guarantees approval. Obtain Microsoft's written guidance before treating the EXE/MSI service route as viable.
 
 Suggested certification note (review against the final Agent implementation before submission):
+
+Suggested opening sentence for every localized Store listing description (review with Microsoft before publication):
+
+> SmartPrint installs and depends on its own non-Microsoft Windows NT service (SmartPrint Agent), running under the built-in LocalService account, for background print queue processing and shop-network printing.
+
+The automated publisher checks the Partner Center product declaration, all returned listing descriptions, certification notes, and the public HTTPS privacy-policy URL. It fails closed if the service dependency is not disclosed in the required locations.
 
 > SmartPrint installs one Windows NT service named QRtoPrintSmartPrintAgent. The service runs under the built-in NT AUTHORITY\LocalService account, not LocalSystem, and no kernel-mode driver is installed. It provides the local printer-integration component required by the SmartPrint desktop application, including local printer inventory and secure communication with the desktop client. The installer configures automatic startup and service recovery. The service is removed during application uninstall. The installer does not install unrelated third-party applications.
 
@@ -108,7 +117,13 @@ The existing release workflow already expects these repository variables/secrets
 
 The public download base must be the root HTTPS custom-domain origin, not the `r2.dev` development URL. The workflow stores immutable objects under `/<tag>/filename`.
 
-### E. Android upload signing
+### E. Microsoft Store privacy policy
+
+SmartPrint's current public privacy-policy page is `https://smartprint.quantaedge.in/privacy-policy/`. It now covers the Windows desktop app and background Agent as well as the Android app and website; verify that this exact URL is published and accurate before saving it in Partner Center.
+
+Set the Partner Center Properties fields `isPrivacyPolicyRequired=true` and `privacyPolicyUrl=https://smartprint.quantaedge.in/privacy-policy/`. The publisher preflight performs an unauthenticated HTTPS GET and checks that the listing metadata has the service disclosure described above. If the actual production privacy practices change, update the policy before submission rather than bypassing the preflight.
+
+### F. Android upload signing
 
 The release build already expects the existing Android upload keystore and signing values. Confirm these four GitHub repository Actions secrets exist and correspond to the same keystore used for prior Android releases:
 
@@ -127,7 +142,7 @@ Add this optional GitHub repository Actions variable if the app already has Play
 
 Never generate a new upload key for a later release. Keep a secure offline backup of the keystore and passwords. If the existing key is lost, stop and plan Google's upload-key reset process rather than silently replacing it.
 
-### F. Microsoft Partner Center (one-time manual setup)
+### G. Microsoft Partner Center (one-time manual setup)
 
 The Microsoft Store Submission API cannot create the first product or perform the initial submission. Complete these actions once in [Partner Center](https://partner.microsoft.com/dashboard):
 
@@ -138,7 +153,7 @@ The Microsoft Store Submission API cannot create the first product or perform th
 4. Use installer parameters:
    `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART /SP- /LOG`
 5. Set architecture to **X64**, package type **EXE**, language **en-us**, and indicate that installer parameters are required.
-6. Disclose the Windows Agent NT service dependency in Partner Center's dependency declarations. SmartPrint installs and manages the non-Microsoft service `QRtoPrintSmartPrintAgent`, runs it as `NT AUTHORITY\LocalService`, and uses it to access local printer queues and expose the local Agent API on TCP 17842. Do not declare this dependency as false. The application does not install a printer driver or modify existing printer queues, ports, or the Windows Spooler configuration.
+6. Set the Partner Center product declaration `dependsOnDriversOrNT=true` and disclose the Windows Agent NT service dependency. SmartPrint installs and manages the non-Microsoft service `QRtoPrintSmartPrintAgent`, runs it as `NT AUTHORITY\LocalService`, and uses it to access local printer queues and expose the local Agent API on TCP 17842. Do not declare this dependency as false. The application does not install a printer driver or modify existing printer queues, ports, or the Windows Spooler configuration.
 7. In **Notes for certification**, explain that the elevated installer installs the service and that uninstall stops/removes the service and its versioned firewall rules. SmartPrint deliberately retains its encrypted machine identity and local print-queue data under `%ProgramData%\QRtoPrint` so a reinstall can recover the same device identity and pending work. Explain this retention and the supported revoke-before-disposal process; do not describe uninstall as erasing that machine data.
 8. Provide a dedicated test account and any required test steps through Partner Center's certification-notes facility. Explain that a physical printer is not required to verify the UI, and give the steps to use a Windows virtual printer when print submission is being tested. Never put test credentials in this repository or a GitHub release.
 9. Test the exact signed Store installer with the documented silent parameters on a clean Windows x64 VM using a standard user account and expected UAC elevation. Confirm install, service start, local printer discovery/print, upgrade, service rollback and uninstall. Check that the encrypted retained data is the only intentional product data left behind.
@@ -157,9 +172,11 @@ Create/associate a Microsoft Entra ID app with the Partner Center account and gr
 | `MICROSOFT_STORE_CLIENT_ID` | Variable | Entra application/client ID |
 | `MICROSOFT_STORE_CLIENT_SECRET` | Secret | Entra client-secret **value** (not secret ID) |
 
-The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission.
+The publishing script patches only the existing X64 package, commits the package module, waits for package validation, then submits the package for Microsoft certification. It refuses to replace multiple architectures or create a competing active submission. Before it changes the package, it verifies `properties.productDeclarations.dependsOnDriversOrNT=true`, the required and reachable public HTTPS privacy-policy URL, verifies that the live policy contains the Windows Agent/LocalService, SSID, TCP 17842 and machine-data-retention disclosures, and checks the NT-service disclosure at the beginning of every returned localized listing description and in certification notes. It stops without changing the package if any declaration or disclosure is missing.
 
-### G. Google Play Console (one-time manual setup)
+**Configuration audit (27 November 2026):** the latest published release, `v0.1.102`, contains `SmartPrint-Windows-Setup.exe` but not `SmartPrint-Windows-Store-Setup.exe`. The release run skipped the signed Store installer because these were empty: `WINDOWS_CODESIGN_PFX_BASE64`, `WINDOWS_CODESIGN_PFX_PASSWORD`, `WEBVIEW2_STANDALONE_X64_URL`, and `SMARTPRINT_WINDOWS_PUBLISHER`. The release log also showed `PUBLIC_DOWNLOAD_BASE_URL`, `CLOUDFLARE_R2_ACCOUNT_ID`, and `CLOUDFLARE_R2_BUCKET` unset. The Store publication workflow additionally requires R2 credentials and the Partner Center product, seller, Entra tenant/client IDs and client secret. Until these are configured in GitHub Actions/Environment settings, the existing service-preserving Store EXE route cannot produce or submit its signed installer. Never paste the PFX or Entra client secret into chat.
+
+### H. Google Play Console (one-time manual setup)
 
 1. Create the SmartPrint app in [Google Play Console](https://play.google.com/console/) using package name `com.quantaedge.smartprint`.
 2. Enrol in Play App Signing and upload the first signed `SmartPrint-Android.aab` manually through Play Console. The publishing action cannot create the package entry; use the same upload keystore that will be configured in GitHub Actions.

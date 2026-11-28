@@ -24,7 +24,9 @@ var builder = Host.CreateApplicationBuilder(args);
 
 builder.Services.AddWindowsService(options =>
 {
-    options.ServiceName = "QRtoPrint Smart Print Agent";
+    // This is the SCM key used by both the website installer and uninstaller.
+    // Keep it identical across EXE and MSIX distribution paths.
+    options.ServiceName = "QRtoPrintSmartPrintAgent";
 });
 builder.Services.AddHttpClient("cloud", client =>
 {
