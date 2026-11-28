@@ -6,6 +6,7 @@ public sealed class PrinterTypePolicyTests
 {
     [Theory]
     [InlineData("USB001", null, "USB")]
+    [InlineData("DOT4_001", null, "USB")]
     [InlineData("IP_192.168.31.171", null, "LAN")]
     [InlineData("TCP_192.168.31.171", null, "LAN")]
     [InlineData("LPR_192.168.31.171", null, "LAN")]
@@ -22,6 +23,17 @@ public sealed class PrinterTypePolicyTests
     public void DetectsConnectionTransportWithoutChangingOutputKind(string port, string? driver, string expected)
     {
         Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port, driver));
+    }
+
+    [Fact]
+    public void DetectsSharedQueueFromUncQueueIdentityWhenWindowsUsesAnOpaquePort()
+    {
+        Assert.Equal(
+            "Shared",
+            PrinterTypePolicy.ResolveConnectionType(
+                "Ne00:",
+                "HP Universal Printing PCL 6",
+                @"\\PRINT-SERVER\HP-LaserJet"));
     }
 
     [Fact]

@@ -9638,7 +9638,7 @@ agentApi.MapPost("/printers/sync", async (
                 DisplayName = discovered.QueueName,
                 Manufacturer = "Windows",
                 Model = discovered.DriverName,
-                ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName),
+                ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName, discovered.QueueName),
                 OutputMode = discovered.OutputMode,
                 IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
                     device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName),
@@ -9691,9 +9691,10 @@ agentApi.MapPost("/printers/sync", async (
                 printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
             printer.DisplayName = discovered.QueueName;
+            printer.QueueName = discovered.QueueName;
             printer.Manufacturer = "Windows";
             printer.Model = discovered.DriverName;
-            printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName);
+            printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName, discovered.QueueName);
             printer.OutputMode = discovered.OutputMode;
             printer.IdentityFingerprint = discoveredFingerprint;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;

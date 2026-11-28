@@ -29,9 +29,13 @@ public static class PrinterTypePolicy
                !port.Equals("NUL:", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string ResolveConnectionType(string? portName, string? driverName = null)
+    public static string ResolveConnectionType(
+        string? portName,
+        string? driverName = null,
+        string? queueName = null)
     {
         var value = portName?.Trim() ?? string.Empty;
+        var queue = queueName?.Trim() ?? string.Empty;
         var usesIppDriver = driverName?.Contains("IPP", StringComparison.OrdinalIgnoreCase) == true;
 
         if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint))
@@ -44,11 +48,16 @@ public static class PrinterTypePolicy
                 return usesIppDriver ? "IPP" : "LAN";
         }
 
-        if (value.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
+        // Some USB-connected Windows drivers expose the DOT4 port monitor
+        // instead of USB00x. It is still a USB-attached queue.
+        if (value.StartsWith("USB", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("DOT4_", StringComparison.OrdinalIgnoreCase))
             return "USB";
 
-        // UNC printer connections are print-server shares, not direct LAN ports.
-        if (value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
+        // Shared queues may expose their UNC identity in the queue name while
+        // Windows assigns an opaque local port such as Ne00:.
+        if (queue.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
             return "Shared";
 
         // Windows may hide the IPP URI behind a generated WSD port.
