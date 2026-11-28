@@ -15,10 +15,10 @@
     "testOverridesNeverRewriteConnectionType": true
   },
   "connectionTypes": [
-    { "id": "USB", "label": "USB", "detectedFrom": "Windows USB port name" },
+    { "id": "USB", "label": "USB", "detectedFrom": "Windows USB or DOT4 port name" },
     { "id": "LAN", "label": "Network / LAN", "detectedFrom": "Windows TCP/IP, WSD or shared-port metadata" },
     { "id": "IPP", "label": "IPP / IPPS", "detectedFrom": "ipp or ipps URI; HTTP(S) only with an installed IPP driver; Windows IPP Class Driver with WSD port" },
-    { "id": "Shared", "label": "Shared Windows queue", "detectedFrom": "UNC print-server queue path or Windows queue connection metadata" },
+    { "id": "Shared", "label": "Shared Windows queue", "detectedFrom": "UNC queue name or port; Windows shared-queue metadata even when Windows uses an opaque local port" },
     { "id": "WindowsQueue", "label": "Windows queue", "detectedFrom": "Other installed Windows queue ports" }
   ],
   "outputProfiles": [

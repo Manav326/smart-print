@@ -303,7 +303,8 @@ jobs:
             @{ Path = "scripts/qa/desktop-open-smoke.ps1"; Expected = "-RequireDevTools" },
             @{ Path = "scripts/qa/windows-installer-lifecycle.ps1"; Expected = "-InstallerV1" },
             @{ Path = "scripts/qa/test-published-apps.ps1"; Expected = "-InstallPublishedAndroidApk" },
-            @{ Path = "scripts/qa/Invoke-AndroidVirtualIppWindowsAcceptance.ps1"; Expected = "Invoke-AndroidVirtualIppWindowsAcceptance.ps1" }
+            @{ Path = "scripts/qa/Invoke-AndroidVirtualIppWindowsAcceptance.ps1"; Expected = "Invoke-AndroidVirtualIppWindowsAcceptance.ps1" },
+            @{ Path = "scripts/qa/Invoke-SmartPrintPhysicalPrinterAcceptance.ps1"; Expected = "Invoke-SmartPrintPhysicalPrinterAcceptance.ps1" }
           )
           foreach ($check in $helpChecks) {
             $helpOutput = & pwsh -NoProfile -File $check.Path -Help 2>&1 | Out-String

@@ -147,6 +147,14 @@ Bluetooth/BLE, thermal/label/portable printers and ESC/POS/ZPL/TSPL/CPCL; broad 
 
 ## 8. Diagnostic page selection and owner experience
 
+The diagnostic is selected by **output profile**, not by transport label alone. USB, LAN, shared and Windows-installed IPP queues that expose a supported physical Windows queue use the same protected spooler path; the installed driver's positive capability evidence determines the artwork and job settings.
+
+- **Physical output:** one physical copy. Use a standard media size reported by the driver (or the conservative A4 fallback that Windows must still validate). Include monochrome and geometry checks; include colour bars only when colour is explicitly supported. Use a two-page, one-copy duplex alignment test only when duplex is explicitly supported. Unknown colour/duplex is never promoted to supported.
+- **Authorised virtual test output:** create a single-page digital PDF artifact, not a paper-print confirmation. The artwork is labelled as a virtual output test; physical duplex is not applicable. The owner confirms that the file was received and opens correctly.
+- **Unsupported device families:** do not send this generic A4 diagnostic to thermal, label, portable or command-language queues (ESC/POS, ZPL, TSPL, CPCL), nor to Bluetooth/BLE devices. These need a dedicated media/profile-aware test template and explicit output handling before they can be enabled.
+
+The shop UI keeps the default view to a short preflight summary and one primary action. Technical spooler evidence and the last five diagnostic records stay collapsed under **Test details and history**. Owner notes are optional. Confirmation choices are constrained by the server's terminal spooler evidence; a completed physical `PRINTED` observation cannot be confirmed as “Nothing printed”. A delayed attempt is never auto-expired or unlocked, because that could permit a duplicate physical copy; the owner is directed to reconnect the paired Windows Agent and wait for the pending job's final result.
+
 ## 9. Physical Windows queue acceptance (USB, LAN/WSD, IPP/IPPS and shared queues)
 
 The operator-assisted acceptance harness exercises the production SmartPrint diagnostic path for an already installed physical Windows queue. It works across the included connection families and never creates a synthetic Windows job, changes a port, downloads a driver or changes the default printer.
@@ -158,12 +166,3 @@ Use one acceptance run per physical queue and per materially different driver/po
 For shared queues, connect the intended Windows print-server share on the paired shop PC before running acceptance. For IPP/IPPS, install/configure the Windows queue with the intended IPP Class Driver or vendor driver first; Windows owns the queue's TLS and certificate policy. SmartPrint uses that installed queue and does not silently downgrade IPPS or claim native direct-IPPS support. For Wi-Fi/Ethernet, record the actual TCP/IP or WSD port and repeat after a controlled disconnect/reconnect or address change.
 
 Hosted CI can validate the Agent, API, driver probing, Windows spooler fixtures and Android IPP receiver. It cannot claim physical USB/network/shared-queue output without the corresponding hardware and real operator inspection. A combination is marked qualified only after its own evidence is recorded.
-
-
-The diagnostic is selected by **output profile**, not by transport label alone. USB, LAN, shared and Windows-installed IPP queues that expose a supported physical Windows queue use the same protected spooler path; the installed driver's positive capability evidence determines the artwork and job settings.
-
-- **Physical output:** one physical copy. Use a standard media size reported by the driver (or the conservative A4 fallback that Windows must still validate). Include monochrome and geometry checks; include colour bars only when colour is explicitly supported. Use a two-page, one-copy duplex alignment test only when duplex is explicitly supported. Unknown colour/duplex is never promoted to supported.
-- **Authorised virtual test output:** create a single-page digital PDF artifact, not a paper-print confirmation. The artwork is labelled as a virtual output test; physical duplex is not applicable. The owner confirms that the file was received and opens correctly.
-- **Unsupported device families:** do not send this generic A4 diagnostic to thermal, label, portable or command-language queues (ESC/POS, ZPL, TSPL, CPCL), nor to Bluetooth/BLE devices. These need a dedicated media/profile-aware test template and explicit output handling before they can be enabled.
-
-The shop UI keeps the default view to a short preflight summary and one primary action. Technical spooler evidence and the last five diagnostic records stay collapsed under **Test details and history**. Owner notes are optional. Confirmation choices are constrained by the server's terminal spooler evidence; a completed physical `PRINTED` observation cannot be confirmed as “Nothing printed”. A delayed attempt is never auto-expired or unlocked, because that could permit a duplicate physical copy; the owner is directed to reconnect the paired Windows Agent and wait for the pending job's final result.

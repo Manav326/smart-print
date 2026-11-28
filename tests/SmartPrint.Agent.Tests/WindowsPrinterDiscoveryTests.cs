@@ -156,6 +156,24 @@ public sealed class WindowsPrinterDiscoveryTests
                 "Office IPP Printer", "Microsoft IPP Class Driver", "ipp://printer.local/ipp/print"));
     }
 
+
+    [Theory]
+    [InlineData("Office USB Printer", "HP Universal Printing PCL 6", "USB001")]
+    [InlineData("Office DOT4 Printer", "HP Universal Printing PCL 6", "DOT4_001")]
+    [InlineData("Office LAN Printer", "HP Universal Printing PCL 6", "IP_192.168.31.171")]
+    [InlineData("Office TCP Printer", "HP Universal Printing PCL 6", "TCP_192.168.31.171")]
+    [InlineData("Office WSD Printer", "HP Universal Printing PCL 6", "WSD-205bd056-1e66-4158-a0b0-8bc8e003f891")]
+    [InlineData(@"\\PRINT-SERVER\\Office Queue", "HP Universal Printing PCL 6", "Ne00:")]
+    [InlineData("Office IPP Printer", "Microsoft IPP Class Driver", "ipp://printer.local/ipp/print")]
+    [InlineData("Office IPPS Printer", "Microsoft IPP Class Driver", "ipps://printer.local/ipp/print")]
+    public void InstalledPhysicalQueuesAcrossSupportedConnectionsRemainPhysical(
+        string queueName, string driverName, string portName)
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.Physical,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(queueName, driverName, portName));
+    }
+
     [Fact]
     public void AndroidVirtualIppQueueRemainsVirtualWhenWindowsHidesTheEndpointBehindWsd()
     {

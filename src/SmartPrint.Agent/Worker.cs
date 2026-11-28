@@ -1,4 +1,5 @@
 using System.IO;
+using System.Diagnostics;
 using System.ComponentModel;
 using System.Net.Http;
 using System.Net;
@@ -769,22 +770,33 @@ public sealed class Worker(
     {
         try
         {
+            var enrichmentStarted = Stopwatch.GetTimestamp();
             var enriched = await printerDiscovery.EnrichCapabilitiesAsync(metadata, cancellationToken);
             if (!enriched.Success)
                 return;
 
-            // Capability probes may take longer than an inventory heartbeat. Re-read
-            // the current Windows queues before syncing so old Ready/Offline/port data
-            // from the original probe snapshot cannot overwrite a newer queue state.
-            var currentMetadata = await printerDiscovery.TryDiscoverMetadataAsync(cancellationToken);
-            if (!currentMetadata.Success)
+            IReadOnlyList<DiscoveredPrinter> currentQueueMetadata;
+            var enrichmentElapsed = Stopwatch.GetElapsedTime(enrichmentStarted);
+            if (AgentLoopIntervals.ShouldRefreshPrinterMetadataAfterCapabilityProbe(enrichmentElapsed))
             {
-                logger.LogWarning("Could not refresh Windows queue metadata after capability probing; keeping the last published live queue state.");
-                return;
+                // Slow or unstable drivers can make the original Ready/Offline/port
+                // snapshot stale. Re-read only after a slow probe batch; fast cached
+                // batches reuse the inventory snapshot that was just published.
+                var refreshed = await printerDiscovery.TryDiscoverMetadataAsync(cancellationToken);
+                if (!refreshed.Success)
+                {
+                    logger.LogWarning("Could not refresh Windows queue metadata after slow capability probing; keeping the last published live queue state.");
+                    return;
+                }
+                currentQueueMetadata = refreshed.Printers;
+            }
+            else
+            {
+                currentQueueMetadata = metadata;
             }
 
             var currentWithCapabilities = WindowsPrinterDiscovery.ApplyCapabilitySnapshots(
-                currentMetadata.Printers, enriched.Printers);
+                currentQueueMetadata, enriched.Printers);
 
             using var client = httpClientFactory.CreateClient("cloud");
             client.BaseAddress = new Uri(credentials.ApiBaseUrl.TrimEnd('/') + "/");

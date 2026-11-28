@@ -17,6 +17,12 @@ public static class AgentLoopIntervals
     public static int ResolvePrinterLaneConcurrency(int? configuredLanes) =>
         Math.Clamp(configuredLanes ?? 4, 1, 8);
 
+    // A second Windows queue enumeration after capability probing is useful only
+    // when slow or unstable drivers made the original queue snapshot stale.
+    // Fast cache hits safely reuse the just-published inventory snapshot.
+    public static bool ShouldRefreshPrinterMetadataAfterCapabilityProbe(TimeSpan elapsed) =>
+        elapsed >= TimeSpan.FromSeconds(5);
+
     // Private-relay failures should recover faster than the general Agent loop,
     // while bounded exponential backoff and jitter prevent retry storms.
     public static int ResolvePrivateRelayRetryDelayMilliseconds(int consecutiveFailures, double jitterSample = 0.5)

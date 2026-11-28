@@ -1,11 +1,7 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
     [string]$QueueName,
 
-    [Parameter(Mandatory = $true)]
-    [ValidateNotNullOrEmpty()]
     [string]$AgentVersion,
 
     [ValidateSet("AUTO", "USB", "LAN", "IPP", "SHARED", "WINDOWS_QUEUE")]
@@ -14,11 +10,42 @@ param(
     [ValidateRange(30, 900)]
     [int]$TimeoutSeconds = 180,
 
-    [string]$EvidenceDirectory = ".\artifacts\physical-printer-acceptance"
+    [string]$EvidenceDirectory = ".\artifacts\physical-printer-acceptance",
+
+    [switch]$Help
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
+
+if ($Help) {
+    @'
+Invoke-SmartPrintPhysicalPrinterAcceptance.ps1
+
+Observe one real SmartPrint owner-initiated diagnostic on an already installed
+physical Windows queue and record explicit operator confirmation of paper output.
+
+Required:
+  -QueueName "Exact Windows printer queue name"
+  -AgentVersion "Installed SmartPrint Agent version"
+
+Optional:
+  -ExpectedConnectionType AUTO|USB|LAN|IPP|SHARED|WINDOWS_QUEUE
+  -TimeoutSeconds 180
+  -EvidenceDirectory .\artifacts\physical-printer-acceptance
+
+The harness does not install drivers, change printer ports, create Windows test
+jobs, or interpret a disappearing spooler job as proof of printed paper.
+'@
+    exit 0
+}
+
+if ([string]::IsNullOrWhiteSpace($QueueName)) {
+    throw "QueueName is required. Run this script with -Help for usage."
+}
+if ([string]::IsNullOrWhiteSpace($AgentVersion)) {
+    throw "AgentVersion is required. Run this script with -Help for usage."
+}
 
 function Get-OptionalPropertyValue {
     param([object]$InputObject, [string]$PropertyName)
@@ -41,12 +68,14 @@ function Resolve-ConnectionType {
     $shareName = [string](Get-OptionalPropertyValue $Printer "ShareName")
     $queueType = [string](Get-OptionalPropertyValue $Printer "Type")
 
+    $queueName = [string](Get-OptionalPropertyValue $Printer "Name")
+    if ($shared -eq $true -or -not [string]::IsNullOrWhiteSpace($shareName) -or
+        $queueType -match '(?i)Connection' -or $queueName.StartsWith("\\") -or
+        $portName.StartsWith("\\")) { return "SHARED" }
     if ($portName -match '(?i)^(ipp://|ipps://)') { return "IPP" }
     if ($portName -match '(?i)^https?://' -and $driverName -match '(?i)IPP') { return "IPP" }
     if ($driverName -match '(?i)IPP Class Driver' -and $portName -match '(?i)^WSD-') { return "IPP" }
-    if ($portName -match '(?i)^USB') { return "USB" }
-    if ($shared -eq $true -or -not [string]::IsNullOrWhiteSpace($shareName) -or
-        $queueType -match '(?i)Connection' -or $portName.StartsWith("\\")) { return "SHARED" }
+    if ($portName -match '(?i)^(USB|DOT4_)') { return "USB" }
     if ($portName -match '(?i)^(IP_|TCP_|LPR_|WSD-)' -or $portName -match '(?i)WSD|TCP/IP|LPR') { return "LAN" }
     return "WINDOWS_QUEUE"
 }
@@ -101,14 +130,18 @@ $observedAt = $null
 $observations = @()
 while ([DateTimeOffset]::UtcNow -lt $deadline -and $null -eq $observedJob) {
     $jobs = Get-QueueJobs -Name $QueueName
-    foreach ($job in $jobs) {
-        if (-not $baselineIds.ContainsKey([string]$job.ID)) {
-            $observedJob = $job
-            $observedAt = [DateTimeOffset]::UtcNow
-            break
-        }
+    $matchingJobs = @($jobs | Where-Object {
+        -not $baselineIds.ContainsKey([string]$_.ID) -and
+        ([string](Get-OptionalPropertyValue $_ "DocumentName")) -like "SmartPrint-D*"
+    })
+    if ($matchingJobs.Count -gt 1) {
+        throw "More than one new SmartPrint diagnostic job appeared on '$QueueName'; refusing to attach ambiguous evidence."
     }
-    if ($null -eq $observedJob) { Start-Sleep -Seconds 2 }
+    if ($matchingJobs.Count -eq 1) {
+        $observedJob = $matchingJobs[0]
+        $observedAt = [DateTimeOffset]::UtcNow
+    }
+    if ($null -eq $observedJob) { Start-Sleep -Milliseconds 250 }
 }
 if ($null -eq $observedJob) {
     throw "No new spooler job appeared on '$QueueName' within $TimeoutSeconds seconds. No printer compatibility pass can be claimed."
@@ -160,6 +193,7 @@ $report = [ordered]@{
         shareName = Get-OptionalPropertyValue $printer "ShareName"
     }
     spooler = [ordered]@{
+        expectedDocumentNamePrefix = "SmartPrint-D"
         jobId = [int]$observedJob.ID
         documentName = [string]$observedJob.DocumentName
         submittedTime = [string]$observedJob.SubmittedTime

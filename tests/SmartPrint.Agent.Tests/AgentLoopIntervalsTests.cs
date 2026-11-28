@@ -5,6 +5,18 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AgentLoopIntervalsTests
 {
     [Theory]
+    [InlineData(0, false)]
+    [InlineData(4, false)]
+    [InlineData(5, true)]
+    [InlineData(30, true)]
+    public void RefreshesQueueMetadataAfterSlowCapabilityProbesOnly(int elapsedSeconds, bool expected)
+    {
+        Assert.Equal(
+            expected,
+            AgentLoopIntervals.ShouldRefreshPrinterMetadataAfterCapabilityProbe(TimeSpan.FromSeconds(elapsedSeconds)));
+    }
+
+    [Theory]
     [InlineData(null, 30)]
     [InlineData(1, 10)]
     [InlineData(10, 10)]

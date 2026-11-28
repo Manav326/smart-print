@@ -38,6 +38,12 @@ public static class PrinterTypePolicy
         var queue = queueName?.Trim() ?? string.Empty;
         var usesIppDriver = driverName?.Contains("IPP", StringComparison.OrdinalIgnoreCase) == true;
 
+        // A UNC-connected queue is presented through a print-server share,
+        // even when the server-side printer itself uses IPP or USB.
+        if (queue.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
+            return "Shared";
+
         if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint))
         {
             if (endpoint.Scheme is "ipp" or "ipps")
@@ -53,12 +59,6 @@ public static class PrinterTypePolicy
         if (value.StartsWith("USB", StringComparison.OrdinalIgnoreCase) ||
             value.StartsWith("DOT4_", StringComparison.OrdinalIgnoreCase))
             return "USB";
-
-        // Shared queues may expose their UNC identity in the queue name while
-        // Windows assigns an opaque local port such as Ne00:.
-        if (queue.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
-            value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
-            return "Shared";
 
         // Windows may hide the IPP URI behind a generated WSD port.
         if (usesIppDriver && value.StartsWith("WSD-", StringComparison.OrdinalIgnoreCase))
