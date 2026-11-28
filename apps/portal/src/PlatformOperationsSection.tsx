@@ -204,7 +204,6 @@ function PrinterPlatformAccessPanel({ tokens }: { tokens: AuthTokens }) {
                 ? t("PDF export")
                 : t("Virtual output · digital test only");
             const queueFresh = !!item.lastSeenUtc && Date.parse(item.lastSeenUtc) >= Date.now() - 120_000;
-            const queueReady = item.outputMode === "PDF_EXPORT" || item.status === "Ready" || item.status === "Busy";
             return (
               <article className={"platform-printer-card" + (item.isPlatformHeld ? " is-held" : "")} key={item.tenantId + ":" + item.id}>
                 <div className="platform-printer-card-top">
