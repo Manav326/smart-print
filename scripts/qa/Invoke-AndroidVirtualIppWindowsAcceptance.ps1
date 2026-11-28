@@ -128,7 +128,10 @@ try {
 
     # Install only the one API image and tools needed for the receiver smoke test.
     # The setup-android action has already accepted the Android SDK licenses.
-    Invoke-Checked $sdkManager @("--install", "platform-tools", "emulator", "platforms;android-35", "build-tools;36.0.0", "system-images;android-35;google_apis;x86_64") "Android SDK package installation failed"
+    # The receiver needs Android framework printing and networking only; Google APIs
+    # are unnecessary and caused GMS/phone startup ANRs under the Windows runner's
+    # constrained emulator resources. Use the lean AOSP image.
+    Invoke-Checked $sdkManager @("--install", "platform-tools", "emulator", "platforms;android-35", "build-tools;36.0.0", "system-images;android-35;default;x86_64") "Android SDK package installation failed"
     if (-not (Test-Path -LiteralPath $adb) -or -not (Test-Path -LiteralPath $emulator) -or -not (Test-Path -LiteralPath $avdManager)) {
         throw "Android SDK installation did not provide adb, emulator and avdmanager."
     }
@@ -170,7 +173,7 @@ try {
 
     # Recreate a disposable AVD so stale snapshots/state can never influence CI.
     & $avdManager delete avd -n $avdName 2>$null | Out-Null
-    "no" | & $avdManager create avd -n $avdName -k "system-images;android-35;google_apis;x86_64" -d "pixel_2" --force
+    "no" | & $avdManager create avd -n $avdName -k "system-images;android-35;default;x86_64" -d "pixel_2" --force
     if ($LASTEXITCODE -ne 0) { throw "Could not create the disposable Android API 35 AVD." }
 
     $emulatorArgs = @(
@@ -205,7 +208,12 @@ try {
     & $adb -s emulator-5554 shell settings put global transition_animation_scale 0
     & $adb -s emulator-5554 shell settings put global window_animation_scale 0
     Invoke-Checked $adb @("-s", "emulator-5554", "install", "-r", $apkPath) "Installing the pinned IppVirtual receiver failed"
-    Invoke-Checked $adb @("-s", "emulator-5554", "shell", "monkey", "-p", $packageName, "1") "Launching IppVirtual failed"
+    # Wait for framework/package-manager startup to settle before launching the
+    # receiver. Avoid Monkey: it performs a broad system-service dump and was
+    # itself triggering timeouts while the emulator was under startup pressure.
+    & $adb -s emulator-5554 shell am wait-for-broadcast-idle 2>$null | Out-Null
+    Start-Sleep -Seconds 8
+    Invoke-Checked $adb @("-s", "emulator-5554", "shell", "am", "start", "-W", "-n", "$packageName/.MainActivity") "Launching IppVirtual MainActivity failed"
 
     # Discover the live Run control from Android accessibility; do not assume
     # fixed coordinates because hosted emulator resolution/density can vary.
