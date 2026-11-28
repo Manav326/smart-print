@@ -17,6 +17,16 @@ public sealed class AddPrinterDiagnosticAttempts : Migration
             ALTER TABLE "PrintJobs"
                 ADD CONSTRAINT "CK_PrintJobs_Origin"
                 CHECK ("Origin" IN ('CUSTOMER_QR', 'SHOP_OWNER', 'PRINTER_DIAGNOSTIC'));
+
+            -- Virtual printer diagnostics are digital test artifacts, not physical
+            -- fulfilment. The PrintJob output-type constraint must explicitly allow
+            -- this internal-only execution profile.
+            ALTER TABLE "PrintJobs"
+                DROP CONSTRAINT IF EXISTS "CK_PrintJobs_OutputType";
+
+            ALTER TABLE "PrintJobs"
+                ADD CONSTRAINT "CK_PrintJobs_OutputType"
+                CHECK ("OutputType" IN ('PHYSICAL', 'PDF_EXPORT', 'TEST_VIRTUAL'));
             """);
 
         migrationBuilder.CreateTable(
@@ -98,11 +108,20 @@ public sealed class AddPrinterDiagnosticAttempts : Migration
                 IF EXISTS (SELECT 1 FROM "PrintJobs" WHERE "Origin" = 'PRINTER_DIAGNOSTIC') THEN
                     RAISE EXCEPTION 'Cannot downgrade while printer diagnostic execution records remain. Retain the diagnostic audit table or remove diagnostic jobs through the supported retention process first.';
                 END IF;
+                IF EXISTS (SELECT 1 FROM "PrintJobs" WHERE "OutputType" = 'TEST_VIRTUAL') THEN
+                    RAISE EXCEPTION 'Cannot downgrade while virtual printer diagnostic output records remain.';
+                END IF;
             END;
             $printer_diagnostic_downgrade$;
             """);
         migrationBuilder.DropTable(name: "PrinterDiagnosticAttempts");
         migrationBuilder.Sql("""
+            ALTER TABLE "PrintJobs"
+                DROP CONSTRAINT IF EXISTS "CK_PrintJobs_OutputType";
+            ALTER TABLE "PrintJobs"
+                ADD CONSTRAINT "CK_PrintJobs_OutputType"
+                CHECK ("OutputType" IN ('PHYSICAL', 'PDF_EXPORT'));
+
             ALTER TABLE "PrintJobs"
                 DROP CONSTRAINT IF EXISTS "CK_PrintJobs_Origin";
             ALTER TABLE "PrintJobs"
