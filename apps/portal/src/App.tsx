@@ -2563,12 +2563,12 @@ function PrintersPage({
                     <span>Print Agent · {agent?.deviceName || t("Not linked")}</span>
                   </div>
                   <PrinterCapabilityPanel printer={printer}/>
-                  {(printer.outputMode === "PHYSICAL" ||
+                  {isSelected && (printer.outputMode === "PHYSICAL" ||
                     (printer.outputMode === "UNSUPPORTED_VIRTUAL" && isAuthorisedVirtual)) && (
                     <PrinterDiagnosticControls
                       printer={printer}
                       token={token}
-                      disabled={!isSelected || !canSelect || !agentOnline}
+                      disabled={!canSelect || !agentOnline}
                       onOpenAgent={onOpenAgent}
                     />
                   )}
