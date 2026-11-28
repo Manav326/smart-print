@@ -14,7 +14,7 @@ namespace SmartPrint.Agent.Tests;
 public sealed class AndroidVirtualIppSpoolerIntegrationTests
 {
     [Fact]
-    public void SmartPrintWindowsExecutorSubmitsDocumentToAndroidIppVirtualReceiver()
+    public async Task SmartPrintWindowsExecutorSubmitsDocumentToAndroidIppVirtualReceiver()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("SMARTPRINT_RUN_ANDROID_IPP_INTEGRATION"),
@@ -32,7 +32,7 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
         var discovery = new WindowsPrinterDiscovery(
             NullLogger<WindowsPrinterDiscovery>.Instance,
             executeInCurrentProcess: true);
-        var inventory = discovery.DiscoverInProcessAsync(CancellationToken.None).GetAwaiter().GetResult();
+        var inventory = await discovery.DiscoverInProcessAsync(CancellationToken.None);
         Assert.True(inventory.Success, "Windows Agent queue discovery failed for the installed Android IPP queue.");
         var discoveredQueue = Assert.Single(inventory.Printers, item =>
             string.Equals(item.QueueName, queueName, StringComparison.OrdinalIgnoreCase));
@@ -128,7 +128,7 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
                 if (current is not null)
                 {
                     if (current.Status is "ERROR" or "OFFLINE" or "PAPEROUT" or "USERINTERVENTION")
-                        Assert.True(false, $"Windows spooler reported {current.Status} for Android IPP job {receipt.JobId}.");
+                        Assert.Fail($"Windows spooler reported {current.Status} for Android IPP job {receipt.JobId}.");
 
                     if ((current.Status is "PRINTED" or "RETAINED") && current.PagesPrinted >= 1)
                     {
@@ -137,12 +137,11 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
                     }
                 }
 
-                Thread.Sleep(500);
+                await Task.Delay(500);
             }
 
-            Assert.NotNull(
-                terminalJob,
-                $"Windows did not observe a completed Android IPP spooler job. Queue={queueName}; jobId={receipt.JobId}.");
+            if (terminalJob is null)
+                Assert.Fail($"Windows did not observe a completed Android IPP spooler job. Queue={queueName}; jobId={receipt.JobId}.");
             Assert.True(terminalJob!.PagesPrinted >= 1, "The Windows spooler did not report a printed page.");
             Assert.True(terminalJob.TotalPages >= 1, "The Windows spooler did not report the expected page count.");
         }
