@@ -487,6 +487,7 @@ try {
     }
 
     $inventory = Get-VisiblePrinterInventory
+    $discoveredIppPorts = @(Get-DiscoveredIppPortsForLiveReceiver)
     foreach ($candidateResource in $ippResources) {
         $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
         # Exact-name reuse is preferred; endpoint-backed ports are also checked
@@ -547,9 +548,11 @@ try {
                     # Refresh both inventories and reuse only after proving the live endpoint.
                     Start-Sleep -Seconds 2
                     $inventory = Get-VisiblePrinterInventory
+                    $discoveredIppPorts = @(Get-DiscoveredIppPortsForLiveReceiver)
                     foreach ($match in @($inventory | Where-Object {
                         $_.Name -eq $queueName -or $_.Name -match "(?i)IppVirtual|virtual" -or
-                        $_.PortName -match "(?i)ipp|10631"
+                        $_.PortName -match "(?i)ipp|10631" -or
+                        $_.PortName -in @($discoveredIppPorts | ForEach-Object { $_.PortName })
                     })) {
                         $candidatePrinter = Get-Printer -Name $match.Name -ErrorAction SilentlyContinue
                         if ($candidatePrinter -and (Test-QueueTargetsLiveReceiver $candidatePrinter $candidateUrl)) {
@@ -576,6 +579,31 @@ try {
                         "$name [$description] host=$hostAddress monitor=$monitor port=$portNumber"
                     })
                     $hiddenRegistrationEvidence = Get-HiddenIppRegistrationEvidence
+
+                    if (-not $printer) {
+                        foreach ($discoveredPort in $discoveredIppPorts) {
+                            try {
+                                $candidatePortName = $discoveredPort.PortName
+                                Write-Host "Creating the Windows queue on verified existing IPP port '$candidatePortName' (UUID $($discoveredPort.PrinterUuid))."
+                                Add-Printer -Name $queueName -DriverName "Microsoft IPP Class Driver" -PortName $candidatePortName -KeepPrintedJobs -ErrorAction Stop
+                                $queueCreated = $true
+                                $queueOwned = $true
+                                $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
+                                if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver" -or
+                                    $candidatePrinter.PortName -ne $candidatePortName) {
+                                    throw "Windows did not bind the created queue to the verified IPP port and Microsoft IPP Class Driver."
+                                }
+                                $printer = $candidatePrinter
+                                $ippResource = $candidateResource
+                                $ippPortReused = $true
+                                $registrationMethod = "EXISTING_WSD_IPP_PORT"
+                                Write-Host "Created Windows queue '$queueName' on existing IPP port '$candidatePortName'."
+                                break
+                            } catch {
+                                $candidateFailures += "existing IPP port $($discoveredPort.PortName) (UUID $($discoveredPort.PrinterUuid)) => $($_.Exception.Message)"
+                            }
+                        }
+                    }
                 } catch {
                     $diagnosticCaptureError = $_.Exception.Message
                 }
@@ -663,6 +691,8 @@ try {
     $report.android.ippResource = $ippResource
     $report.windowsQueue = $queueEvidence
     $report.queueReused = $queueReused
+    $report.ippPortReused = $ippPortReused
+    $report.registrationMethod = if ($registrationMethod) { $registrationMethod } elseif ($queueReused) { "EXISTING_QUEUE" } else { "DIRECTED_IPP_DISCOVERY" }
 
     $env:SMARTPRINT_RUN_ANDROID_IPP_INTEGRATION = "1"
     $env:SMARTPRINT_ANDROID_IPP_QUEUE = $queueName
