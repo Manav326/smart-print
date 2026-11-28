@@ -65,11 +65,17 @@ public static class PrinterDiagnosticPdfBuilder
         var sb = new StringBuilder(12_000);
         DrawPageBackground(sb);
         DrawBrandMark(sb);
+        var virtualOutput = string.Equals(
+            metadata.OutputType, PrivatePrintingOutputPolicy.TestVirtual, StringComparison.OrdinalIgnoreCase);
         DrawText(sb, "SmartPrint", 111, 77, 27, bold: true, Ink);
-        DrawText(sb, "PRINTER DIAGNOSTIC", 543, 76, 14, bold: true, Violet, alignRight: true);
+        DrawText(sb, virtualOutput ? "VIRTUAL OUTPUT TEST" : "PRINTER DIAGNOSTIC",
+            543, 76, 14, bold: true, Violet, alignRight: true);
         DrawLine(sb, 52, 105, 543, 105, Border, 1.1);
 
-        DrawText(sb, "One controlled test copy - not a customer order", 52, 132, 11, bold: false, Muted);
+        DrawText(sb, virtualOutput
+            ? "One generated test file - not a customer order"
+            : "One controlled test copy - not a customer order",
+            52, 132, 11, bold: false, Muted);
         DrawText(sb, "TEMPLATE SP-DIAG-1", 543, 132, 8, bold: true, Muted, alignRight: true);
 
         DrawPanel(sb, 52, 151, 491, 105);
@@ -107,7 +113,7 @@ public static class PrinterDiagnosticPdfBuilder
         }
 
         DrawLine(sb, 52, 805, 543, 805, Border, 0.8);
-        DrawText(sb, "ONE COPY", 52, 824, 7, bold: true, Violet);
+        DrawText(sb, virtualOutput ? "ONE TEST FILE" : "ONE COPY", 52, 824, 7, bold: true, Violet);
         DrawText(sb, $"{settings.PaperSize}  |  {settings.ColourMode}  |  {(settings.IsDuplex ? "DUPLEX" : "SIMPLEX")}", 543, 824, 7, bold: true, Muted, alignRight: true);
         DrawText(sb, SafeLabel(createdUtc.ToString("yyyy-MM-dd HH:mm 'UTC'", CultureInfo.InvariantCulture), 28), 52, 838, 6, bold: false, Muted);
         return sb.ToString();
@@ -124,7 +130,12 @@ public static class PrinterDiagnosticPdfBuilder
         DrawText(sb, "DUPLEX REVERSE SIDE", 543, 76, 14, bold: true, Violet, alignRight: true);
         DrawLine(sb, 52, 105, 543, 105, Border, 1.1);
 
-        DrawText(sb, "This is the reverse side of the same one-copy diagnostic sheet.", 52, 134, 10, bold: false, Muted);
+        var virtualOutput = string.Equals(
+            metadata.OutputType, PrivatePrintingOutputPolicy.TestVirtual, StringComparison.OrdinalIgnoreCase);
+        DrawText(sb, virtualOutput
+            ? "This is page 2 of the generated test file."
+            : "This is the reverse side of the same one-copy diagnostic sheet.",
+            52, 134, 10, bold: false, Muted);
         DrawPanel(sb, 52, 166, 491, 430);
         DrawText(sb, "FRONT-TO-BACK REGISTRATION", 297.5, 195, 10, bold: true, Ink, alignCenter: true);
         DrawRegistrationTarget(sb, 104, 260);
@@ -145,7 +156,8 @@ public static class PrinterDiagnosticPdfBuilder
         }
 
         DrawLine(sb, 52, 805, 543, 805, Border, 0.8);
-        DrawText(sb, "DUPLEX TEST - PAGE 2 OF 2", 52, 824, 7, bold: true, Violet);
+        DrawText(sb, virtualOutput ? "VIRTUAL TEST FILE - PAGE 2 OF 2" : "DUPLEX TEST - PAGE 2 OF 2",
+            52, 824, 7, bold: true, Violet);
         DrawText(sb, settings.PaperSize, 543, 824, 7, bold: true, Muted, alignRight: true);
         DrawText(sb, "Owner must verify the physical output; spooler acceptance is not proof of paper output.", 52, 838, 6, bold: false, Muted);
         return sb.ToString();
