@@ -37,7 +37,7 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
         var discoveredQueue = Assert.Single(inventory.Printers, item =>
             string.Equals(item.QueueName, queueName, StringComparison.OrdinalIgnoreCase));
         Assert.Equal(PrinterOutputModeRules.UnsupportedVirtual, discoveredQueue.OutputMode);
-        Assert.Contains("IPP", discoveredQueue.DriverName, StringComparison.OrdinalIgnoreCase);
+        Assert.True(discoveredQueue.DriverName.Contains("IPP", StringComparison.OrdinalIgnoreCase));
 
         using var bitmap = new SKBitmap(640, 840);
         bitmap.Erase(SKColors.White);
