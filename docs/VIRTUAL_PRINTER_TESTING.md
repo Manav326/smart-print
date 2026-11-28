@@ -40,11 +40,11 @@ Automated coverage now includes a real child-process stdin/stdout pipe test for 
 6. A revoked/expired grant or failed authorization response after document preparation produces no spooler job.
 7. Duplicate claims, retry, lost acknowledgement, and reconciliation remain idempotent.
 7. Private Printing cannot purge protected content before the existing required acknowledgement.
-8. Real Windows acceptance with the actual installed IPP virtual queue. CI/unit tests are not a substitute for this hardware/driver check.
+8. Hosted CI Android receiver acceptance: the Windows Agent job boots the pinned IppVirtual Android receiver on the same Windows runner, creates a real Microsoft IPP Class Driver queue and submits through the Agent GDI/spooler executor. This validates the Windows-to-Android IPP interoperability path; it does not replace the real shop-PC/hardware acceptance below.
 
 ## Real Windows IPP acceptance (shop PC)
 
-Hosted CI can validate the policy, API, Agent protocol and Windows spooler integration fixtures, but it cannot reach a printer installed on a shop PC or an Android device on the shop LAN. Do not mark this acceptance complete from unit tests alone.
+Hosted CI now runs an additional Windows-to-Android receiver acceptance on one Windows runner: it boots the actual 402D IppVirtual app in an Android emulator, forwards its IPP listener to localhost, creates a directed Windows IPP queue with the Microsoft IPP Class Driver, and sends a diagnostic through the existing Windows Agent GDI/spooler executor. The APK is pinned by SHA-256 and signer-certificate SHA-1 before installation. This is automated interoperability evidence, not a replacement for the shop-PC acceptance: CI does not validate the customer's Wi-Fi/LAN, physical Android handset, production Agent pairing, platform grant lifecycle, or physical printers.
 
 1. On the shop PC, install/connect the Android IPP virtual queue and confirm Windows can see it as Ready or Busy. Give the test queue an explicit name containing `Virtual` (for example, `Android Virtual IPP Test`) so discovery classifies it as `UNSUPPORTED_VIRTUAL`; do not rename or reclassify a physical IPP printer.
 2. Confirm the Agent inventory reports the exact queue name, Microsoft IPP driver, port/IPP endpoint and `UNSUPPORTED_VIRTUAL` output mode. Record the identity fingerprint.
@@ -74,4 +74,18 @@ Run this on the Windows shop PC that has the paired SmartPrint Agent and Android
 
 The harness reports PASS only when both the new Windows spooler job and the Android receiver confirmation are present. A missing spooler job, timeout, or absent receiver confirmation fails. A spooler job disappearing from Windows is recorded as an observation only; it is not interpreted as proof of delivery. The report records queue/driver/port identity, Windows and Agent versions, grant ID, spooler job metadata, timestamps and receiver confirmation. It deliberately excludes document contents and customer data.
 
-This is an operator-assisted **real-device acceptance test**, not a hosted-CI test: hosted runners cannot see the shop PC's installed queue or the Android device on the shop LAN. Keep the Android receiver visible during the test and retain the generated JSON with the matching SmartPrint diagnostic attempt/job ID. After a successful virtual test, revoke the grant and run the negative-path checks above. Do not mark the overall hardware qualification complete until the real shop-PC run and its evidence have been reviewed.
+This is an operator-assisted **real-device acceptance test**, separate from the automated hosted-CI emulator test. Keep the Android receiver visible during the test and retain the generated JSON with the matching SmartPrint diagnostic attempt/job ID. After a successful virtual test, revoke the grant and run the negative-path checks above. Do not mark the overall hardware qualification complete until the real shop-PC run and its evidence have been reviewed.
+
+
+## Automated hosted-CI Android receiver acceptance
+
+The Windows Agent CI job runs `scripts/qa/Invoke-AndroidVirtualIppWindowsAcceptance.ps1` after the ordinary Agent spooler regression suite. It uses one Windows runner for both sides of the connection:
+
+- Boots a disposable Android API 35 emulator; uses WHPX when available and the documented software TCG mode only when the hosted Windows VM exposes no usable hypervisor.
+- Installs 402D's `ru.a402d.ippprinter` version 1.1.3. The APK download is rejected unless its SHA-256 and signing-certificate SHA-1 match the reviewed pins in the script.
+- Uses ADB port forwarding for the receiver's TCP 10631 listener, then directed discovery at `http://127.0.0.1:10631/p/virtual`; it does not depend on mDNS multicast crossing virtual networks.
+- Creates a temporary Windows IPP queue using the Microsoft IPP Class Driver and `KeepPrintedJobs`.
+- Runs `AndroidVirtualIppSpoolerIntegrationTests`, which sends a generated diagnostic image through the existing `WindowsPrintExecutor` GDI path and requires a terminal printed spooler job with at least one printed page. It also asserts the final pre-`StartDoc` authorization callback is invoked once.
+- Captures the emulator log, logcat, UI hierarchy, screenshot, queue/driver/port metadata and a JSON result in the `smart-print-android-ipp-windows-e2e` artifact, then removes the temporary queue and stops the emulator.
+
+The emulator test does not claim that the full production cloud grant endpoint was exercised: the live authorization API and isolated child ALLOW/DENY protocol remain covered by their dedicated tests. A successful IPP spooler receipt proves the Windows driver/transport and Android receiver interoperated; it is not evidence of physical paper output or real shop LAN qualification.
