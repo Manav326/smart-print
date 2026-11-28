@@ -323,7 +323,7 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
-    public async Task ProductionIsolatedDiscoveryPublishesInstalledQueueBeforeCapabilityEnrichmentCompletes()
+    public async Task InProcessWindowsDiscoveryAndCapabilityEnrichmentHandleInstalledQueue()
     {
         if (!string.Equals(
                 Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
@@ -332,7 +332,13 @@ public sealed class WindowsPrinterDiscoveryTests
             return;
 
         Assert.True(OperatingSystem.IsWindows(), "The production discovery-worker acceptance requires Windows.");
-        var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            executeInCurrentProcess: true);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
         var result = await discovery.TryDiscoverAsync(CancellationToken.None);
 
         Assert.True(result.Success, "The isolated WMI/WinSpool discovery and capability-enrichment pipeline failed.");
