@@ -292,22 +292,39 @@ try {
         return @($items)
     }
 
+    # Windows returns different property sets for TCP/IP, WSD, FILE and
+    # Microsoft IPP ports. StrictMode is enabled, so optional CIM/CIM-like
+    # properties must be read through PSObject.Properties rather than by
+    # direct member access.
+    function Get-OptionalPropertyValue([AllowNull()][object]$InputObject, [string]$PropertyName) {
+        if ($null -eq $InputObject) { return $null }
+        $property = $InputObject.PSObject.Properties[$PropertyName]
+        if ($null -eq $property) { return $null }
+        return $property.Value
+    }
+
     function Test-QueueTargetsLiveReceiver($candidatePrinter, [string]$candidateUrl) {
-        if (-not $candidatePrinter -or $candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") { return $false }
-        $candidatePort = Get-PrinterPort -Name $candidatePrinter.PortName -ErrorAction SilentlyContinue
+        if (-not $candidatePrinter) { return $false }
+        $driverName = [string](Get-OptionalPropertyValue $candidatePrinter "DriverName")
+        $printerPortName = [string](Get-OptionalPropertyValue $candidatePrinter "PortName")
+        if ($driverName -notmatch "Microsoft IPP Class Driver" -or [string]::IsNullOrWhiteSpace($printerPortName)) { return $false }
+
+        $candidatePort = Get-PrinterPort -Name $printerPortName -ErrorAction SilentlyContinue
         if (-not $candidatePort) { return $false }
-        $portText = @(
-            $candidatePort.Name, $candidatePort.PrinterHostAddress, $candidatePort.PortNumber,
-            $candidatePort.Protocol, $candidatePort.Description, $candidatePort.PortMonitor
-        ) -join " "
+
+        $portName = [string](Get-OptionalPropertyValue $candidatePort "Name")
+        $hostAddress = [string](Get-OptionalPropertyValue $candidatePort "PrinterHostAddress")
+        $portNumber = [string](Get-OptionalPropertyValue $candidatePort "PortNumber")
+        $description = [string](Get-OptionalPropertyValue $candidatePort "Description")
         # Reuse is allowed only when both the loopback host and this run's
         # forwarded port match. An unrelated IPP queue on the same machine is
         # never considered equivalent merely because it uses an IPP monitor.
-        $hostMatches = [string]$candidatePort.PrinterHostAddress -eq "127.0.0.1" -or
-            [string]$candidatePort.Name -match "(?i)127\\.0\\.0\\.1"
-        $portMatches = [string]$candidatePort.PortNumber -eq [string]$ippPort -or
-            [string]$candidatePort.Name -match "(?<!\\d)$ippPort(?!\\d)" -or
-            [string]$candidatePort.Description -match [regex]::Escape(":$ippPort")
+        $hostMatches = $hostAddress -eq "127.0.0.1" -or
+            $portName -match '(?i)127\.0\.0\.1' -or
+            $description -match '(?i)127\.0\.0\.1'
+        $portMatches = $portNumber -eq [string]$ippPort -or
+            $portName -match "(?<!\d)$ippPort(?!\d)" -or
+            $description -match [regex]::Escape(":$ippPort")
         return ($hostMatches -and $portMatches)
     }
 
@@ -375,8 +392,20 @@ try {
                         break
                     }
                 }
-                $visiblePrinters = @($inventory | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
-                $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.Description)] host=$($_.PrinterHostAddress) monitor=$($_.PortMonitor)" })
+                $visiblePrinters = @($inventory | ForEach-Object {
+                    $name = [string](Get-OptionalPropertyValue $_ "Name")
+                    $driver = [string](Get-OptionalPropertyValue $_ "DriverName")
+                    $port = [string](Get-OptionalPropertyValue $_ "PortName")
+                    "$name [$driver] port=$port"
+                })
+                $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object {
+                    $name = [string](Get-OptionalPropertyValue $_ "Name")
+                    $description = [string](Get-OptionalPropertyValue $_ "Description")
+                    $hostAddress = [string](Get-OptionalPropertyValue $_ "PrinterHostAddress")
+                    $monitor = [string](Get-OptionalPropertyValue $_ "PortMonitor")
+                    $portNumber = [string](Get-OptionalPropertyValue $_ "PortNumber")
+                    "$name [$description] host=$hostAddress monitor=$monitor port=$portNumber"
+                })
                 $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
                 $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
                 $diagnostic = [ordered]@{
