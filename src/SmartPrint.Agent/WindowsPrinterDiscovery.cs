@@ -481,6 +481,19 @@ public sealed class WindowsPrinterDiscovery
             endpoint.Scheme is "ipp" or "ipps" or "http" or "https"))
             return PrinterOutputModeRules.UnsupportedVirtual;
 
+        // Windows' Microsoft IPP Class Driver may hide the discovered IPP URL
+        // behind a WSD-<GUID> port. In that case the URL path (for example
+        // /p/virtual) is not available to WMI/WinSpool. Preserve the explicit
+        // virtual queue marker when both the driver and WSD port establish that
+        // this is the IPP bridge path. Ordinary physical IPP queues without a
+        // virtual marker remain physical.
+        var usesMicrosoftIppClassDriver =
+            string.Equals(driverName?.Trim(), "Microsoft IPP Class Driver", StringComparison.OrdinalIgnoreCase);
+        var usesWindowsDiscoveredWsdPort =
+            portName?.StartsWith("WSD-", StringComparison.OrdinalIgnoreCase) ?? false;
+        if (textLooksVirtual && usesMicrosoftIppClassDriver && usesWindowsDiscoveredWsdPort)
+            return PrinterOutputModeRules.UnsupportedVirtual;
+
         return PrinterOutputModeRules.Detect(queueName, driverName, portName);
     }
 
