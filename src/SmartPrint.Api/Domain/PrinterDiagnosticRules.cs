@@ -20,6 +20,13 @@ public static class PrinterDiagnosticRules
     public static bool TryResolveSettings(
         string? capabilitiesJson,
         out PrinterDiagnosticSettings settings,
+        out string failureReason) =>
+        TryResolveSettings(capabilitiesJson, virtualOutput: false, out settings, out failureReason);
+
+    public static bool TryResolveSettings(
+        string? capabilitiesJson,
+        bool virtualOutput,
+        out PrinterDiagnosticSettings settings,
         out string failureReason)
     {
         settings = new PrinterDiagnosticSettings("A4", "Mono", false, 1, "CAPABILITIES_UNKNOWN");
@@ -61,12 +68,22 @@ public static class PrinterDiagnosticRules
             var evidence = paperEvidence +
                 (colorSupported ? ";COLOUR_SUPPORTED" : ";COLOUR_NOT_CONFIRMED") +
                 (duplexSupported ? ";DUPLEX_SUPPORTED" : ";DUPLEX_NOT_CONFIRMED");
-            settings = new PrinterDiagnosticSettings(
-                paperSize,
-                colorSupported ? "Colour" : "Mono",
-                duplexSupported,
-                duplexSupported ? 2 : 1,
-                evidence);
+            // A virtual queue produces a file, not paper. Duplex is not a
+            // meaningful physical capability for this test, so keep the artifact
+            // to one page while retaining positively confirmed colour evidence.
+            settings = virtualOutput
+                ? new PrinterDiagnosticSettings(
+                    paperSize,
+                    colorSupported ? "Colour" : "Mono",
+                    false,
+                    1,
+                    evidence + ";VIRTUAL_FILE_OUTPUT;DUPLEX_NOT_APPLICABLE")
+                : new PrinterDiagnosticSettings(
+                    paperSize,
+                    colorSupported ? "Colour" : "Mono",
+                    duplexSupported,
+                    duplexSupported ? 2 : 1,
+                    evidence);
             return true;
         }
         catch (JsonException)
