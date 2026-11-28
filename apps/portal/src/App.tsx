@@ -2853,7 +2853,7 @@ function PrinterDiagnosticControls({
     return t(labels[decision] ?? "Result recorded");
   };
   const preflightSummary = preflight
-    ? `1 copy · ${preflight.pageCount} ${preflight.pageCount === 1 ? t("page") : t("pages")} · ${preflight.paperSize} · ${preflight.colourMode} · ${preflight.isDuplex ? t("Duplex") : t("Single-sided")}`
+    ? `${virtualTest ? t("1 test file") : t("1 copy")} · ${preflight.pageCount} ${preflight.pageCount === 1 ? t("page") : t("pages")} · ${preflight.paperSize} · ${preflight.colourMode}${virtualTest ? "" : ` · ${preflight.isDuplex ? t("Duplex") : t("Single-sided")}`}`
     : "";
 
   return (
