@@ -454,41 +454,55 @@ try {
                 $nativeCode = $null
                 if ($exception -is [System.ComponentModel.Win32Exception]) { $nativeCode = $exception.NativeErrorCode }
 
-                # Add-Printer may race a spooler/device-enumeration registration.
-                # Refresh both inventories and reuse only after proving the live endpoint.
-                Start-Sleep -Seconds 2
-                $inventory = Get-VisiblePrinterInventory
-                foreach ($match in @($inventory | Where-Object {
-                    $_.Name -eq $queueName -or $_.Name -match "(?i)IppVirtual|virtual" -or
-                    $_.PortName -match "(?i)ipp|10631"
-                })) {
-                    $candidatePrinter = Get-Printer -Name $match.Name -ErrorAction SilentlyContinue
-                    if ($candidatePrinter -and (Test-QueueTargetsLiveReceiver $candidatePrinter $candidateUrl)) {
-                        $printer = $candidatePrinter
-                        $queueName = $candidatePrinter.Name
-                        $ippResource = $candidateResource
-                        $queueReused = $true
-                        Write-Host "Add-Printer reported a duplicate; verified and reused existing queue '$queueName'."
-                        break
+                $visiblePrinters = @()
+                $visiblePorts = @()
+                $hiddenRegistrationEvidence = $null
+                $diagnosticCaptureError = $null
+                $diagnosticWriteError = $null
+
+                # Diagnostics are deliberately best-effort. The original
+                # Add-Printer exception is authoritative and must never be
+                # replaced by a secondary inventory/event/artifact failure.
+                try {
+                    # Add-Printer may race a spooler/device-enumeration registration.
+                    # Refresh both inventories and reuse only after proving the live endpoint.
+                    Start-Sleep -Seconds 2
+                    $inventory = Get-VisiblePrinterInventory
+                    foreach ($match in @($inventory | Where-Object {
+                        $_.Name -eq $queueName -or $_.Name -match "(?i)IppVirtual|virtual" -or
+                        $_.PortName -match "(?i)ipp|10631"
+                    })) {
+                        $candidatePrinter = Get-Printer -Name $match.Name -ErrorAction SilentlyContinue
+                        if ($candidatePrinter -and (Test-QueueTargetsLiveReceiver $candidatePrinter $candidateUrl)) {
+                            $printer = $candidatePrinter
+                            $queueName = $candidatePrinter.Name
+                            $ippResource = $candidateResource
+                            $queueReused = $true
+                            Write-Host "Add-Printer reported a duplicate; verified and reused existing queue '$queueName'."
+                            break
+                        }
                     }
+                    $visiblePrinters = @($inventory | ForEach-Object {
+                        $name = [string](Get-OptionalPropertyValue $_ "Name")
+                        $driver = [string](Get-OptionalPropertyValue $_ "DriverName")
+                        $port = [string](Get-OptionalPropertyValue $_ "PortName")
+                        "$name [$driver] port=$port"
+                    })
+                    $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object {
+                        $name = [string](Get-OptionalPropertyValue $_ "Name")
+                        $description = [string](Get-OptionalPropertyValue $_ "Description")
+                        $hostAddress = [string](Get-OptionalPropertyValue $_ "PrinterHostAddress")
+                        $monitor = [string](Get-OptionalPropertyValue $_ "PortMonitor")
+                        $portNumber = [string](Get-OptionalPropertyValue $_ "PortNumber")
+                        "$name [$description] host=$hostAddress monitor=$monitor port=$portNumber"
+                    })
+                    $hiddenRegistrationEvidence = Get-HiddenIppRegistrationEvidence
+                } catch {
+                    $diagnosticCaptureError = $_.Exception.Message
+                    Write-Warning "IPP registration evidence collection failed without replacing the Add-Printer error: $diagnosticCaptureError"
                 }
-                $visiblePrinters = @($inventory | ForEach-Object {
-                    $name = [string](Get-OptionalPropertyValue $_ "Name")
-                    $driver = [string](Get-OptionalPropertyValue $_ "DriverName")
-                    $port = [string](Get-OptionalPropertyValue $_ "PortName")
-                    "$name [$driver] port=$port"
-                })
-                $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object {
-                    $name = [string](Get-OptionalPropertyValue $_ "Name")
-                    $description = [string](Get-OptionalPropertyValue $_ "Description")
-                    $hostAddress = [string](Get-OptionalPropertyValue $_ "PrinterHostAddress")
-                    $monitor = [string](Get-OptionalPropertyValue $_ "PortMonitor")
-                    $portNumber = [string](Get-OptionalPropertyValue $_ "PortNumber")
-                    "$name [$description] host=$hostAddress monitor=$monitor port=$portNumber"
-                })
-                $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
-                $hiddenRegistrationEvidence = Get-HiddenIppRegistrationEvidence
-                $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
+
+                $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | '); diagnosticCaptureError=$diagnosticCaptureError"
                 $diagnostic = [ordered]@{
                     resource = $candidateResource; url = $candidateUrl
                     message = $exception.Message; exceptionType = $exception.GetType().FullName
@@ -498,27 +512,41 @@ try {
                     verifiedReuse = [bool]$printer
                     printers = $visiblePrinters; ports = $visiblePorts
                     hiddenRegistration = $hiddenRegistrationEvidence
+                    diagnosticCaptureError = $diagnosticCaptureError
                 }
-                $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8
-                if ($printer) { break }
+                try {
+                    $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8 -ErrorAction Stop
+                } catch {
+                    $diagnosticWriteError = $_.Exception.Message
+                    Write-Warning "Could not save IPP registration diagnostics; preserving the original Add-Printer error: $diagnosticWriteError"
+                    $candidateFailures[-1] = "$($candidateFailures[-1]); diagnosticWriteError=$diagnosticWriteError"
+                }
             }
         }
     }
 
     if ($null -eq $printer) {
         $printEvents = @()
-        foreach ($logName in @("Microsoft-Windows-PrintService/Admin", "Microsoft-Windows-PrintService/Operational")) {
-            try {
-                $printEvents += @(Get-WinEvent -FilterHashtable @{ LogName = $logName; StartTime = [DateTime]::Now.AddMinutes(-15) } -MaxEvents 30 -ErrorAction Stop |
-                    Select-Object @{Name="LogName";Expression={$logName}}, TimeCreated, Id, LevelDisplayName, Message)
-            } catch {
-                $printEvents += [ordered]@{ LogName=$logName; queryError=$_.Exception.Message }
-            }
-        }
+        $eventEvidenceError = $null
         $eventEvidencePath = Join-Path $evidenceDirectory "windows-printservice-events.json"
-        $printEvents | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8
-        throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService events saved to $eventEvidencePath"
+        try {
+            foreach ($logName in @("Microsoft-Windows-PrintService/Admin", "Microsoft-Windows-PrintService/Operational")) {
+                try {
+                    $printEvents += @(Get-WinEvent -FilterHashtable @{ LogName = $logName; StartTime = [DateTime]::Now.AddMinutes(-15) } -MaxEvents 30 -ErrorAction Stop |
+                        Select-Object @{Name="LogName";Expression={$logName}}, TimeCreated, Id, LevelDisplayName, Message)
+                } catch {
+                    $printEvents += [ordered]@{ LogName=$logName; queryError=$_.Exception.Message }
+                }
+            }
+            $printEvents | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8 -ErrorAction Stop
+        } catch {
+            $eventEvidenceError = $_.Exception.Message
+            Write-Warning "Could not write PrintService evidence; preserving the original printer registration failure: $eventEvidenceError"
+        }
+
+        throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService evidence: $eventEvidencePath; evidenceError=$eventEvidenceError"
     }
+
     $queueState = Get-Printer -Name $printer.Name -ErrorAction Stop
     $keepPrintedJobsValue = Get-OptionalPropertyValue $queueState "KeepPrintedJobs"
     if ($null -eq $keepPrintedJobsValue) {
