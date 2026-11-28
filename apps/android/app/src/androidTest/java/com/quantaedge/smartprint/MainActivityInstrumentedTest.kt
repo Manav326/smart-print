@@ -39,7 +39,6 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import org.hamcrest.Matchers.allOf
 import org.junit.Test
 import org.junit.runner.RunWith
-import eightbitlab.com.blurview.BlurView
 import com.google.android.material.bottomnavigation.BottomNavigationView
 import com.google.android.material.navigationrail.NavigationRailView
 import android.view.View
@@ -1248,18 +1247,18 @@ class MainActivityInstrumentedTest {
     }
 
     @Test
-    fun nativeShellUsesTwoRealBlurOverlaysForItsNavigationChrome() {
+    fun nativeShellUsesSolidNavigationChromeWithoutBlurOverlays() {
         ActivityScenario.launch(MainActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 val content = activity.findViewById<ViewGroup>(android.R.id.content)
                 fun countBlurViews(view: View): Int {
-                    if (view is BlurView) return 1
+                    if (view.javaClass.name.contains("BlurView", ignoreCase = true)) return 1
                     if (view !is ViewGroup) return 0
                     var count = 0
                     for (index in 0 until view.childCount) count += countBlurViews(view.getChildAt(index))
                     return count
                 }
-                assertEquals(2, countBlurViews(content))
+                assertEquals("Native navigation must not contain blur overlays", 0, countBlurViews(content))
             }
         }
     }
