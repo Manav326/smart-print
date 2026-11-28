@@ -47,8 +47,22 @@ test("unselected but ready queues remain eligible for the owner to select", () =
   assert.equal(isPrinterAvailableForShop(candidate, [agent()], now), false);
 });
 
-test("unsupported virtual queues remain visible but cannot be selected or assigned", () => {
-  assert.equal(getPrinterReadinessReason(printer({ outputMode: "UNSUPPORTED_VIRTUAL" }), [agent()], now), "Unsupported Windows output queue");
+test("unsupported virtual queues are available by default when Agent and Windows readiness are valid", () => {
+  const virtual = printer({ connectionType: "IPP", outputMode: "UNSUPPORTED_VIRTUAL" });
+  assert.equal(getPrinterReadinessReason(virtual, [agent()], now), null);
+  assert.equal(isPrinterAvailableForShop(virtual, [agent()], now), true);
+});
+
+test("a platform hold blocks virtual queues without changing the shop selection", () => {
+  const held = printer({
+    connectionType: "IPP",
+    outputMode: "UNSUPPORTED_VIRTUAL",
+    isPlatformHeld: true
+  });
+  assert.equal(held.isActive, true);
+  assert.equal(getPrinterReadinessReason(held, [agent()], now), "This printer is on a platform hold.");
+  assert.equal(getPrinterAvailabilityReason(held, [agent()], now), "This printer is on a platform hold.");
+  assert.equal(isPrinterAvailableForShop(held, [agent()], now), false);
 });
 
 
@@ -59,10 +73,11 @@ test("IPP physical queues use the same live Windows readiness contract as USB pr
   assert.equal(getPrinterAvailabilityReason({ ...ipp, lastSeenUtc: stale }, [agent()], now), "Windows printer queue has not reported recently");
 });
 
-test("virtual queues promoted by platform test mode use physical readiness after server classification", () => {
-  const promoted = printer({ connectionType: "IPP", outputMode: "PHYSICAL", isTestModeOverride: true });
-  assert.equal(getPrinterReadinessReason(promoted, [agent()], now), null);
-  assert.equal(getPrinterReadinessReason({ ...promoted, status: "Offline" }, [agent()], now), "Windows queue reports offline");
+test("virtual queues retain virtual identity and use the normal Windows readiness checks", () => {
+  const virtual = printer({ connectionType: "IPP", outputMode: "UNSUPPORTED_VIRTUAL" });
+  assert.equal(getPrinterReadinessReason(virtual, [agent()], now), null);
+  assert.equal(getPrinterReadinessReason({ ...virtual, status: "Offline" }, [agent()], now), "Windows queue reports offline");
+  assert.equal(getPrinterReadinessReason({ ...virtual, lastSeenUtc: stale }, [agent()], now), "Windows printer queue has not reported recently");
 });
 
 test("PDF Export is ready independently of physical Windows queue status when the Agent is online", () => {
