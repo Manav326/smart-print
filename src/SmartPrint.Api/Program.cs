@@ -340,7 +340,7 @@ platform.MapGet("/overview", async (SmartPrintDbContext db, CancellationToken ct
         .CountAsync(agent => agent.RevokedUtc == null && agent.Status != "Revoked" &&
                              agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter, ct);
     var jobsLast30Days = await db.PrintJobs.AsNoTracking()
-        .CountAsync(job => job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
+        .CountAsync(job => job.Origin != "PRINTER_DIAGNOSTIC" && job.CreatedUtc >= recentStart && job.CreatedUtc < now, ct);
 
     var subscriptionsByStatus = await db.TenantSubscriptions.AsNoTracking()
         .GroupBy(subscription =>
@@ -494,7 +494,7 @@ platform.MapGet("/tenants", async (
                 .Where(agent => agent.TenantId == tenant.Id && agent.RevokedUtc == null && agent.Status != "Revoked")
                 .Max(agent => agent.LastSeenUtc),
             JobsLast30Days = db.PrintJobs.AsNoTracking()
-                .Count(job => job.TenantId == tenant.Id && job.CreatedUtc >= recentStart && job.CreatedUtc < recentEnd)
+                .Count(job => job.TenantId == tenant.Id && job.Origin != "PRINTER_DIAGNOSTIC" && job.CreatedUtc >= recentStart && job.CreatedUtc < recentEnd)
         })
         .Skip((pageNumber - 1) * boundedPageSize)
         .Take(boundedPageSize)
@@ -562,6 +562,7 @@ platform.MapPatch("/tenants/{tenantId:guid}/status", async (
     {
         var unresolvedJobs = await db.PrintJobs.LongCountAsync(job =>
             job.TenantId == tenant.Id &&
+            job.Origin != "PRINTER_DIAGNOSTIC" &&
             job.Status != "COMPLETED" &&
             job.Status != "REJECTED" &&
             job.Status != "PAYMENT_REJECTED" &&
@@ -1469,6 +1470,7 @@ var shop = app.MapGroup("/api/v1/shop").RequireAuthorization()
     .AddEndpointFilter((context, next) => EnforceTenantActiveAsync(context, next, allowSubscriptionRead: true));
 
 shop.MapShopSubscriptionPaymentEndpoints();
+shop.MapPrinterDiagnosticEndpoints();
 
 shop.MapGet("/subscription", async (
     ClaimsPrincipal principal,
@@ -2796,7 +2798,7 @@ shop.MapGet("/print-jobs", async (
         from job in db.PrintJobs.AsNoTracking()
         join document in db.PrintDocuments.AsNoTracking()
             on new { job.TenantId, PrintJobId = job.Id } equals new { document.TenantId, document.PrintJobId }
-        where job.TenantId == tenantId
+        where job.TenantId == tenantId && job.Origin != "PRINTER_DIAGNOSTIC"
         orderby job.CreatedUtc descending
         select new
         {
@@ -3450,6 +3452,7 @@ shop.MapGet("/reports/summary", async (
     var fromUtc = toUtc.AddDays(-periodDays);
     var jobs = db.PrintJobs.AsNoTracking().Where(job =>
         job.TenantId == tenantId &&
+        job.Origin != "PRINTER_DIAGNOSTIC" &&
         job.CreatedUtc >= fromUtc &&
         job.CreatedUtc < toUtc);
 
@@ -6791,6 +6794,35 @@ agentApi.MapPost("/private-relays/{ticketId:guid}/reject", async (
     return Results.Ok(new { ticket.Id, ticket.PrivateRelayFailedUtc, DuplicateRequest = false });
 });
 
+agentApi.MapPost("/jobs/diagnostics/reconcile", async (
+    AgentPrinterDiagnosticReconciliationRequest request,
+    HttpContext context,
+    SmartPrintDbContext db,
+    CancellationToken ct) =>
+{
+    var device = await AuthenticateAgentAsync(context, db, ct);
+    if (device is null) return Results.Unauthorized();
+
+    if (request.JobIds is null || request.JobIds.Count is < 1 or > 100 ||
+        request.JobIds.Any(id => id == Guid.Empty) ||
+        request.JobIds.Distinct().Count() != request.JobIds.Count)
+        return Results.ValidationProblem(new Dictionary<string, string[]>
+        {
+            ["jobIds"] = ["Provide between 1 and 100 unique diagnostic job IDs."]
+        });
+
+    var ids = request.JobIds.ToArray();
+    var confirmed = await db.PrinterDiagnosticAttempts.AsNoTracking()
+        .Where(attempt => attempt.TenantId == device.TenantId &&
+            attempt.AgentDeviceId == device.Id &&
+            ids.Contains(attempt.PrintJobId) &&
+            attempt.ConfirmedUtc != null)
+        .Select(attempt => attempt.PrintJobId)
+        .ToListAsync(ct);
+
+    return Results.Ok(new { confirmedJobIds = confirmed });
+});
+
 agentApi.MapPost("/jobs/claim", async (
     HttpContext context,
     SmartPrintDbContext db,
@@ -6842,11 +6874,11 @@ agentApi.MapPost("/jobs/claim", async (
             equals new { printer.TenantId, PrinterId = printer.Id }
         where job.TenantId == device.TenantId &&
               (!suspendedAtUtc.HasValue || job.CreatedUtc < suspendedAtUtc.Value) &&
-              db.PrintPayments.Any(payment =>
+              (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(payment =>
                   payment.TenantId == job.TenantId &&
                   payment.PrintJobId == job.Id &&
                   (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value)))) &&
               availablePrinterIds.Contains(printer.Id) &&
               (!job.PrivatePrinting || (document.StorageMode == "LOCAL_AGENT" && document.AgentDeviceId == device.Id)) &&
               (job.BatchId == null || !db.PrintJobs.Any(other =>
@@ -6856,13 +6888,15 @@ agentApi.MapPost("/jobs/claim", async (
                   other.Status != "REJECTED" &&
                   other.Status != "REFUNDED" &&
                   other.PrinterDeviceId != job.PrinterDeviceId)) &&
-              (job.Status == "PAID_AUTHORISED" ||
+              (job.Status == "DIAGNOSTIC_QUEUED" ||
+               job.Status == "PAID_AUTHORISED" ||
                (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                 (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now)))
         orderby job.CreatedUtc
         select new
         {
             job.Id,
+            job.Origin,
             job.Status,
             job.JobNumber,
             job.PageCount,
@@ -6920,12 +6954,12 @@ agentApi.MapPost("/jobs/claim", async (
                               agent.TenantId == device.TenantId &&
                               agent.RevokedUtc == null && agent.Status != "Revoked" &&
                               agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-                          db.PrintPayments.Any(payment =>
+                          (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(payment =>
                               payment.TenantId == job.TenantId &&
                               payment.PrintJobId == job.Id &&
                               (payment.Status == "VERIFIED" || payment.Status == "PARTIALLY_REFUNDED") &&
-                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value))) &&
-                          (job.Status == "PAID_AUTHORISED" ||
+                  (!suspendedAtUtc.HasValue || (payment.VerifiedUtc != null && payment.VerifiedUtc <= suspendedAtUtc.Value)))) &&
+                          (job.Status == "DIAGNOSTIC_QUEUED" || job.Status == "PAID_AUTHORISED" ||
                            (job.Status == "LOCAL_QUEUE_CLAIMED" &&
                             (job.AgentLeaseExpiresUtc == null || job.AgentLeaseExpiresUtc <= now))))
             .ExecuteUpdateAsync(update => update
@@ -6949,7 +6983,9 @@ agentApi.MapPost("/jobs/claim", async (
             NewStatus = "LOCAL_QUEUE_CLAIMED",
             ActorType = "PrintAgent",
             ActorId = device.Id,
-            ReasonCode = "AGENT_CLAIMED_PAID_JOB",
+            ReasonCode = candidate.Origin == "PRINTER_DIAGNOSTIC"
+                ? "AGENT_CLAIMED_PRINTER_DIAGNOSTIC"
+                : "AGENT_CLAIMED_PAID_JOB",
             CreatedUtc = now
         });
 
@@ -7201,6 +7237,11 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
         });
     }
 
+    if (job.Origin == "PRINTER_DIAGNOSTIC" &&
+        job.LocalQueueReceivedUtc is not null &&
+        job.ClaimedByAgentDeviceId == device.Id)
+        return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.LocalQueueReceivedUtc, DuplicateRequest = true });
+
     if (job.Status == "LOCAL_QUEUE_READY" && job.ClaimedByAgentDeviceId == device.Id)
     {
         return Results.Ok(new { job.Id, job.JobNumber, job.Status, job.LocalQueueReceivedUtc, DuplicateRequest = true });
@@ -7220,7 +7261,16 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
     }
 
     var previousStatus = job.Status;
-    job.Status = "LOCAL_QUEUE_READY";
+    var isDiagnostic = job.Origin == "PRINTER_DIAGNOSTIC";
+    job.Status = isDiagnostic ? "PRINT_AUTHORISED" : "LOCAL_QUEUE_READY";
+    if (isDiagnostic)
+    {
+        var prefix = job.OutputType == PrivatePrintingOutputPolicy.TestVirtual
+            ? "VIRTUAL-TEST-DIAG-"
+            : "SmartPrint-DIAG-";
+        job.SpoolerJobName = prefix + job.JobNumber + "-" + job.Id.ToString("N")[..8];
+        job.SpoolerStatus = "AWAITING_AGENT";
+    }
     job.LocalQueueReceivedUtc = now;
     job.AgentLeaseExpiresUtc = null;
     job.UpdatedUtc = now;
@@ -7232,7 +7282,9 @@ agentApi.MapPost("/jobs/{jobId:guid}/received", async (
         NewStatus = job.Status,
         ActorType = "PrintAgent",
         ActorId = device.Id,
-        ReasonCode = "AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT",
+        ReasonCode = isDiagnostic
+            ? "AGENT_STAGED_PRINTER_DIAGNOSTIC_FOR_OUTPUT"
+            : "AGENT_CONFIRMED_LOCAL_QUEUE_RECEIPT",
         CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
@@ -8215,8 +8267,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
                   db.AgentDevices.Any(a => a.Id == device.Id && a.TenantId == device.TenantId &&
                       a.RevokedUtc == null && a.Status != "Revoked" &&
                       a.LastSeenUtc != null && a.LastSeenUtc >= onlineAfter) &&
-                  db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))
+                  (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
             select new { job.Id, job.JobNumber, job.Status, job.SpoolerJobName, job.PrintDispatchAttempts, job.RejectedPageNumbersJson, QueueName = printer.QueueName, OutputMode = printer.OutputMode }
         ).SingleOrDefaultAsync(ct);
         if (candidate is null || string.IsNullOrWhiteSpace(candidate.SpoolerJobName)) continue;
@@ -8272,8 +8324,8 @@ agentApi.MapPost("/jobs/print-claim", async (AgentPrintClaimRequest request, Htt
             db.AgentDevices.Any(agent => agent.Id == device.Id && agent.TenantId == device.TenantId &&
                 agent.RevokedUtc == null && agent.Status != "Revoked" &&
                 agent.LastSeenUtc != null && agent.LastSeenUtc >= onlineAfter) &&
-            db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
-                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value))))
+            (job.Origin == "PRINTER_DIAGNOSTIC" || db.PrintPayments.Any(pay => pay.TenantId == job.TenantId && pay.PrintJobId == job.Id && (pay.Status == "VERIFIED" || pay.Status == "PARTIALLY_REFUNDED") &&
+                      (!suspendedAtUtc.HasValue || (pay.VerifiedUtc != null && pay.VerifiedUtc <= suspendedAtUtc.Value)))))
             .ExecuteUpdateAsync(u => u
                 .SetProperty(job => job.Status, "PRINT_SUBMITTING")
                 .SetProperty(job => job.SpoolerJobName, attemptSpoolerJobName)
@@ -8633,6 +8685,31 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         return Results.BadRequest();
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    // Diagnostic callbacks and owner confirmation serialize on the diagnostic
+    // attempt row. Without the shared lock, a late Agent callback could pass the
+    // unconfirmed check and overwrite the owner's committed terminal decision.
+    await using var diagnosticTransaction = job.Origin == "PRINTER_DIAGNOSTIC"
+        ? await db.Database.BeginTransactionAsync(ct)
+        : null;
+    if (diagnosticTransaction is not null)
+    {
+        var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
+            $"SELECT * FROM \"PrinterDiagnosticAttempts\" WHERE \"TenantId\" = {device.TenantId} AND \"PrintJobId\" = {job.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var diagnosticAttempt = lockedAttempts.SingleOrDefault();
+        if (diagnosticAttempt is null)
+            return Results.Conflict(new { code = "diagnostic_attempt_missing" });
+        if (diagnosticAttempt.ConfirmedUtc is not null)
+        {
+            await diagnosticTransaction.CommitAsync(ct);
+            return Results.Ok(new { job.Id, Status = "COMPLETED", job.FailureCode, job.OutputType, DuplicateRequest = true });
+        }
+
+        // The initial job read happened before acquiring the attempt lock. Reload
+        // it now so this callback validates the latest state after any prior owner
+        // confirmation or diagnostic callback has finished.
+        await db.Entry(job).ReloadAsync(ct);
+    }
     if (!string.Equals(job.SpoolerJobName, request.SpoolerJobName, StringComparison.Ordinal))
         return Results.Conflict(new { code = "stale_spooler_submission_attempt" });
     var verifiedSpoolerAbsence = SpoolerOutputConfirmationPolicy.IsVerifiedSpoolerAbsenceReport(reason, job.SpoolerJobId);
@@ -8646,14 +8723,19 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
                 // Only an Agent lookup that proves the submitted spooler entry is absent
                 // may replace a last-known RETAINED observation.
                 var verifiedAtUtc = DateTimeOffset.UtcNow;
-                job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
-                job.SpoolerObservedUtc = verifiedAtUtc;
-                job.FailureCode = reason;
                 var progress = SpoolerOutputConfirmationPolicy.MergePageProgress(
                     job.SpoolerPagesPrinted, job.SpoolerTotalPages,
                     request.PagesPrinted, request.TotalPages);
                 job.SpoolerPagesPrinted = progress.PagesPrinted;
                 job.SpoolerTotalPages = progress.TotalPages;
+                // Repeated queue-absence reports must preserve a prior complete
+                // PRINTED observation just like the first report does below.
+                if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+                        job.SpoolerStatus, "OUTPUT_UNCONFIRMED",
+                        progress.PagesPrinted, progress.TotalPages))
+                    job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+                job.SpoolerObservedUtc = verifiedAtUtc;
+                job.FailureCode = reason;
                 job.UpdatedUtc = verifiedAtUtc;
                 updated = true;
             }
@@ -8667,6 +8749,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
             }
             if (updated) await db.SaveChangesAsync(ct);
         }
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
         return Results.Ok(new { job.Id, job.Status, job.FailureCode, job.OutputType, DuplicateRequest = true });
     }
     if (job.Status is not ("PRINT_SUBMITTING" or "SPOOLER_ACCEPTED" or "PRINTING") || job.ClaimedByAgentDeviceId != device.Id)
@@ -8688,7 +8772,13 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
     job.SpoolerTotalPages = pageProgress.TotalPages;
     if (verifiedSpoolerAbsence)
     {
-        job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
+        // A missing queue entry after Windows already reported every page PRINTED
+        // is not a regression in output evidence. Preserve PRINTED while recording
+        // the fresh Agent reconciliation time.
+        if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+                job.SpoolerStatus, "OUTPUT_UNCONFIRMED",
+                pageProgress.PagesPrinted, pageProgress.TotalPages))
+            job.SpoolerStatus = "OUTPUT_UNCONFIRMED";
         job.SpoolerObservedUtc = now;
     }
     job.PrintDispatchLeaseExpiresUtc = null;
@@ -8699,6 +8789,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/output-unconfirmed", async (Guid jobId, Age
         ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = reason, CreatedUtc = now
     });
     await db.SaveChangesAsync(ct);
+    if (diagnosticTransaction is not null)
+        await diagnosticTransaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.FailureCode });
 });
 
@@ -8712,6 +8804,25 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
 
     var job = await db.PrintJobs.SingleOrDefaultAsync(x => x.Id == jobId && x.TenantId == device.TenantId, ct);
     if (job is null) return Results.NotFound();
+    await using var diagnosticTransaction = job.Origin == "PRINTER_DIAGNOSTIC"
+        ? await db.Database.BeginTransactionAsync(ct)
+        : null;
+    if (diagnosticTransaction is not null)
+    {
+        var lockedAttempts = await db.PrinterDiagnosticAttempts.FromSqlInterpolated(
+            $"SELECT * FROM \"PrinterDiagnosticAttempts\" WHERE \"TenantId\" = {device.TenantId} AND \"PrintJobId\" = {job.Id} FOR UPDATE")
+            .ToListAsync(ct);
+        var diagnosticAttempt = lockedAttempts.SingleOrDefault();
+        if (diagnosticAttempt is null)
+            return Results.Conflict(new { code = "diagnostic_attempt_missing" });
+        if (diagnosticAttempt.ConfirmedUtc is not null)
+        {
+            await diagnosticTransaction.CommitAsync(ct);
+            return Results.Ok(new { job.Id, Status = "COMPLETED", DuplicateRequest = true });
+        }
+
+        await db.Entry(job).ReloadAsync(ct);
+    }
     if (job.Status == "COMPLETED")
         return Results.Ok(new { job.Id, job.Status, DuplicateRequest = true });
     if (job.Status is not ("SPOOLER_ACCEPTED" or "PRINTING" or "OUTPUT_UNCONFIRMED") ||
@@ -8727,8 +8838,14 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     job.SpoolerPagesPrinted = pageProgress.PagesPrinted;
     job.SpoolerTotalPages = pageProgress.TotalPages;
 
-    // A transient Agent query failure is not proof that a previously retained Windows job has cleared.
-    if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus))
+    // A transient query failure must not clear RETAINED, and a terminal PRINTED
+    // observation with complete page progress must never regress to a stale queue
+    // state or temporary printer error.
+    var preservePrinted = SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownPrintedStatus(
+        job.SpoolerStatus, request.SpoolerStatus,
+        pageProgress.PagesPrinted, pageProgress.TotalPages);
+    if (!SpoolerOutputConfirmationPolicy.ShouldPreserveLastKnownRetainedStatus(job.SpoolerStatus, request.SpoolerStatus) &&
+        !preservePrinted)
         job.SpoolerStatus = request.SpoolerStatus;
     job.SpoolerObservedUtc = now;
     job.UpdatedUtc = now;
@@ -8737,13 +8854,29 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
     // RETAINED flag, but it must not silently mark the physical pages as complete.
     if (job.Status == "OUTPUT_UNCONFIRMED")
     {
+        if (PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(job.OutputType, request.SpoolerStatus))
+        {
+            var previousVirtualStatus = job.Status;
+            job.Status = "TEST_OUTPUT_READY";
+            job.OutputCompletedUtc = now;
+            job.OutputConfirmedUtc = null;
+            if (job.PrivatePrinting)
+                job.PrivateDocumentPurgeRequestedUtc ??= now;
+            db.PrintJobEvents.Add(new PrintJobEvent
+            {
+                TenantId = device.TenantId, PrintJobId = job.Id, PreviousStatus = previousVirtualStatus,
+                NewStatus = job.Status, ActorType = "PrintAgent", ActorId = device.Id,
+                ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
+            });
+        }
         await db.SaveChangesAsync(ct);
-        return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
+        return Results.Ok(new { job.Id, job.Status, job.OutputType, job.OutputCompletedUtc, job.SpoolerStatus });
     }
 
     var previous = job.Status;
-    if (job.OutputType == PrivatePrintingOutputPolicy.TestVirtual &&
-        string.Equals(request.SpoolerStatus, "PRINTED", StringComparison.OrdinalIgnoreCase))
+    if (PrinterDiagnosticRules.IsVirtualOutputPrintCompleted(job.OutputType, request.SpoolerStatus))
     {
         job.Status = "TEST_OUTPUT_READY";
         job.OutputCompletedUtc = now;
@@ -8757,6 +8890,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
             ReasonCode = "VIRTUAL_PRINTER_TEST_OUTPUT_CONFIRMED_BY_WINDOWS_SPOOLER", CreatedUtc = now
         });
         await db.SaveChangesAsync(ct);
+        if (diagnosticTransaction is not null)
+            await diagnosticTransaction.CommitAsync(ct);
         return Results.Ok(new { job.Id, job.Status, job.OutputType, job.OutputCompletedUtc, job.SpoolerStatus });
     }
     job.Status = request.SpoolerStatus == "PRINTING" ? "PRINTING" : "SPOOLER_ACCEPTED";
@@ -8767,6 +8902,8 @@ agentApi.MapPost("/jobs/{jobId:guid}/spooler-status", async (Guid jobId, AgentSp
             ActorType = "PrintAgent", ActorId = device.Id, ReasonCode = "WINDOWS_SPOOLER_STATUS_UPDATED", CreatedUtc = now
         });
     await db.SaveChangesAsync(ct);
+    if (diagnosticTransaction is not null)
+        await diagnosticTransaction.CommitAsync(ct);
     return Results.Ok(new { job.Id, job.Status, job.SpoolerStatus, job.SpoolerObservedUtc });
 });
 

@@ -39,7 +39,8 @@ public sealed record AgentClaimedJob(
     int PagesPerSheet = 1,
     string PhotoPaperFinish = "PLAIN",
     string PhotoOutputLayout = "A4_SHEET",
-    string? PhotoSizeCode = null);
+    string? PhotoSizeCode = null,
+    string Origin = "CUSTOMER_QR");
 
 public sealed record AgentQueueStorageSnapshot(
     long DocumentCount,
@@ -131,7 +132,8 @@ public sealed record AgentLocalQueueEntry(
     string? PhotoSizeCode = null,
     Guid? DocumentScopeId = null,
     int SpoolerPagesPrinted = 0,
-    int SpoolerTotalPages = 0);
+    int SpoolerTotalPages = 0,
+    string Origin = "CUSTOMER_QR");
 
 public sealed record AgentLocalQueueProof(Guid JobId, string Sha256, long SizeBytes);
 public sealed record AgentPrintClaimRequest(IReadOnlyList<AgentLocalQueueProof> LocalJobs);
@@ -157,6 +159,8 @@ public sealed record AgentPrivateSpoolerCleanupEntry(
 public sealed record WindowsSpoolerJob(int JobId, string DocumentName, string Status, uint StatusFlags, int PagesPrinted, int TotalPages);
 
 public sealed record AgentCloudSpoolerStatusResponse(Guid Id, string Status, bool? DuplicateRequest = null);
+public sealed record AgentPrinterDiagnosticReconciliationRequest(IReadOnlyList<Guid> JobIds);
+public sealed record AgentPrinterDiagnosticReconciliationResponse(IReadOnlyList<Guid> ConfirmedJobIds);
 public sealed record AgentLocalUploadStatusResponse(
     bool Completed,
     DateTimeOffset ExpiresUtc,

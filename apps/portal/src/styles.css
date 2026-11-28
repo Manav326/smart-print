@@ -5073,3 +5073,54 @@ html[data-theme="dark"] .batch-review-next-step{color:#aab6ca}
 /* Keep the shared release downloader aligned with the shop pairing panel. */
 .agent-installer-download{flex:0 1 300px;min-width:220px;max-width:340px;width:100%}
 @media(max-width:700px){.agent-installer-download{flex:1 1 auto;min-width:0;max-width:none;width:100%}}
+
+/* Printer diagnostic panel: compact, owner-focused and responsive. */
+.printer-diagnostic-panel{
+  display:grid;gap:10px;margin-top:14px;padding:12px;
+  border:1px solid var(--border);border-radius:12px;background:var(--surface-2)
+}
+.printer-diagnostic-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0
+}
+.printer-diagnostic-heading>div{display:grid;gap:3px;min-width:0}
+.printer-diagnostic-heading strong{font:700 11px Manrope,sans-serif;color:var(--text)}
+.printer-diagnostic-heading span,.printer-diagnostic-state,.printer-diagnostic-panel .field-hint{
+  font-size:10px;line-height:1.5;color:var(--muted)
+}
+.printer-diagnostic-heading .subtle-button{
+  display:inline-flex;align-items:center;justify-content:center;gap:6px;white-space:nowrap;flex:0 0 auto
+}
+.printer-diagnostic-state{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-top:8px;border-top:1px solid var(--border)
+}
+.printer-diagnostic-state strong{color:var(--text)}
+.printer-diagnostic-confirmation{display:grid;gap:8px}
+.printer-diagnostic-confirmation>strong{font:700 11px Manrope,sans-serif;color:var(--text)}
+.printer-diagnostic-actions{display:flex;gap:6px;flex-wrap:wrap}
+.printer-diagnostic-actions .subtle-button{font-size:10px;padding:7px 9px;white-space:normal}
+.printer-diagnostic-preflight{display:grid;gap:6px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--surface)}
+.printer-diagnostic-preflight>span:first-child{font-size:11px;font-weight:700;color:var(--text)}
+.printer-diagnostic-preflight>span:nth-child(2){font-size:10px;line-height:1.45;color:var(--muted)}
+.printer-diagnostic-preflight>div{display:flex;justify-content:flex-end;gap:7px;margin-top:3px}
+.printer-diagnostic-preflight .subtle-button.primary{border-color:var(--accent-strong);background:var(--accent-strong);color:#fff}
+.printer-diagnostic-notes{display:grid;gap:4px;max-width:100%}
+.printer-diagnostic-notes span{font-size:9px;color:var(--muted)}
+.printer-diagnostic-notes input{width:100%;min-width:0;border:1px solid var(--border);border-radius:7px;background:var(--surface);color:var(--text);padding:8px 9px;font:10px "DM Sans",sans-serif}
+.printer-diagnostic-details{border-top:1px solid var(--border);padding-top:8px;color:var(--muted);font-size:9px}
+.printer-diagnostic-details summary{cursor:pointer;color:var(--muted);font-weight:600;list-style-position:inside}
+.printer-diagnostic-details p{margin:8px 0 5px;line-height:1.5;overflow-wrap:anywhere}
+.printer-diagnostic-details ul{list-style:none;margin:0;padding:0;display:grid;gap:6px}
+.printer-diagnostic-details li{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:3px 8px;padding:6px 0;border-top:1px solid var(--border-soft)}
+.printer-diagnostic-details li span{overflow-wrap:anywhere}
+.printer-diagnostic-details li strong{color:var(--text);font-size:9px}
+.printer-diagnostic-details li small{grid-column:1/-1;overflow-wrap:anywhere}
+.printer-diagnostic-pending{display:grid;gap:4px}
+.printer-diagnostic-pending.is-stale{padding:9px;border:1px solid var(--amber);border-radius:8px;background:var(--surface)}
+.printer-diagnostic-pending .field-hint{margin:0}
+.printer-diagnostic-panel .inline-success,.printer-diagnostic-panel .inline-error{font-size:10px;margin:0}
+@media(max-width:650px){
+  .printer-diagnostic-heading{align-items:flex-start;flex-direction:column}
+  .printer-diagnostic-heading .subtle-button{width:100%}
+  .printer-diagnostic-actions{display:grid;grid-template-columns:1fr}
+  .printer-diagnostic-actions .subtle-button{width:100%}
+}

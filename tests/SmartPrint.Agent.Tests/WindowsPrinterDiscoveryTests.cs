@@ -157,6 +157,28 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public void AndroidVirtualIppQueueRemainsVirtualWhenWindowsHidesTheEndpointBehindWsd()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.UnsupportedVirtual,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(
+                "SmartPrint Android Virtual IPP CI 46108060059-1",
+                "Microsoft IPP Class Driver",
+                "WSD-205bd056-1e66-4158-a0b0-8bc8e003f891"));
+    }
+
+    [Fact]
+    public void OrdinaryPhysicalIppQueueOnWsdPortRemainsPhysical()
+    {
+        Assert.Equal(
+            PrinterOutputModeRules.Physical,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(
+                "Office Front Desk Printer",
+                "Microsoft IPP Class Driver",
+                "WSD-205bd056-1e66-4158-a0b0-8bc8e003f891"));
+    }
+
+    [Fact]
     public void GenericVirtualPrinterWithoutIppTransportRemainsUnsupported()
     {
         Assert.Equal(

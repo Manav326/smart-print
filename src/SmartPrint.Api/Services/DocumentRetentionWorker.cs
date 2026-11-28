@@ -57,7 +57,7 @@ public sealed class DocumentRetentionWorker(
                 join job in db.PrintJobs
                     on new { document.TenantId, PrintJobId = document.PrintJobId }
                     equals new { job.TenantId, PrintJobId = job.Id }
-                let completedUtc = job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
+                let completedUtc = job.Origin == "PRINTER_DIAGNOSTIC" || job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
                 let hasFinancialHold = db.PrintPayments.Any(payment =>
                     payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                     (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
@@ -67,7 +67,10 @@ public sealed class DocumentRetentionWorker(
                       payment.RefundedAmountMinor < payment.AmountMinor)))
                 where document.StorageMode == "CLOUD" &&
                       document.PurgedUtc == null &&
-                      (((job.Status == "COMPLETED" || job.Status == "TEST_OUTPUT_READY") && completedUtc != null && completedUtc <= completedCutoff) ||
+                      (((job.Status == "COMPLETED" || job.Status == "TEST_OUTPUT_READY" ||
+                         job.Status == "DIAGNOSTIC_VERIFIED" || job.Status == "DIAGNOSTIC_RECEIVED" ||
+                         job.Status == "DIAGNOSTIC_ISSUE" || job.Status == "DIAGNOSTIC_NO_OUTPUT") &&
+                        completedUtc != null && completedUtc <= completedCutoff) ||
                        ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED" || job.Status == "REFUNDED") &&
                         job.OutputConfirmedUtc == null && job.OutputCompletedUtc == null &&
                         job.UpdatedUtc <= abandonedCutoff && !hasFinancialHold))
@@ -138,7 +141,7 @@ public sealed class DocumentRetentionWorker(
             join job in db.PrintJobs
                 on new { document.TenantId, PrintJobId = document.PrintJobId }
                 equals new { job.TenantId, PrintJobId = job.Id }
-            let completedUtc = job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
+            let completedUtc = job.Origin == "PRINTER_DIAGNOSTIC" || job.OutputType == "PDF_EXPORT" || job.OutputType == "TEST_VIRTUAL" ? job.OutputCompletedUtc : job.OutputConfirmedUtc
             let hasFinancialHold = db.PrintPayments.Any(payment =>
                 payment.TenantId == job.TenantId && payment.PrintJobId == job.Id &&
                 (payment.Status == "AWAITING_CUSTOMER_PAYMENT" ||
@@ -149,7 +152,10 @@ public sealed class DocumentRetentionWorker(
             where document.StorageMode == "LOCAL_AGENT" &&
                   document.PurgedUtc == null &&
                   (document.PhotoSourceSha256 != null || document.PhotoEditorSettingsJson != null) &&
-                  (((job.Status == "COMPLETED" || job.Status == "TEST_OUTPUT_READY") && completedUtc != null && completedUtc <= completedCutoff) ||
+                  (((job.Status == "COMPLETED" || job.Status == "TEST_OUTPUT_READY" ||
+                         job.Status == "DIAGNOSTIC_VERIFIED" || job.Status == "DIAGNOSTIC_RECEIVED" ||
+                         job.Status == "DIAGNOSTIC_ISSUE" || job.Status == "DIAGNOSTIC_NO_OUTPUT") &&
+                        completedUtc != null && completedUtc <= completedCutoff) ||
                    ((job.Status == "REJECTED" || job.Status == "PAYMENT_REJECTED" || job.Status == "QUOTE_EXPIRED" || job.Status == "REFUNDED") &&
                     job.OutputConfirmedUtc == null && job.OutputCompletedUtc == null &&
                     job.UpdatedUtc <= abandonedCutoff && !hasFinancialHold))

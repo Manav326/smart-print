@@ -71,6 +71,24 @@ public sealed class DocumentRetentionRulesTests
             "CLOUD", status, null, Cutoff.AddDays(-40), Cutoff.AddDays(-40),
             false, null, Cutoff, Cutoff));
 
+    [Theory]
+    [InlineData("DIAGNOSTIC_VERIFIED")]
+    [InlineData("DIAGNOSTIC_RECEIVED")]
+    [InlineData("DIAGNOSTIC_ISSUE")]
+    [InlineData("DIAGNOSTIC_NO_OUTPUT")]
+    public void PurgesConfirmedDiagnosticDocumentsAfterCompletedRetention(string status)
+    {
+        Assert.True(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", status, null, Cutoff.AddTicks(-1), Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+        Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", status, null, Cutoff.AddTicks(1), Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+        Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(
+            "CLOUD", status, null, null, Cutoff.AddDays(-40),
+            false, null, Cutoff, Cutoff));
+    }
+
     [Fact]
     public void DoesNotPurgeDocumentTwice()
         => Assert.False(DocumentRetentionRules.ShouldPurgeCloudDocument(

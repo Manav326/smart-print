@@ -2650,6 +2650,116 @@ export function getShopPrinters(token: string) {
   return apiRequest<PrinterDevice[]>("/api/v1/shop/printers", {}, token);
 }
 
+export interface PrinterDiagnosticProfile {
+  id: string;
+  displayName: string;
+  queueName: string;
+  connectionType: string;
+  outputMode: string;
+  templateVersion: string;
+  paperSize: string;
+  colourMode: string;
+  isDuplex: boolean;
+  pageCount: number;
+  capabilityEvidence: string;
+  capabilitiesObservedUtc: string | null;
+}
+
+export interface PrinterDiagnosticAttempt {
+  id: string;
+  printJobId: string;
+  templateVersion: string;
+  ownerDecision: string | null;
+  ownerNotes: string | null;
+  createdUtc: string;
+  confirmedUtc: string | null;
+  job: {
+    status: string;
+    spoolerStatus: string | null;
+    spoolerSubmittedUtc: string | null;
+    spoolerObservedUtc: string | null;
+    failureCode: string | null;
+    outputType: string;
+    copies: number;
+    pageCount: number;
+    localQueueReceivedUtc: string | null;
+    printDispatchAttempts: number;
+    spoolerPagesPrinted: number;
+    spoolerTotalPages: number;
+    outputCompletedUtc: string | null;
+  } | null;
+}
+
+export interface PrinterDiagnosticStartResult {
+  id: string;
+  printJobId: string;
+  jobNumber: string;
+  status: string;
+  copies: number;
+  pageCount: number;
+  paperSize: string;
+  colourMode: string;
+  isDuplex: boolean;
+  outputType: string;
+  templateVersion: string;
+  createdUtc: string;
+  duplicateRequest?: boolean;
+}
+
+export function getPrinterDiagnosticProfile(token: string, printerId: string) {
+  return apiRequest<PrinterDiagnosticProfile>(
+    `/api/v1/shop/printers/${printerId}/diagnostics/profile`,
+    {},
+    token
+  );
+}
+
+export function getPrinterDiagnosticHistory(token: string, printerId: string) {
+  return apiRequest<PrinterDiagnosticAttempt[]>(
+    `/api/v1/shop/printers/${printerId}/diagnostics?take=10`,
+    {},
+    token
+  );
+}
+
+export function startPrinterDiagnostic(
+  token: string,
+  printerId: string,
+  request: {
+    templateVersion: string;
+    paperSize: string;
+    colourMode: string;
+    isDuplex: boolean;
+    idempotencyKey: string;
+  }
+) {
+  return apiRequest<PrinterDiagnosticStartResult>(
+    `/api/v1/shop/printers/${printerId}/diagnostics`,
+    { method: "POST", body: JSON.stringify(request) },
+    token
+  );
+}
+
+export function confirmPrinterDiagnostic(
+  token: string,
+  attemptId: string,
+  decision: string,
+  notes?: string
+) {
+  return apiRequest<{
+    id: string;
+    ownerDecision: string;
+    ownerNotes: string | null;
+    confirmedUtc: string;
+    jobStatus: string;
+    physicalOutputConfirmed: boolean;
+  }>(
+    `/api/v1/shop/printer-diagnostics/${attemptId}/confirm`,
+    { method: "POST", body: JSON.stringify({ decision, notes: notes ?? null }) },
+    token
+  );
+}
+
 export function getShopAgentDevices(token: string) {
   return apiRequest<AgentDevice[]>("/api/v1/shop/agent-devices", {}, token);
 }

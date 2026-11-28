@@ -138,6 +138,22 @@ public static class SpoolerOutputConfirmationPolicy
         IsRetained(currentStatus) &&
         string.Equals(Normalize(incomingStatus), "PRINTER_UNAVAILABLE", StringComparison.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// PRINTED is terminal Windows evidence. Queue disappearance or a later transient
+    /// status must not downgrade a fully printed job and make owner confirmation
+    /// impossible. Incomplete page progress remains non-terminal.
+    /// </summary>
+    public static bool ShouldPreserveLastKnownPrintedStatus(
+        string? currentStatus,
+        string? incomingStatus,
+        int pagesPrinted,
+        int totalPages) =>
+        string.Equals(Normalize(currentStatus), "PRINTED", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(Normalize(incomingStatus), "PRINTED", StringComparison.OrdinalIgnoreCase) &&
+        pagesPrinted >= 0 &&
+        totalPages >= 0 &&
+        (totalPages == 0 || pagesPrinted >= totalPages);
+
     public static (int PagesPrinted, int TotalPages) MergePageProgress(
         int currentPagesPrinted,
         int currentTotalPages,
