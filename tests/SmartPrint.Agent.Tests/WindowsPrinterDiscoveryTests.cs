@@ -402,6 +402,79 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(1, runner.CallCount);
     }
 
+    [Fact]
+    public async Task MalformedWmiPayloadFallsBackToWinspoolInventory()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string fallbackJson = """[{"queueName":"Shared Office","driverName":"Office Driver","portName":"\\\\PRINT-SERVER\\Office","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, "{malformed", string.Empty, false),
+            new AgentChildProcessResult(0, fallbackJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        var queue = Assert.Single(result.Printers);
+        Assert.Equal("Shared Office", queue.QueueName);
+        Assert.Equal(@"\\PRINT-SERVER\Office", queue.PortName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task UnknownWmiStatusTriggersOneTargetedWinspoolRefreshWithoutOverwritingKnownStatus()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string wmiJson = """[
+            {"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Unknown","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},
+            {"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}
+        ]""";
+        const string winspoolJson = """[
+            {"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Busy","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},
+            {"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Offline","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}
+        ]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, wmiJson, string.Empty, false),
+            new AgentChildProcessResult(0, winspoolJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Printers.Count);
+        Assert.Equal("Busy", result.Printers.Single(item => item.QueueName == "Unknown Office").Status);
+        Assert.Equal("Ready", result.Printers.Single(item => item.QueueName == "Known Office").Status);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task DiscoveryDoesNotRunExtraWinspoolPassWhenAllWmiStatusesAreKnown()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string wmiJson = """[{"queueName":"Office USB","driverName":"Office Driver","portName":"USB001","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, wmiJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Single(result.Printers);
+        Assert.Equal(new[] { "--discover-printers" }, runner.Commands);
+    }
+
     private sealed class SequenceChildProcessRunner(params AgentChildProcessResult[] results)
         : IAgentChildProcessRunner
     {
