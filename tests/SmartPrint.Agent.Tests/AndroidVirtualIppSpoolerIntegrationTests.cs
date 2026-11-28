@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using Microsoft.Extensions.Logging.Abstractions;
 using SmartPrint.Agent;
 using SkiaSharp;
 
@@ -25,6 +26,18 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
 
         var queueName = Environment.GetEnvironmentVariable("SMARTPRINT_ANDROID_IPP_QUEUE");
         Assert.False(string.IsNullOrWhiteSpace(queueName), "SMARTPRINT_ANDROID_IPP_QUEUE must identify the temporary Android IPP queue.");
+
+        // Verify the real installed queue is discovered as a virtual output,
+        // not accidentally promoted to a physical printer by the Agent.
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            executeInCurrentProcess: true);
+        var inventory = discovery.DiscoverInProcessAsync(CancellationToken.None).GetAwaiter().GetResult();
+        Assert.True(inventory.Success, "Windows Agent queue discovery failed for the installed Android IPP queue.");
+        var discoveredQueue = Assert.Single(inventory.Printers, item =>
+            string.Equals(item.QueueName, queueName, StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(PrinterOutputModeRules.UnsupportedVirtual, discoveredQueue.OutputMode);
+        Assert.Contains("IPP", discoveredQueue.DriverName, StringComparison.OrdinalIgnoreCase);
 
         using var bitmap = new SKBitmap(640, 840);
         bitmap.Erase(SKColors.White);
