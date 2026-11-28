@@ -30,7 +30,8 @@ $ErrorActionPreference = "Stop"
 $packageName = "ru.a402d.ippprinter"
 $apkSha256 = "f1e64933fa0f69306e8c5cf885e0884be7265556a8c507c89846578d1ec4caed"
 $signerSha1 = "49fa922e98eda907944076fba7aba6251b546f29"
-$queueName = "SmartPrint Android Virtual IPP CI"
+$queueSuffix = if ($env:GITHUB_RUN_ID) { "$($env:GITHUB_RUN_ID)-$($env:GITHUB_RUN_ATTEMPT)" } else { [Guid]::NewGuid().ToString("N").Substring(0, 12) }
+$queueName = "SmartPrint Android Virtual IPP CI $queueSuffix"
 $ippPort = 10631
 $ippResource = $null
 $evidenceDirectory = Join-Path (Get-Location) "artifacts/android-ipp-windows"
@@ -253,11 +254,22 @@ try {
     # spelling used by most IPP clients. Only a successful Windows IPP
     # directed-discovery result is accepted.
     Start-Service -Name Spooler
+    # Use a run-scoped local queue name so a stale queue left by a previous
+    # acceptance attempt cannot collide with this runner's new receiver.
+    $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+    if ($existingQueue) {
+        Remove-Printer -Name $queueName -ErrorAction Stop
+        $removeDeadline = [DateTimeOffset]::UtcNow.AddSeconds(20)
+        do {
+            Start-Sleep -Milliseconds 500
+            $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+        } while ($existingQueue -and [DateTimeOffset]::UtcNow -lt $removeDeadline)
+        if ($existingQueue) { throw "Windows did not remove stale IPP queue '$queueName' before discovery." }
+    }
     $ippResources = @("/p/virtual")
     $candidateFailures = @()
     $printer = $null
     foreach ($candidateResource in $ippResources) {
-        Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
         try {
             $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
             Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
@@ -270,12 +282,13 @@ try {
             $queueCreated = $true
             break
         } catch {
-            $candidateFailures += "$candidateResource => $($_.Exception.Message)"
+            $visiblePrinters = @(Get-Printer -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
+            $candidateFailures += "$candidateResource => $($_.Exception.Message); visible printers: $($visiblePrinters -join ' | ')"
             Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
         }
     }
     if (-not $queueCreated -or $null -eq $printer) {
-        throw "Windows could not discover IppVirtual through either advertised resource path: $($candidateFailures -join '; ')"
+        throw "Windows could not discover IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; ')"
     }
     $driver = Get-PrinterDriver -Name $printer.DriverName -ErrorAction Stop
     $port = Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
