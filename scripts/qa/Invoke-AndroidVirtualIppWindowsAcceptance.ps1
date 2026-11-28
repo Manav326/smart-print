@@ -130,7 +130,30 @@ try {
             Sort-Object FullName -Descending
     )
     $sdkManagerCandidate = $sdkManagerCandidates |
-        Where-Object { $_.FullName -match '(?i)[\\/]cmdline-tools[\\/]latest[\\/]bin[\\/]sdkmanager\.bat
+        Where-Object { $_.FullName -match '(?i)[\\/]cmdline-tools[\\/]latest[\\/]bin[\\/]sdkmanager\.bat$' } |
+        Select-Object -First 1
+    if (-not $sdkManagerCandidate) {
+        $sdkManagerCandidate = $sdkManagerCandidates | Select-Object -First 1
+    }
+    if (-not $sdkManagerCandidate) {
+        $pathCommand = Get-Command "sdkmanager.bat" -ErrorAction SilentlyContinue
+        $pathLocation = if ($pathCommand) { $pathCommand.Source } else { "<not on PATH>" }
+        throw "Android SDK Manager is missing under ANDROID_SDK_ROOT '$sdkRoot'. PATH resolves sdkmanager to '$pathLocation'; refusing to mix SDK installations."
+    }
+
+    $sdkManager = $sdkManagerCandidate.FullName
+    $sdkToolsBin = Split-Path -Parent $sdkManager
+    $avdManager = Join-Path $sdkToolsBin "avdmanager.bat"
+    $adb = Join-Path $sdkRoot "platform-tools\adb.exe"
+    $emulator = Join-Path $sdkRoot "emulator\emulator.exe"
+    if (-not (Test-Path -LiteralPath $sdkManager)) { throw "Android SDK Manager is missing at $sdkManager." }
+    if (-not (Test-Path -LiteralPath $avdManager)) { throw "Android AVD Manager is missing beside sdkmanager at $avdManager." }
+
+    Write-Host "Android SDK root: $sdkRoot"
+    Write-Host "Android SDK Manager: $sdkManager"
+    Write-Host "Android AVD Manager: $avdManager"
+    Write-Host "Android ADB: $adb"
+    Write-Host "Android Emulator: $emulator"
 
     # Install only the one API image and tools needed for the receiver smoke test.
     # The setup-android action has already accepted the Android SDK licenses.
@@ -455,9 +478,9 @@ try {
     $queueEvidence = [ordered]@{
         name = $printer.Name
         driver = $printer.DriverName
-        driverVersion = $driver.DriverVersion
+        driverVersion = Get-OptionalPropertyValue $driver "DriverVersion"
         port = $printer.PortName
-        portMonitor = $port.PortMonitor
+        portMonitor = Get-OptionalPropertyValue $port "PortMonitor"
         ippUrl = "http://127.0.0.1:$ippPort$ippResource"
         keepPrintedJobs = $true
     }
