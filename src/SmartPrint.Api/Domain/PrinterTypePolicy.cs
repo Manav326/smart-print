@@ -23,7 +23,6 @@ public static class PrinterTypePolicy
         if (string.IsNullOrWhiteSpace(port))
             return false;
 
-        // These Windows ports are file/prompt sinks, not connected print targets.
         return !port.Equals("FILE:", StringComparison.OrdinalIgnoreCase) &&
                !port.Equals("PORTPROMPT:", StringComparison.OrdinalIgnoreCase) &&
                !port.Equals("NUL:", StringComparison.OrdinalIgnoreCase);
@@ -49,7 +48,8 @@ public static class PrinterTypePolicy
 
     public static bool IsSelectableOutputMode(string? outputMode) =>
         string.Equals(outputMode, Physical, StringComparison.OrdinalIgnoreCase) ||
-        string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase);
+        string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(outputMode, UnsupportedVirtual, StringComparison.OrdinalIgnoreCase);
 
     public static bool UsesWindowsQueueReadiness(string? outputMode) =>
         !string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase);

@@ -17,46 +17,16 @@ public sealed class PrivatePrintingOutputPolicyTests
             allowVirtualOutput, isProduction, PrivatePrintingOutputPolicy.Physical));
     }
 
-    [Fact]
-    public void VirtualPrinterIsDeniedByDefault()
+    [Theory]
+    [InlineData("PDF_EXPORT")]
+    [InlineData("UNSUPPORTED_VIRTUAL")]
+    public void DigitalDestinationsRequireTheCentralNonProductionSetting(string outputMode)
     {
-        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: false, isProduction: false, PrivatePrintingOutputPolicy.PdfExport));
-    }
-
-    [Fact]
-    public void VirtualPrinterRequiresCentralNonProductionOptIn()
-    {
-        Assert.True(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: true, isProduction: false, PrivatePrintingOutputPolicy.PdfExport));
-        Assert.True(PrivatePrintingOutputPolicy.IsVirtualTestOutput(
-            allowVirtualOutput: true, isProduction: false, PrivatePrintingOutputPolicy.PdfExport));
-    }
-
-    [Fact]
-    public void UnsupportedVirtualQueueRequiresItsOwnShopScopedGrant()
-    {
-        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: true, isProduction: false,
-            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: false));
-        Assert.True(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: false, isProduction: false,
-            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
-        Assert.True(PrivatePrintingOutputPolicy.IsVirtualTestOutput(
-            allowVirtualOutput: false, isProduction: false,
-            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
-        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: false, isProduction: true,
-            outputMode: PrinterTypePolicy.UnsupportedVirtual, virtualTestGrantActive: true));
-    }
-
-    [Fact]
-    public void ProductionAlwaysRejectsVirtualPrinterEvenWhenSettingIsEnabled()
-    {
-        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: true, isProduction: true, PrivatePrintingOutputPolicy.PdfExport));
-        Assert.False(PrivatePrintingOutputPolicy.IsVirtualTestOutput(
-            allowVirtualOutput: true, isProduction: true, PrivatePrintingOutputPolicy.PdfExport));
+        Assert.False(PrivatePrintingOutputPolicy.IsEligible(false, false, outputMode));
+        Assert.False(PrivatePrintingOutputPolicy.IsEligible(true, true, outputMode));
+        Assert.True(PrivatePrintingOutputPolicy.IsEligible(true, false, outputMode));
+        Assert.False(PrivatePrintingOutputPolicy.IsVirtualTestOutput(false, false, outputMode));
+        Assert.True(PrivatePrintingOutputPolicy.IsVirtualTestOutput(true, false, outputMode));
     }
 
     [Theory]
@@ -64,13 +34,10 @@ public sealed class PrivatePrintingOutputPolicyTests
     [InlineData("")]
     [InlineData("UNKNOWN")]
     [InlineData("PDF")]
-    [InlineData("UNSUPPORTED_VIRTUAL")]
     public void UnknownPrinterModesAreNeverEligible(string? outputMode)
     {
-        Assert.False(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: true, isProduction: false, outputMode));
-        Assert.False(PrivatePrintingOutputPolicy.IsVirtualTestOutput(
-            allowVirtualOutput: true, isProduction: false, outputMode));
+        Assert.False(PrivatePrintingOutputPolicy.IsEligible(true, false, outputMode));
+        Assert.False(PrivatePrintingOutputPolicy.IsVirtualTestOutput(true, false, outputMode));
     }
 
     [Theory]
@@ -79,7 +46,6 @@ public sealed class PrivatePrintingOutputPolicyTests
     [InlineData("Physical")]
     public void PhysicalOutputModeComparisonIsCaseInsensitive(string outputMode)
     {
-        Assert.True(PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput: false, isProduction: true, outputMode));
+        Assert.True(PrivatePrintingOutputPolicy.IsEligible(false, true, outputMode));
     }
 }

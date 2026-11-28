@@ -246,7 +246,7 @@ public sealed class AgentPrinterSyncRulesTests
     {
         Assert.True(AgentPrinterSyncRules.ShouldAutoSelectQueue("PHYSICAL", "Ready", true, 0, 5));
         Assert.True(AgentPrinterSyncRules.ShouldAutoSelectQueue("PDF_EXPORT", "Busy", true, 0, 5));
-        Assert.False(AgentPrinterSyncRules.ShouldAutoSelectQueue("UNSUPPORTED_VIRTUAL", "Ready", true, 0, 5));
+        Assert.True(AgentPrinterSyncRules.ShouldAutoSelectQueue("UNSUPPORTED_VIRTUAL", "Ready", true, 0, 5));
         Assert.False(AgentPrinterSyncRules.ShouldAutoSelectQueue("PHYSICAL", "Offline", true, 0, 5));
         Assert.False(AgentPrinterSyncRules.ShouldAutoSelectQueue("PHYSICAL", "Ready", false, 0, 5));
         Assert.False(AgentPrinterSyncRules.ShouldAutoSelectQueue("PHYSICAL", "Ready", true, 5, 5));

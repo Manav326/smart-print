@@ -581,6 +581,10 @@ function ShopConsole({ tokens, onSignOut, dark, onToggleTheme }: { tokens: AuthT
 
   async function togglePrinter(printer: PrinterDevice, replacePrinterId?: string): Promise<boolean> {
     if (busyResourceId) return false;
+    if (printer.isPlatformHeld) {
+      setError(t("This printer is on hold by platform administration. Its current selection will be preserved until the hold is released."));
+      return false;
+    }
     const replacedPrinter = replacePrinterId
       ? printers.find(candidate => candidate.id === replacePrinterId)
       : undefined;
@@ -2210,8 +2214,7 @@ function Overview({ profile, printers, stations, printJobs, pricing, agentDevice
   const { locale } = useLocale();
   const t = (value: string, values: MessageValues = {}) => translateUiText(locale, value, values);
   const activePrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
-      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
+    printer.isActive && ["PHYSICAL", "PDF_EXPORT", "UNSUPPORTED_VIRTUAL"].includes(printer.outputMode)
   );
   const todayKey = istDateKey(new Date());
   const jobsToday = printJobs.filter(job => istDateKey(job.createdUtc) === todayKey);
@@ -2429,8 +2432,7 @@ function PrintersPage({
   const [pendingReplacement, setPendingReplacement] = useState<PrinterDevice | null>(null);
   const [replacePrinterId, setReplacePrinterId] = useState("");
   const selectedPrinters = printers.filter(printer =>
-    printer.isActive && (printer.outputMode === "PHYSICAL" || printer.outputMode === "PDF_EXPORT" ||
-      (printer.outputMode === "UNSUPPORTED_VIRTUAL" && printer.virtualTestGrantActive === true))
+    printer.isActive && ["PHYSICAL", "PDF_EXPORT", "UNSUPPORTED_VIRTUAL"].includes(printer.outputMode)
   );
   const selectablePrinters = printers.filter(printer =>
     !printer.isActive && isPrinterReadyForSelection(printer, agents)
@@ -2496,9 +2498,9 @@ function PrintersPage({
             {printers.map(printer => {
               const agent = agents.find(candidate => candidate.id === printer.agentDeviceId);
               const isUnsupportedVirtual = printer.outputMode === "UNSUPPORTED_VIRTUAL";
-              const isAuthorisedVirtual = isUnsupportedVirtual && printer.virtualTestGrantActive === true;
-              const isSelected = printer.isActive && (!isUnsupportedVirtual || isAuthorisedVirtual);
-              const canSelect = isPrinterReadyForSelection(printer, agents);
+              const isHeld = printer.isPlatformHeld === true;
+              const isSelected = printer.isActive;
+              const canSelect = !isHeld && isPrinterReadyForSelection(printer, agents);
               const agentLastSeen = agent?.lastSeenUtc ? Date.parse(agent.lastSeenUtc) : Number.NaN;
               const agentOnline = !!agent && !agent.revokedUtc && agent.status === "Online" &&
                 Number.isFinite(agentLastSeen) && agentLastSeen > Date.now() - 2 * 60 * 1000;
@@ -2507,8 +2509,8 @@ function PrintersPage({
                 (Number.isFinite(printerLastSeen) && printerLastSeen > Date.now() - 2 * 60 * 1000);
               const queueReady = printer.outputMode === "PDF_EXPORT" ||
                 printer.status === "Ready" || printer.status === "Busy";
-              const selectionBlockReason = isUnsupportedVirtual && !isAuthorisedVirtual
-                ? t("This virtual queue needs an active platform-admin test grant for this shop before it can be selected.")
+              const selectionBlockReason = isHeld
+                ? t("This printer is on hold by platform administration.")
                 : !printer.agentDeviceId
                   ? t("Keep the Print Agent connected. This Windows queue has not been linked yet.")
                   : !agentOnline
@@ -2523,8 +2525,8 @@ function PrintersPage({
                     other.agentDeviceId === printer.agentDeviceId && !!other.connectionAddress &&
                     other.connectionAddress.trim().toLowerCase() === printer.connectionAddress!.trim().toLowerCase())
                 : [];
-              const ownerStatus = isAuthorisedVirtual
-                ? t("Platform-approved virtual test queue")
+              const ownerStatus = isHeld
+                ? t("On hold by platform administration")
                 : !printer.agentDeviceId
                 ? t("Waiting for Print Agent discovery")
                 : !agentOnline
@@ -2541,15 +2543,13 @@ function PrintersPage({
                   <div className="printer-card-top">
                     <div className="printer-card-icon"><Printer size={20}/></div>
                     <Status
-                      label={t(isUnsupportedVirtual && !isAuthorisedVirtual ? "Needs approval" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? (isAuthorisedVirtual ? "Test queue approved" : "Available") : !agentOnline ? "Computer offline" : "Queue not ready")}
-                      tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
+                      label={t(isHeld ? "On hold" : isSelected ? (canSelect ? "Selected" : "Selected · not ready") : canSelect ? "Available" : !agentOnline ? "Computer offline" : "Queue not ready")}
+                      tone={isHeld ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? t("Virtual test · ") : t("Unsupported virtual · ")) : printer.outputMode === "PDF_EXPORT" ? t("PDF export · ") : printer.connectionType === "IPP" ? t("IPP printer · ") : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? t("Virtual output · ") : printer.outputMode === "PDF_EXPORT" ? t("PDF export · ") : printer.connectionType === "IPP" ? t("IPP printer · ") : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
-                    ? isAuthorisedVirtual
-                      ? t("Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment.")
-                      : t("This virtual Windows queue is visible but requires platform-admin approval for this shop before it can be selected.")
+                    ? t("Virtual Windows destination. Digital test output only; SmartPrint never records it as physical paper fulfilment.")
                     : printer.outputMode === "PDF_EXPORT"
                       ? t("Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used.")
                       : printer.connectionType === "IPP"
@@ -2562,16 +2562,37 @@ function PrintersPage({
                     <span>{printer.queueName || printer.connectionAddress || t("Connection details not reported")}</span>
                     <span>Print Agent · {agent?.deviceName || t("Not linked")}</span>
                   </div>
-                  <PrinterCapabilityPanel printer={printer}/>
-                  {isSelected && (printer.outputMode === "PHYSICAL" ||
-                    (printer.outputMode === "UNSUPPORTED_VIRTUAL" && isAuthorisedVirtual)) && (
-                    <PrinterDiagnosticControls
-                      printer={printer}
-                      token={token}
-                      disabled={!canSelect || !agentOnline}
-                      onOpenAgent={onOpenAgent}
-                    />
-                  )}
+                  <details className="printer-card-details">
+                    <summary>{t("Details")}</summary>
+                    <div className="printer-expanded-details">
+                      <div className="printer-expanded-facts">
+                        <div><span>{t("Output type")}</span><strong>{isUnsupportedVirtual ? t("Virtual test output · no physical fulfilment") : printer.outputMode === "PDF_EXPORT" ? t("PDF export") : t("Physical print output")}</strong></div>
+                        <div><span>{t("Windows queue")}</span><strong>{printer.queueName || t("Not reported")}</strong></div>
+                        <div><span>{t("Connection port")}</span><strong>{printer.connectionAddress || t("Not reported")}</strong></div>
+                        <div><span>{t("Print Agent")}</span><strong>{agent?.deviceName || t("Not linked")}</strong></div>
+                        <div><span>{t("Agent status")}</span><strong>{agentOnline ? t("Online") : t("Offline")}</strong></div>
+                        <div><span>{t("Last discovered")}</span><strong>{printer.lastSeenUtc ? formatCapabilityTimestamp(printer.lastSeenUtc) : t("Not reported")}</strong></div>
+                        <div><span>{t("Windows queue status")}</span><strong>{printer.status}</strong></div>
+                        <div><span>{t("Default Windows queue")}</span><strong>{printer.isDefault ? t("Yes") : t("No")}</strong></div>
+                      </div>
+                      {isHeld && printer.platformHoldReason && (
+                        <div className="printer-hold-notice">
+                          <strong>{t("Platform hold")}</strong>
+                          <span>{printer.platformHoldReason}</span>
+                          {printer.platformHeldUtc && <small>{t("Placed on hold")} · {formatCapabilityTimestamp(printer.platformHeldUtc)}</small>}
+                        </div>
+                      )}
+                      <PrinterCapabilityPanel printer={printer}/>
+                      {isSelected && !isHeld && (printer.outputMode === "PHYSICAL" || isUnsupportedVirtual) && (
+                        <PrinterDiagnosticControls
+                          printer={printer}
+                          token={token}
+                          disabled={!canSelect || !agentOnline}
+                          onOpenAgent={onOpenAgent}
+                        />
+                      )}
+                    </div>
+                  </details>
                   {possibleDuplicates.length > 0 && (
                     <div className="printer-duplicate-warning" role="note">
                       <strong>{t("Same Windows port")}</strong>
@@ -2579,13 +2600,13 @@ function PrintersPage({
                     </div>
                   )}
                   <div className="printer-card-footer">
-                    <span className={isSelected ? "enabled-label" : "disabled-label"}>
-                      {t(isSelected ? "Selected for new jobs" : isUnsupportedVirtual && !isAuthorisedVirtual ? "Visible · awaiting approval" : "Not selected")}
+                    <span className={isHeld ? "disabled-label" : isSelected ? "enabled-label" : "disabled-label"}>
+                      {t(isHeld ? (isSelected ? "Selected · on hold" : "On hold") : isSelected ? "Selected for new jobs" : "Not selected")}
                     </span>
                     {isSelected ? (
                       <button
                         className="subtle-button"
-                        disabled={!!busyResourceId}
+                        disabled={!!busyResourceId || isHeld}
                         onClick={() => void onToggle(printer)}
                       >
                         {busyResourceId === printer.id ? <span className="button-spinner"/> : t("Deselect")}
@@ -2606,8 +2627,8 @@ function PrintersPage({
                         )}
                         <button
                           className="subtle-button"
-                          disabled={!!busyResourceId || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
-                          title={!canSelect ? selectionBlockReason : !canUseSelection ? t("Shop plan access must be confirmed before selecting a printer.") : quotaFull && !canReplaceSelection ? t("No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot.") : undefined}
+                          disabled={!!busyResourceId || isHeld || !canSelect || !canUseSelection || (quotaFull && !canReplaceSelection)}
+                          title={isHeld ? selectionBlockReason : !canSelect ? selectionBlockReason : !canUseSelection ? t("Shop plan access must be confirmed before selecting a printer.") : quotaFull && !canReplaceSelection ? t("No other ready queue is available to replace a selected printer. Connect and ready another printer, or upgrade your plan for another slot.") : undefined}
                           onClick={() => {
                             if (!canSelect || !canUseSelection) return;
                             if (quotaFull && canReplaceSelection) {
@@ -3738,7 +3759,7 @@ function PrintQueuePage({ jobs, printers, agentDevices, searchQuery, loadingBatc
                   <strong>{batchPrinterConflict?"Multiple printer assignments":batchAssignmentIncomplete?(assignedPrinterIds.length?"Choose one printer":"Printer not assigned"):batchPrinterDisplayName}</strong>
                   <small>{lockedPrinterIds.length===1?"Locked to the printer already used for this batch":waiting.length===0?"No files awaiting review":`${waiting.length} ${waiting.length===1?"file":"files"} awaiting review`}</small>
                   {batchPrinter?.outputMode==="PDF_EXPORT"&&<small>{t("Saves a PDF, not paper")}</small>}
-                  {batchPrinter?.outputMode==="UNSUPPORTED_VIRTUAL"&&batchPrinter.virtualTestGrantActive!==true&&<small className="queue-batch-printer-lock">{t("This virtual queue needs an active platform-admin test grant for this shop before it can receive jobs.")}</small>}
+                  {batchPrinter?.isPlatformHeld&&<small className="queue-batch-printer-lock">{t("This printer is on hold by platform administration.")}</small>}
                 </>}
                 {assignmentJob&&<select
                   aria-label={t("Assign one printer for all files in batch")}
@@ -4286,7 +4307,7 @@ function StationModal({ busy, printers, onClose, onSubmit }: {
   return <Modal title={t("Create a QR station")} subtitle={t("Give customers a clear entry point for this counter or printer.")} onClose={onClose}>
     <form className="modal-form" onSubmit={e=>{e.preventDefault();onSubmit({displayName,printerDeviceId:printerDeviceId||undefined});}}>
       <label>{t("Station name")}<input value={displayName} onChange={e=>setDisplayName(e.target.value)} placeholder={t("e.g. Front counter")} required maxLength={120}/></label>
-      <label>{t("Default printer")} <span className="field-hint">{t("Optional · only approved virtual test queues are included")}</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">{t("No default printer")}</option>{printers.filter(printer=>printer.isActive&&(printer.outputMode!=="UNSUPPORTED_VIRTUAL"||printer.virtualTestGrantActive===true)).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
+      <label>{t("Default printer")} <span className="field-hint">{t("Optional · choose an available selected queue")}</span><select value={printerDeviceId} onChange={e=>setPrinterDeviceId(e.target.value)}><option value="">{t("No default printer")}</option>{printers.filter(printer=>printer.isActive&&!printer.isPlatformHeld).map(printer=><option key={printer.id} value={printer.id}>{printer.outputMode==="PDF_EXPORT"?"Microsoft Print to PDF · ":printer.outputMode==="UNSUPPORTED_VIRTUAL"?"Virtual output · ":""}{printer.displayName} · {printer.manufacturer}</option>)}</select></label>
       <div className="modal-note"><QrCode size={15}/> The QR contains a public station identifier, not a permanent print authorisation. Every scan creates an expiring customer session. Only enabled printers are offered as defaults; you can also assign a printer to each paid job in the queue.</div>
       <div className="modal-actions"><button type="button" className="secondary-button" onClick={onClose}>{t("Cancel")}</button><button className="primary-button" disabled={busy||!displayName.trim()}>{busy?<span className="button-spinner"/>:"Create station"}</button></div>
     </form>

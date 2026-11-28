@@ -28,6 +28,7 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
     public DbSet<ShopSubscriptionPayment> ShopSubscriptionPayments => Set<ShopSubscriptionPayment>();
     public DbSet<RazorpayWebhookEvent> RazorpayWebhookEvents => Set<RazorpayWebhookEvent>();
     public DbSet<PrinterDevice> PrinterDevices => Set<PrinterDevice>();
+    public DbSet<PrinterPlatformAccessAudit> PrinterPlatformAccessAudits => Set<PrinterPlatformAccessAudit>();
     public DbSet<VirtualPrinterTestGrant> VirtualPrinterTestGrants => Set<VirtualPrinterTestGrant>();
     public DbSet<QrStation> QrStations => Set<QrStation>();
     public DbSet<CustomerPrintSession> CustomerPrintSessions => Set<CustomerPrintSession>();
@@ -359,7 +360,13 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
         modelBuilder.Entity<PrinterDevice>(entity =>
         {
             entity.ToTable("PrinterDevices", table =>
-                table.HasCheckConstraint("CK_PrinterDevices_OutputMode", "\"OutputMode\" IN ('PHYSICAL', 'PDF_EXPORT', 'UNSUPPORTED_VIRTUAL')"));
+            {
+                table.HasCheckConstraint("CK_PrinterDevices_OutputMode", "\"OutputMode\" IN ('PHYSICAL', 'PDF_EXPORT', 'UNSUPPORTED_VIRTUAL')");
+                table.HasCheckConstraint(
+                    "CK_PrinterDevices_PlatformHold",
+                    "(\"IsPlatformHeld\" = FALSE AND \"PlatformHoldReason\" IS NULL AND \"PlatformHeldByUserId\" IS NULL AND \"PlatformHeldUtc\" IS NULL) OR " +
+                    "(\"IsPlatformHeld\" = TRUE AND \"PlatformHoldReason\" IS NOT NULL AND length(trim(\"PlatformHoldReason\")) >= 5 AND \"PlatformHeldByUserId\" IS NOT NULL AND \"PlatformHeldUtc\" IS NOT NULL)");
+            });
             entity.HasKey(x => x.Id);
             entity.Property(x => x.DisplayName).HasMaxLength(160).IsRequired();
             entity.Property(x => x.IsDefault).HasDefaultValue(false);
@@ -368,6 +375,12 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
             entity.Property(x => x.ConnectionType).HasMaxLength(24).IsRequired();
             entity.Property(x => x.OutputMode).HasMaxLength(20).IsRequired();
             entity.Property(x => x.IdentityFingerprint).HasMaxLength(64);
+            entity.Property(x => x.IsPlatformHeld).HasDefaultValue(false);
+            entity.Property(x => x.PlatformHoldReason).HasMaxLength(500);
+            entity.HasIndex(x => new { x.TenantId, x.IsPlatformHeld });
+            entity.HasOne<AppUser>().WithMany()
+                .HasForeignKey(x => x.PlatformHeldByUserId)
+                .OnDelete(DeleteBehavior.Restrict);
             entity.Property(x => x.ConnectionAddress).HasMaxLength(255);
             entity.Property(x => x.QueueName).HasMaxLength(160);
             entity.Property(x => x.CapabilitiesJson).HasColumnType("jsonb").IsRequired();
@@ -382,6 +395,27 @@ public sealed class SmartPrintDbContext(DbContextOptions<SmartPrintDbContext> op
                 .HasPrincipalKey(x => new { x.TenantId, x.Id })
                 .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<PrinterPlatformAccessAudit>(entity =>
+        {
+            entity.ToTable("PrinterPlatformAccessAudits", table =>
+                table.HasCheckConstraint("CK_PrinterPlatformAccessAudits_Action", "\"Action\" IN ('HOLD', 'RELEASE')"));
+            entity.HasKey(x => x.Id);
+            entity.Property(x => x.Action).HasMaxLength(16).IsRequired();
+            entity.Property(x => x.Reason).HasMaxLength(500).IsRequired();
+            entity.Property(x => x.IdentityFingerprint).HasMaxLength(64);
+            entity.HasIndex(x => new { x.TenantId, x.PrinterDeviceId, x.CreatedUtc });
+            entity.HasIndex(x => x.ActorUserId);
+            entity.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne<PrinterDevice>().WithMany()
+                .HasForeignKey(x => new { x.TenantId, x.PrinterDeviceId })
+                .HasPrincipalKey(x => new { x.TenantId, x.Id })
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne<AppUser>().WithMany()
+                .HasForeignKey(x => x.ActorUserId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
 
         modelBuilder.Entity<VirtualPrinterTestGrant>(entity =>

@@ -1,9 +1,9 @@
 namespace SmartPrint.Api.Domain;
 
 /// <summary>
-/// Private Printing may use PDF Export only when the central non-production
-/// setting is enabled. Other virtual Windows queues require their own current
-/// shop-scoped grant. Neither virtual path is physical fulfilment.
+/// Private Printing keeps its protected-source guarantees. Physical printers
+/// are allowed; digital destinations require the central non-production
+/// setting and are never represented as physical fulfilment.
 /// </summary>
 public static class PrivatePrintingOutputPolicy
 {
@@ -11,25 +11,21 @@ public static class PrivatePrintingOutputPolicy
     public const string PdfExport = "PDF_EXPORT";
     public const string TestVirtual = "TEST_VIRTUAL";
 
-    public static bool IsEligible(
-        bool allowVirtualOutput,
-        bool isProduction,
-        string? outputMode,
-        bool virtualTestGrantActive = false)
+    public static bool IsEligible(bool allowVirtualOutput, bool isProduction, string? outputMode)
     {
-        if (string.Equals(outputMode, Physical, StringComparison.OrdinalIgnoreCase)) return true;
-        if (string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase))
-            return !isProduction && virtualTestGrantActive;
-        return !isProduction && allowVirtualOutput &&
-            string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase);
+        if (string.Equals(outputMode, Physical, StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        if (isProduction || !allowVirtualOutput)
+            return false;
+
+        return string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase) ||
+               string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase);
     }
 
-    public static bool IsVirtualTestOutput(
-        bool allowVirtualOutput,
-        bool isProduction,
-        string? outputMode,
-        bool virtualTestGrantActive = false) =>
+    public static bool IsVirtualTestOutput(bool allowVirtualOutput, bool isProduction, string? outputMode) =>
         !isProduction &&
-        ((allowVirtualOutput && string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase)) ||
-         (virtualTestGrantActive && string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase)));
+        allowVirtualOutput &&
+        (string.Equals(outputMode, PdfExport, StringComparison.OrdinalIgnoreCase) ||
+         string.Equals(outputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase));
 }

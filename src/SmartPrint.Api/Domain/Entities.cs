@@ -214,8 +214,13 @@ public sealed class PrinterDevice
     public string ConnectionType { get; set; } = "WindowsQueue";
     public string OutputMode { get; set; } = "PHYSICAL";
     // SHA-256 of the paired Agent + Windows queue, driver and port identity.
-    // Any identity change invalidates an existing virtual-printer test grant.
+    // Captured in platform hold audit records for reliable queue identification.
     public string? IdentityFingerprint { get; set; }
+    // Platform access is an explicit hold; shop selection remains independent.
+    public bool IsPlatformHeld { get; set; }
+    public string? PlatformHoldReason { get; set; }
+    public Guid? PlatformHeldByUserId { get; set; }
+    public DateTimeOffset? PlatformHeldUtc { get; set; }
     public string? ConnectionAddress { get; set;}
     public string? QueueName { get; set; }
     public string CapabilitiesJson { get; set; } = "{}";
@@ -224,6 +229,19 @@ public sealed class PrinterDevice
     public DateTimeOffset? LastSeenUtc { get; set; }
     public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset UpdatedUtc { get; set; } = DateTimeOffset.UtcNow;
+}
+
+
+public sealed class PrinterPlatformAccessAudit
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid TenantId { get; set; }
+    public Guid PrinterDeviceId { get; set; }
+    public string Action { get; set; } = string.Empty;
+    public string Reason { get; set; } = string.Empty;
+    public string? IdentityFingerprint { get; set; }
+    public Guid ActorUserId { get; set; }
+    public DateTimeOffset CreatedUtc { get; set; } = DateTimeOffset.UtcNow;
 }
 
 public sealed class VirtualPrinterTestGrant
