@@ -74,7 +74,7 @@ class MainActivityInstrumentedTest {
             } catch (failure: androidx.test.espresso.NoMatchingViewException) {
                 lastFailure = failure
                 // The hosted emulator can occasionally turn a delayed tap into a
-                // long-press while the app is rendering its blur-backed navigation.
+                // long-press while the app is rendering its navigation chrome.
                 // Retry the real menu tap; keep the destination assertion mandatory.
                 Thread.sleep(250)
             }
