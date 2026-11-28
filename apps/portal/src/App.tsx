@@ -2537,7 +2537,7 @@ function PrintersPage({
                         ? t("Windows queue is ready")
                         : getPrinterQueueStatusKind(printer.status) === "busy"
                           ? t("Windows queue is busy processing jobs")
-                          : \`Windows queue reports \${printer.status.toLowerCase()}\`;
+                          : `Windows queue reports ${printer.status.toLowerCase()}`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">
