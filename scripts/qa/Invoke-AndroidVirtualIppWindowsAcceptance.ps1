@@ -78,6 +78,7 @@ $report = [ordered]@{
         expectedResource = "/p/virtual"
     }
     windowsQueue = $null
+    queueReused = $false
     agentTestExitCode = $null
     failure = $null
     limitations = @(
@@ -263,68 +264,129 @@ try {
         throw "IppVirtual did not expose its documented IPP listener on TCP $ippPort after launch."
     }
 
-    # Register the documented receiver resource path directly. This stage
-    # validates IPP transport and the real Windows spooler/Agent path only;
-    # it does NOT claim to validate mDNS/DNS-SD automatic discovery.
+    # Register the documented receiver resource path directly. First reconcile
+    # the Windows spooler inventory: Add-Printer -IppURL can report
+    # ERROR_PRINTER_ALREADY_EXISTS even when the generated CI queue name differs.
+    # Reuse only a queue whose IPP endpoint can be tied to this live receiver.
     Start-Service -Name Spooler
-    # The queue name is unique to this workflow attempt. A collision is an
-    # invariant violation: preserve the existing queue and fail with evidence.
-    # Never delete a queue just to make a test pass.
-    $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
-    if ($existingQueue) {
-        throw "Refusing to overwrite pre-existing queue '$queueName' (driver '$($existingQueue.DriverName)', port '$($existingQueue.PortName)')."
-    }
     $ippResources = @("/p/virtual")
     $candidateFailures = @()
     $printer = $null
-    foreach ($candidateResource in $ippResources) {
+    $queueReused = $false
+    $queueOwned = $false
+
+    function Get-VisiblePrinterInventory {
+        $items = @()
+        try { $items += @(Get-Printer -Full -ErrorAction Stop) } catch { $items += @(Get-Printer -ErrorAction SilentlyContinue) }
         try {
+            foreach ($item in @(Get-CimInstance -ClassName Win32_Printer -ErrorAction Stop)) {
+                if (-not ($items | Where-Object { $_.Name -eq $item.Name })) {
+                    $items += [pscustomobject]@{
+                        Name = $item.Name; DriverName = $item.DriverName; PortName = $item.PortName
+                        PrinterStatus = $item.PrinterStatus; WorkOffline = $item.WorkOffline
+                        DetectedBy = "Win32_Printer"
+                    }
+                }
+            }
+        } catch { Write-Warning "Win32 printer inventory query failed: $($_.Exception.Message)" }
+        return @($items)
+    }
+
+    function Test-QueueTargetsLiveReceiver($candidatePrinter, [string]$candidateUrl) {
+        if (-not $candidatePrinter -or $candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") { return $false }
+        $candidatePort = Get-PrinterPort -Name $candidatePrinter.PortName -ErrorAction SilentlyContinue
+        if (-not $candidatePort) { return $false }
+        $portText = @(
+            $candidatePort.Name, $candidatePort.PrinterHostAddress,
+            $candidatePort.Description, $candidatePort.PortMonitor
+        ) -join " "
+        # A local IPP port may retain the endpoint as a port name or host field.
+        return ($portText -match [regex]::Escape("127.0.0.1") -and
+            ($portText -match [regex]::Escape("$ippPort") -or $portText -match "IPP"))
+    }
+
+    $inventory = Get-VisiblePrinterInventory
+    foreach ($candidateResource in $ippResources) {
+        $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
+        # Exact-name reuse is preferred; endpoint-backed ports are also checked
+        # because Windows may choose the printer name advertised by the receiver.
+        $matches = @($inventory | Where-Object {
+            $_.Name -eq $queueName -or $_.Name -match "(?i)IppVirtual|virtual" -or
+            $_.PortName -match "(?i)ipp|10631"
+        })
+        foreach ($match in $matches) {
+            $candidatePrinter = Get-Printer -Name $match.Name -ErrorAction SilentlyContinue
+            if ($candidatePrinter -and (Test-QueueTargetsLiveReceiver $candidatePrinter $candidateUrl)) {
+                $printer = $candidatePrinter
+                $queueName = $candidatePrinter.Name
+                $ippResource = $candidateResource
+                $queueReused = $true
+                Write-Host "Reusing existing Windows IPP queue '$queueName' for $candidateUrl."
+                break
+            }
+        }
+        if ($printer) { break }
+    }
+
+    if (-not $printer) {
+        foreach ($candidateResource in $ippResources) {
             $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
-            Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
-            # Add-Printer succeeded, so this test owns the queue and finally
-            # may clean up this exact queue name (never its shared port/driver).
-            $queueCreated = $true
-            $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
-            if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") {
-                throw "Windows selected unexpected driver '$($candidatePrinter.DriverName)'."
+            try {
+                Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
+                $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
+                if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") {
+                    throw "Windows selected unexpected driver '$($candidatePrinter.DriverName)'."
+                }
+                $printer = $candidatePrinter
+                $ippResource = $candidateResource
+                $queueCreated = $true
+                $queueOwned = $true
+                break
+            } catch {
+                $errorRecord = $_
+                $exception = $errorRecord.Exception
+                $hresult = '0x{0:X8}' -f $exception.HResult
+                $nativeCode = $null
+                if ($exception -is [System.ComponentModel.Win32Exception]) { $nativeCode = $exception.NativeErrorCode }
+
+                # Add-Printer may race a spooler/device-enumeration registration.
+                # Refresh both inventories and reuse only after proving the live endpoint.
+                Start-Sleep -Seconds 2
+                $inventory = Get-VisiblePrinterInventory
+                foreach ($match in @($inventory | Where-Object {
+                    $_.Name -eq $queueName -or $_.Name -match "(?i)IppVirtual|virtual" -or
+                    $_.PortName -match "(?i)ipp|10631"
+                })) {
+                    $candidatePrinter = Get-Printer -Name $match.Name -ErrorAction SilentlyContinue
+                    if ($candidatePrinter -and (Test-QueueTargetsLiveReceiver $candidatePrinter $candidateUrl)) {
+                        $printer = $candidatePrinter
+                        $queueName = $candidatePrinter.Name
+                        $ippResource = $candidateResource
+                        $queueReused = $true
+                        Write-Host "Add-Printer reported a duplicate; verified and reused existing queue '$queueName'."
+                        break
+                    }
+                }
+                $visiblePrinters = @($inventory | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
+                $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.Description)] host=$($_.PrinterHostAddress) monitor=$($_.PortMonitor)" })
+                $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+                $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
+                $diagnostic = [ordered]@{
+                    resource = $candidateResource; url = $candidateUrl
+                    message = $exception.Message; exceptionType = $exception.GetType().FullName
+                    hresult = $hresult; nativeErrorCode = $nativeCode
+                    fullyQualifiedErrorId = $errorRecord.FullyQualifiedErrorId
+                    category = "$($errorRecord.CategoryInfo)"; targetObject = "$($errorRecord.TargetObject)"
+                    verifiedReuse = [bool]$printer
+                    printers = $visiblePrinters; ports = $visiblePorts
+                }
+                $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8
+                if ($printer) { break }
             }
-            $printer = $candidatePrinter
-            $ippResource = $candidateResource
-            break
-        } catch {
-            $errorRecord = $_
-            $exception = $errorRecord.Exception
-            $hresult = '0x{0:X8}' -f $exception.HResult
-            $nativeCode = $null
-            if ($exception -is [System.ComponentModel.Win32Exception]) {
-                $nativeCode = $exception.NativeErrorCode
-            }
-            $visiblePrinters = @(Get-Printer -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
-            $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.Description)] monitor=$($_.PortMonitor)" })
-            $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
-            $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); partialQueue=$([bool]$partialQueue); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
-            $diagnostic = [ordered]@{
-                resource = $candidateResource
-                url = $candidateUrl
-                message = $exception.Message
-                exceptionType = $exception.GetType().FullName
-                hresult = $hresult
-                nativeErrorCode = $nativeCode
-                fullyQualifiedErrorId = $errorRecord.FullyQualifiedErrorId
-                category = "$($errorRecord.CategoryInfo)"
-                targetObject = "$($errorRecord.TargetObject)"
-                scriptStackTrace = $errorRecord.ScriptStackTrace
-                partialQueue = if ($partialQueue) { [ordered]@{ name=$partialQueue.Name; driver=$partialQueue.DriverName; port=$partialQueue.PortName } } else { $null }
-                printers = $visiblePrinters
-                ports = $visiblePorts
-            }
-            $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8
-            # If Add-Printer failed, ownership is unproven. Do not remove a
-            # queue that may have been created concurrently by another actor.
-            if ($partialQueue) { break }
         }
     }
-    if (-not $queueCreated -or $null -eq $printer) {
+
+    if ($null -eq $printer) {
         $printEvents = @()
         foreach ($logName in @("Microsoft-Windows-PrintService/Admin", "Microsoft-Windows-PrintService/Operational")) {
             try {
@@ -356,6 +418,7 @@ try {
     $queueEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $queueEvidencePath -Encoding UTF8
     $report.android.acceleration = $acceleration
     $report.windowsQueue = $queueEvidence
+    $report.queueReused = $queueReused
 
     $env:SMARTPRINT_RUN_ANDROID_IPP_INTEGRATION = "1"
     $env:SMARTPRINT_ANDROID_IPP_QUEUE = $queueName
@@ -383,7 +446,7 @@ finally {
     $report.android.acceleration = $acceleration
 
     try {
-        if ($queueCreated) {
+        if ($queueOwned -and $queueCreated) {
             $printer = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
             if ($printer) {
                 $report.windowsQueue = [ordered]@{
