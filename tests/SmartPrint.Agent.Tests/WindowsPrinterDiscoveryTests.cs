@@ -452,14 +452,8 @@ public sealed class WindowsPrinterDiscoveryTests
         if (!OperatingSystem.IsWindows())
             return;
 
-        const string wmiJson = """[
-            {"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Unknown","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},
-            {"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}
-        ]""";
-        const string winspoolJson = """[
-            {"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Busy","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},
-            {"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Offline","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}
-        ]""";
+        const string wmiJson = """[{"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Unknown","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},{"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        const string winspoolJson = """[{"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Busy","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},{"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Offline","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
         var runner = new SequenceChildProcessRunner(
             new AgentChildProcessResult(0, wmiJson, string.Empty, false),
             new AgentChildProcessResult(0, winspoolJson, string.Empty, false));
