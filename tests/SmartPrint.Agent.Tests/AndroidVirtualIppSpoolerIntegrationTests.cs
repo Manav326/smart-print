@@ -87,7 +87,7 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
             bytes.LongLength,
             1,
             1,
-            "Colour",
+            "Mono",
             "A4",
             false,
             "INR",
