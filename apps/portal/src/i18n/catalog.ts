@@ -163,6 +163,8 @@ const english = {
   "Nothing printed": "Nothing printed",
   "Printed correctly": "Printed correctly",
   "No output received": "No output received",
+  "1 test file": "1 test file",
+  "1 copy": "1 copy",
   "This test is taking longer than expected. Reconnect the Windows computer so the pending job can report its final result before another test.": "This test is taking longer than expected. Reconnect the Windows computer so the pending job can report its final result before another test.",
   "Open Print Agent": "Open Print Agent",
 } as const;
@@ -331,6 +333,8 @@ const hindi: Record<keyof typeof english, string> = {
   "Nothing printed": "कुछ भी प्रिंट नहीं हुआ",
   "Printed correctly": "सही प्रिंट हुआ",
   "No output received": "कोई आउटपुट नहीं मिला",
+  "1 test file": "1 टेस्ट फ़ाइल",
+  "1 copy": "1 कॉपी",
   "This test is taking longer than expected. Reconnect the Windows computer so the pending job can report its final result before another test.": "इस टेस्ट में अपेक्षा से अधिक समय लग रहा है। दूसरा टेस्ट शुरू करने से पहले Windows कंप्यूटर फिर से जोड़ें ताकि लंबित जॉब अपना अंतिम परिणाम भेज सके।",
   "Open Print Agent": "Print Agent खोलें",
 };
@@ -499,6 +503,8 @@ const hinglish: Record<keyof typeof english, string> = {
   "Nothing printed": "Kuch print nahi hua",
   "Printed correctly": "Sahi print hua",
   "No output received": "Koi output receive nahi hua",
+  "1 test file": "1 test file",
+  "1 copy": "1 copy",
   "This test is taking longer than expected. Reconnect the Windows computer so the pending job can report its final result before another test.": "Test mein zyada time lag raha hai. Dusra test shuru karne se pehle Windows computer reconnect karein taaki pending job final result bhej sake.",
   "Open Print Agent": "Print Agent kholein",
 };
