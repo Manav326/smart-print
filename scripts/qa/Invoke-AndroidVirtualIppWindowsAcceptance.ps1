@@ -40,6 +40,11 @@ $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:AND
 $avdName = "SmartPrintIppVirtualApi35"
 $emulatorProcess = $null
 $queueCreated = $false
+$queueOwned = $false
+$queueReused = $false
+$queueOriginalKeepPrintedJobs = $null
+$queueOriginalKeepPrintedJobsKnown = $false
+$queueKeepPrintedJobsChanged = $false
 $forwardCreated = $false
 $testExitCode = $null
 $failure = $null
@@ -307,7 +312,6 @@ try {
     $candidateFailures = @()
     $printer = $null
     $queueReused = $false
-    $queueOwned = $false
 
     function Get-VisiblePrinterInventory {
         $items = @()
@@ -515,6 +519,24 @@ try {
         $printEvents | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8
         throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService events saved to $eventEvidencePath"
     }
+    $queueState = Get-Printer -Name $printer.Name -ErrorAction Stop
+    $keepPrintedJobsValue = Get-OptionalPropertyValue $queueState "KeepPrintedJobs"
+    if ($null -eq $keepPrintedJobsValue) {
+        throw "Windows did not expose the KeepPrintedJobs setting for queue '$($printer.Name)'; refusing an unreliable terminal-job assertion."
+    }
+
+    $queueOriginalKeepPrintedJobs = [bool]$keepPrintedJobsValue
+    $queueOriginalKeepPrintedJobsKnown = $true
+    if (-not $queueOriginalKeepPrintedJobs) {
+        Set-Printer -Name $printer.Name -KeepPrintedJobs $true -ErrorAction Stop
+        $queueKeepPrintedJobsChanged = $true
+    }
+
+    $printer = Get-Printer -Name $printer.Name -ErrorAction Stop
+    if (-not [bool](Get-OptionalPropertyValue $printer "KeepPrintedJobs")) {
+        throw "Windows did not retain completed jobs for queue '$($printer.Name)'; the terminal spooler assertion would be unreliable."
+    }
+
     $driver = Get-PrinterDriver -Name $printer.DriverName -ErrorAction Stop
     $port = Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
     if ([string]::IsNullOrWhiteSpace($printer.PortName)) {
@@ -528,7 +550,8 @@ try {
         port = $printer.PortName
         portMonitor = (Get-OptionalPropertyValue $port "PortMonitor")
         ippUrl = "http://127.0.0.1:$ippPort$ippResource"
-        keepPrintedJobs = $true
+        keepPrintedJobs = [bool](Get-OptionalPropertyValue $printer "KeepPrintedJobs")
+        originalKeepPrintedJobs = $queueOriginalKeepPrintedJobs
     }
     $queueEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $queueEvidencePath -Encoding UTF8
     $report.android.acceleration = $acceleration
@@ -560,6 +583,18 @@ finally {
     $report.agentTestExitCode = $testExitCode
     if ($null -ne $failure) { $report.failure = $failure }
     $report.android.acceleration = $acceleration
+
+    try {
+        if ($queueReused -and $queueKeepPrintedJobsChanged -and $queueOriginalKeepPrintedJobsKnown) {
+            $reusedQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+            if ($reusedQueue) {
+                Set-Printer -Name $queueName -KeepPrintedJobs $queueOriginalKeepPrintedJobs -ErrorAction Stop
+                Write-Host "Restored the reused queue '$queueName' KeepPrintedJobs setting to $queueOriginalKeepPrintedJobs."
+            }
+        }
+    } catch {
+        Write-Warning "Could not restore the reused queue's original KeepPrintedJobs setting: $($_.Exception.Message)"
+    }
 
     try {
         if ($queueOwned -and $queueCreated) {
