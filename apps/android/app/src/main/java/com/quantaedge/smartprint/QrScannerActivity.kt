@@ -188,7 +188,7 @@ class QrScannerActivity : AppCompatActivity() {
     private fun buildScannerUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = SmartPrintGlass.backdrop(this@QrScannerActivity)
+            background = ColorDrawable(getColor(R.color.qp_surface))
             setPadding(dp(18), 0, dp(18), 0)
         }
 
@@ -224,7 +224,7 @@ class QrScannerActivity : AppCompatActivity() {
         ))
 
         previewHost = FrameLayout(this).apply {
-            background = SmartPrintGlass.surface(this@QrScannerActivity, 22)
+            background = GradientDrawable().apply { setColor(getColor(R.color.qp_card)); cornerRadius = dp(22).toFloat(); setStroke(dp(1), getColor(R.color.qp_outline)) }
             clipToOutline = true
         }
         previewView = PreviewView(this).apply {
@@ -242,7 +242,7 @@ class QrScannerActivity : AppCompatActivity() {
             13, getColor(R.color.qp_muted), false
         ).apply {
             gravity = Gravity.CENTER
-            background = SmartPrintGlass.surface(this@QrScannerActivity, 15, R.color.qp_glass_inset)
+            background = GradientDrawable().apply { setColor(getColor(R.color.qp_surface)); cornerRadius = dp(15).toFloat(); setStroke(dp(1), getColor(R.color.qp_outline)) }
             setPadding(dp(12), dp(10), dp(12), dp(12))
         }
         root.addView(statusText, LinearLayout.LayoutParams(
@@ -261,8 +261,8 @@ class QrScannerActivity : AppCompatActivity() {
             iconTint = ColorStateList.valueOf(getColor(R.color.qp_primary))
             iconGravity = MaterialButton.ICON_GRAVITY_TEXT_START
             iconPadding = dp(10)
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
-            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_surface))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
             strokeWidth = dp(1)
             setTextColor(getColor(R.color.qp_text))
             contentDescription = "Choose a QR from a photo or screenshot"
@@ -282,8 +282,8 @@ class QrScannerActivity : AppCompatActivity() {
             isAllCaps = false
             cornerRadius = dp(16)
             setTextColor(getColor(R.color.qp_text))
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
-            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_surface))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
             strokeWidth = dp(1)
             isEnabled = false
             setOnClickListener { toggleTorch() }

@@ -70,8 +70,6 @@ import com.google.android.material.navigationrail.NavigationRailView
 import com.google.android.material.button.MaterialButton
 import com.google.android.material.card.MaterialCardView
 import com.google.android.material.bottomsheet.BottomSheetDialog
-import eightbitlab.com.blurview.BlurTarget
-import eightbitlab.com.blurview.BlurView
 import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions
@@ -129,7 +127,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var toolbar: MaterialToolbar
     private lateinit var content: FrameLayout
     private lateinit var navigation: NavigationBarView
-    private lateinit var bottomGlass: BlurView
+    private lateinit var bottomNavigationSurface: FrameLayout
     private var shopDisplayName: String? = null
     private var shopLogoUrl: String? = null
     private var shopAccentColor: String? = null
@@ -718,22 +716,19 @@ class MainActivity : AppCompatActivity() {
     private fun buildLayout() {
         window.statusBarColor = getColor(R.color.qp_surface)
         window.navigationBarColor = getColor(R.color.qp_surface)
-        val backdrop = SmartPrintGlass.backdrop(this)
         val root = FrameLayout(this).apply {
             id = R.id.smartprint_native_root
             clipChildren = false
             clipToPadding = false
-            background = backdrop
+            setBackgroundColor(getColor(R.color.qp_surface))
         }
 
-        val blurTarget = BlurTarget(this)
         content = FrameLayout(this).apply {
             clipToPadding = false
             setPadding(0, dp(64), 0, dp(76))
             setBackgroundColor(android.graphics.Color.TRANSPARENT)
         }
-        blurTarget.addView(content, FrameLayout.LayoutParams(-1, -1))
-        root.addView(blurTarget, FrameLayout.LayoutParams(-1, -1))
+        root.addView(content, FrameLayout.LayoutParams(-1, -1))
 
         toolbar = MaterialToolbar(this).apply {
             title = ""
@@ -865,17 +860,19 @@ class MainActivity : AppCompatActivity() {
             ))
         }
 
-        val topGlass = BlurView(this).apply {
-            foreground = SmartPrintGlass.edge(this@MainActivity)
+        val topBarSurface = FrameLayout(this).apply {
+            setBackgroundColor(getColor(R.color.qp_card))
+            elevation = dp(2).toFloat()
             addView(toolbar, FrameLayout.LayoutParams(-1, dp(56), Gravity.BOTTOM))
         }
-        root.addView(topGlass, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
+        root.addView(topBarSurface, FrameLayout.LayoutParams(-1, dp(64), Gravity.TOP))
 
         val useRail = ResponsiveLayoutPolicy.useNavigationRail(resources.configuration.orientation)
         navigation = createNavigation(useRail, resources.configuration)
         if (!useRail) createBottomNavigationContent(resources.configuration.screenWidthDp)
-        bottomGlass = BlurView(this).apply {
-            foreground = SmartPrintGlass.edge(this@MainActivity)
+        bottomNavigationSurface = FrameLayout(this).apply {
+            setBackgroundColor(getColor(R.color.qp_card))
+            elevation = dp(4).toFloat()
             if (!useRail) addView(bottomNavigationContent, FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM))
         }
         if (useRail) {
@@ -883,7 +880,7 @@ class MainActivity : AppCompatActivity() {
                 topMargin = dp(64)
             })
         } else {
-            root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+            root.addView(bottomNavigationSurface, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
         }
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
@@ -892,8 +889,6 @@ class MainActivity : AppCompatActivity() {
             insets
         }
         setContentView(root)
-        SmartPrintGlass.bindBlur(topGlass, blurTarget, this, R.color.qp_glass_top_overlay, backdrop)
-        SmartPrintGlass.bindBlur(bottomGlass, blurTarget, this, R.color.qp_glass_bottom_overlay, backdrop)
         ViewCompat.requestApplyInsets(root)
     }
 
@@ -971,7 +966,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applyResponsiveNavigation(configuration: Configuration) {
-        if (!::navigation.isInitialized || !::content.isInitialized || !::bottomGlass.isInitialized) return
+        if (!::navigation.isInitialized || !::content.isInitialized || !::bottomNavigationSurface.isInitialized) return
 
         val useRail = ResponsiveLayoutPolicy.useNavigationRail(configuration.orientation)
         val currentlyUsesRail = navigation is NavigationRailView
@@ -982,8 +977,8 @@ class MainActivity : AppCompatActivity() {
             } ?: HOME
 
             root.removeView(navigation)
-            root.removeView(bottomGlass)
-            bottomGlass.removeAllViews()
+            root.removeView(bottomNavigationSurface)
+            bottomNavigationSurface.removeAllViews()
             bottomNavigationItemViews.clear()
 
             navigation = createNavigation(useRail, configuration, selectedItemId)
@@ -996,11 +991,11 @@ class MainActivity : AppCompatActivity() {
                 )
             } else {
                 createBottomNavigationContent(configuration.screenWidthDp)
-                bottomGlass.addView(
+                bottomNavigationSurface.addView(
                     bottomNavigationContent,
                     FrameLayout.LayoutParams(-1, dp(66), Gravity.BOTTOM)
                 )
-                root.addView(bottomGlass, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
+                root.addView(bottomNavigationSurface, FrameLayout.LayoutParams(-1, dp(76), Gravity.BOTTOM))
             }
             setBottomNavigationVisible(bottomNavigationVisible)
             return
@@ -1101,7 +1096,7 @@ class MainActivity : AppCompatActivity() {
         val rail = navigation is NavigationRailView
         navigation.visibility = if (rail) visibility else View.GONE
         if (::bottomNavigationContent.isInitialized) bottomNavigationContent.visibility = if (visible && !rail) View.VISIBLE else View.GONE
-        if (::bottomGlass.isInitialized) bottomGlass.visibility = if (visible && !rail) View.VISIBLE else View.GONE
+        if (::bottomNavigationSurface.isInitialized) bottomNavigationSurface.visibility = if (visible && !rail) View.VISIBLE else View.GONE
         if (::content.isInitialized) content.setPadding(
             if (visible && rail) dp(80) else 0,
             dp(64),
@@ -4202,7 +4197,7 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(dp(20), dp(10), dp(20), dp(22))
-            background = SmartPrintGlass.surface(this@MainActivity, 22)
+            background = GradientDrawable().apply { setColor(getColor(R.color.qp_card)); cornerRadius = dp(22).toFloat(); setStroke(dp(1), getColor(R.color.qp_outline)) }
         }
         val handle = View(this).apply {
             background = roundedDrawable(getColor(R.color.qp_outline), dp(2))
@@ -7871,9 +7866,9 @@ class MainActivity : AppCompatActivity() {
         radius = dp(21).toFloat()
         cardElevation = dp(2).toFloat()
         strokeWidth = dp(1)
-        strokeColor = getColor(R.color.qp_glass_border)
+        strokeColor = getColor(R.color.qp_outline)
         rippleColor = ColorStateList.valueOf(android.graphics.Color.TRANSPARENT)
-        setCardBackgroundColor(getColor(R.color.qp_glass_card))
+        setCardBackgroundColor(getColor(R.color.qp_card))
         useCompatPadding = false
     }
     private fun text(
@@ -7904,8 +7899,8 @@ class MainActivity : AppCompatActivity() {
             setTextColor(getColor(R.color.qp_primary_content))
         } else {
             strokeWidth = dp(1)
-            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_glass_border))
-            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_glass_inset))
+            strokeColor = ColorStateList.valueOf(getColor(R.color.qp_outline))
+            backgroundTintList = ColorStateList.valueOf(getColor(R.color.qp_surface))
             setTextColor(getColor(R.color.qp_text))
         }
     }

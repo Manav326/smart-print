@@ -119,7 +119,7 @@ class SmartPrintDocumentViewer(
         gravity = Gravity.CENTER
         textSize = 12f
         setTextColor(getColor(R.color.qp_text))
-        background = SmartPrintGlass.surface(context, 14, R.color.qp_glass_card)
+        background = GradientDrawable().apply { setColor(context.getColor(R.color.qp_card)); cornerRadius = 14f * context.resources.displayMetrics.density; setStroke(context.resources.displayMetrics.density.toInt().coerceAtLeast(1), context.getColor(R.color.qp_outline)) }
         setPadding(dp(10), dp(7), dp(10), dp(7))
         includeFontPadding = false
     }
@@ -157,7 +157,7 @@ class SmartPrintDocumentViewer(
 
     init {
         orientation = LinearLayout.VERTICAL
-        background = SmartPrintGlass.backdrop(context)
+        background = ColorDrawable(context.getColor(R.color.qp_surface))
         clipToPadding = false
 
         updateBreadcrumbs()
@@ -993,7 +993,7 @@ class SmartPrintDocumentViewer(
             includeFontPadding = false
             contentDescription = description
             setTextColor(getColor(R.color.qp_text))
-            background = SmartPrintGlass.surface(context, 12, R.color.qp_glass_card)
+            background = GradientDrawable().apply { setColor(context.getColor(R.color.qp_card)); cornerRadius = 12f * context.resources.displayMetrics.density; setStroke(context.resources.displayMetrics.density.toInt().coerceAtLeast(1), context.getColor(R.color.qp_outline)) }
             elevation = dp(1).toFloat()
             isClickable = true
             isFocusable = true

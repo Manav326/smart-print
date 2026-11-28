@@ -27,12 +27,4 @@
     <color name="qp_muted">#8B96A9</color>
     <color name="qp_outline">#252E3D</color>
     <color name="qp_danger">#EF818A</color>
-    <color name="qp_glass_top_overlay">#E610141D</color>
-    <color name="qp_glass_bottom_overlay">#E610141D</color>
-    <color name="qp_glass_card">#D9141A25</color>
-    <color name="qp_glass_inset">#C8192130</color>
-    <color name="qp_glass_border">#3D9CAFC9</color>
-    <color name="qp_glass_edge">#29FFFFFF</color>
-    <color name="qp_glass_warm_glow">#18F49167</color>
-    <color name="qp_glass_cool_glow">#16709DD6</color>
 </resources>
