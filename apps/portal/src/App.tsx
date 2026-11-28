@@ -2786,7 +2786,9 @@ function PrinterDiagnosticControls({
       }, ...current.filter(item => item.id !== started.id)]);
       setMessage(started.duplicateRequest
         ? t("This test was already accepted. Checking its current result.")
-        : t("One test copy has been sent to the paired Windows computer."));
+        : t(virtualTest
+          ? "Test file sent to the virtual printer."
+          : "One test copy has been sent to the paired Windows computer."));
       await refreshHistory();
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : t("The printer test could not be started."));
