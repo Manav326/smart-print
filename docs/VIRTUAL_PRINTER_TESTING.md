@@ -18,8 +18,9 @@ Only platform administrators can place or release a hold. Both actions require a
 
 An active hold blocks new use at the server:
 
-- Shop selection changes and QR-station assignment
-- Job assignment and new Agent queue claims
+- Shop selection changes through direct or portal APIs; the selected state is preserved while held
+- New QR customer sessions and uploads for a station whose default printer is held
+- QR-station assignment, job assignment and new Agent queue claims
 - Private relay staging / dispatch and diagnostics
 - The final authorization immediately before Windows spooler submission
 
