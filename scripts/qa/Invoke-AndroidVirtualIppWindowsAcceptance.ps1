@@ -103,8 +103,19 @@ function Save-AndroidEvidence {
 }
 
 try {
-    $sdkManager = Join-Path $sdkRoot "cmdline-tools\latest\bin\sdkmanager.bat"
-    $avdManager = Join-Path $sdkRoot "cmdline-tools\latest\bin\avdmanager.bat"
+    # setup-android installs a versioned cmdline-tools folder (for example
+    # cmdline-tools\20.0\bin), not necessarily a "latest" alias.
+    $sdkManagerCommand = Get-Command "sdkmanager.bat" -ErrorAction SilentlyContinue
+    if ($sdkManagerCommand) {
+        $sdkManager = $sdkManagerCommand.Source
+    } else {
+        $sdkManagerCandidate = Get-ChildItem -Path (Join-Path $sdkRoot "cmdline-tools") -Filter "sdkmanager.bat" -File -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending | Select-Object -First 1
+        if (-not $sdkManagerCandidate) { throw "Android SDK Manager is missing under $sdkRoot." }
+        $sdkManager = $sdkManagerCandidate.FullName
+    }
+    $sdkToolsBin = Split-Path -Parent $sdkManager
+    $avdManager = Join-Path $sdkToolsBin "avdmanager.bat"
     $adb = Join-Path $sdkRoot "platform-tools\adb.exe"
     $emulator = Join-Path $sdkRoot "emulator\emulator.exe"
     if (-not (Test-Path -LiteralPath $sdkManager)) { throw "Android SDK Manager is missing at $sdkManager." }
