@@ -306,4 +306,42 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(primary.DriverName, secondary.DriverName);
         Assert.Equal(primary.PortName, secondary.PortName);
     }
+    [Theory]
+    [InlineData("Office USB", "Office Laser Driver", "USB001", "PHYSICAL")]
+    [InlineData("Office LAN", "Office Laser Driver", "IP_192.168.1.20", "PHYSICAL")]
+    [InlineData("Office WSD", "Microsoft IPP Class Driver", "WSD-12345678", "PHYSICAL")]
+    [InlineData("Office Shared", "Office Laser Driver", @"\\PRINT-SERVER\Office", "PHYSICAL")]
+    [InlineData("Office IPP", "Microsoft IPP Class Driver", "ipp://printer.local/ipp/print", "PHYSICAL")]
+    [InlineData("Office IPPS", "Microsoft IPP Class Driver", "ipps://printer.local/ipp/print", "PHYSICAL")]
+    [InlineData("SmartPrint Android Virtual IPP CI", "Microsoft IPP Class Driver", "ipps://printer.local/ipp/print", "UNSUPPORTED_VIRTUAL")]
+    public void PhysicalOfficeQueueClassificationIsIndependentOfConnectionFamily(
+        string queueName, string driverName, string portName, string expectedOutputMode)
+    {
+        Assert.Equal(
+            expectedOutputMode,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(queueName, driverName, portName));
+    }
+
+    [Fact]
+    public async Task ProductionIsolatedDiscoveryPublishesInstalledQueueBeforeCapabilityEnrichmentCompletes()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The production discovery-worker acceptance requires Windows.");
+        var discovery = new WindowsPrinterDiscovery(NullLogger<WindowsPrinterDiscovery>.Instance);
+        var result = await discovery.TryDiscoverAsync(CancellationToken.None);
+
+        Assert.True(result.Success, "The isolated WMI/WinSpool discovery and capability-enrichment pipeline failed.");
+        var queue = Assert.Single(result.Printers, item =>
+            string.Equals(item.QueueName, "Microsoft Print to PDF", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(PrinterOutputModeRules.PdfExport, queue.OutputMode);
+        using var capabilities = JsonDocument.Parse(queue.CapabilitiesJson);
+        Assert.Equal(JsonValueKind.Object, capabilities.RootElement.ValueKind);
+        Assert.Equal(2, capabilities.RootElement.GetProperty("schemaVersion").GetInt32());
+    }
+
 }
