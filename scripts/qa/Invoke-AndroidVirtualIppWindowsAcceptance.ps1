@@ -300,9 +300,15 @@ try {
             $candidatePort.Name, $candidatePort.PrinterHostAddress, $candidatePort.PortNumber,
             $candidatePort.Protocol, $candidatePort.Description, $candidatePort.PortMonitor
         ) -join " "
-        # A local IPP port may retain the endpoint as a port name or host field.
-        return ($portText -match [regex]::Escape("127.0.0.1") -and
-            ($portText -match [regex]::Escape("$ippPort") -or $portText -match "IPP"))
+        # Reuse is allowed only when both the loopback host and this run's
+        # forwarded port match. An unrelated IPP queue on the same machine is
+        # never considered equivalent merely because it uses an IPP monitor.
+        $hostMatches = [string]$candidatePort.PrinterHostAddress -eq "127.0.0.1" -or
+            [string]$candidatePort.Name -match "(?i)127\\.0\\.0\\.1"
+        $portMatches = [string]$candidatePort.PortNumber -eq [string]$ippPort -or
+            [string]$candidatePort.Name -match "(?<!\\d)$ippPort(?!\\d)" -or
+            [string]$candidatePort.Description -match [regex]::Escape(":$ippPort")
+        return ($hostMatches -and $portMatches)
     }
 
     $inventory = Get-VisiblePrinterInventory
