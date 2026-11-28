@@ -141,3 +141,13 @@ Focused policy, PDF-renderer and endpoint integration tests cover conservative c
 ## 7. Explicit non-goals for this branch
 
 Bluetooth/BLE, thermal/label/portable printers and ESC/POS/ZPL/TSPL/CPCL; broad subnet scans; vendor-driver downloads or installation; replacing a shop's existing Windows driver/default printer; universal compatibility claims; a second rendering/dispatch/queue service; or changes to the MSIX release pipeline unrelated to the printer product.
+
+## 8. Diagnostic page selection and owner experience
+
+The diagnostic is selected by **output profile**, not by transport label alone. USB, LAN, shared and Windows-installed IPP queues that expose a supported physical Windows queue use the same protected spooler path; the installed driver's positive capability evidence determines the artwork and job settings.
+
+- **Physical output:** one physical copy. Use a standard media size reported by the driver (or the conservative A4 fallback that Windows must still validate). Include monochrome and geometry checks; include colour bars only when colour is explicitly supported. Use a two-page, one-copy duplex alignment test only when duplex is explicitly supported. Unknown colour/duplex is never promoted to supported.
+- **Authorised virtual test output:** create a single-page digital PDF artifact, not a paper-print confirmation. The artwork is labelled as a virtual output test; physical duplex is not applicable. The owner confirms that the file was received and opens correctly.
+- **Unsupported device families:** do not send this generic A4 diagnostic to thermal, label, portable or command-language queues (ESC/POS, ZPL, TSPL, CPCL), nor to Bluetooth/BLE devices. These need a dedicated media/profile-aware test template and explicit output handling before they can be enabled.
+
+The shop UI keeps the default view to a short preflight summary and one primary action. Technical spooler evidence and the last five diagnostic records stay collapsed under **Test details and history**. Owner notes are optional. Confirmation choices are constrained by the server's terminal spooler evidence; a completed physical `PRINTED` observation cannot be confirmed as “Nothing printed”. A delayed attempt is never auto-expired or unlocked, because that could permit a duplicate physical copy; the owner is directed to reconnect the paired Windows Agent and wait for the pending job's final result.
