@@ -9,12 +9,27 @@ public sealed class PrinterTypePolicyTests
     [InlineData("IP_192.168.31.171", "LAN")]
     [InlineData(@"\\PRINT-SERVER\Queue", "LAN")]
     [InlineData("WSD-abc123", "LAN")]
-    [InlineData("http://192.168.31.171:10631/p/virtual", "IPP")]
+    [InlineData("http://192.168.31.171:10631/p/virtual", "LAN")]
+    [InlineData("https://printer.local/print", "LAN")]
     [InlineData("ipp://printer.local/ipp/print", "IPP")]
     [InlineData("ipps://printer.local/ipp/print", "IPP")]
     [InlineData("PORTPROMPT:", "WindowsQueue")]
     [InlineData("FILE:", "WindowsQueue")]
     public void DetectsConnectionTransportWithoutChangingOutputKind(string port, string expected)
+    {
+        Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
+    }
+
+    [Theory]
+    [InlineData("IPP://PRINTER.LOCAL/IPP/PRINT", "IPP")]
+    [InlineData("IPPS://PRINTER.LOCAL/IPP/PRINT", "IPP")]
+    [InlineData("HTTP://PRINTER.LOCAL/IPP/PRINT", "LAN")]
+    [InlineData("HTTPS://PRINTER.LOCAL/IPP/PRINT", "LAN")]
+    [InlineData("LPT1:", "WindowsQueue")]
+    [InlineData("", "WindowsQueue")]
+    [InlineData(null, "WindowsQueue")]
+    public void ConnectionClassificationIsCaseInsensitiveAndFailsClosedForUnknownPorts(
+        string? port, string expected)
     {
         Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
     }
@@ -61,4 +76,27 @@ public sealed class PrinterTypePolicyTests
         Assert.Equal(selectable, PrinterTypePolicy.IsSelectableOutputMode(outputMode));
         Assert.Equal(usesQueueReadiness, PrinterTypePolicy.UsesWindowsQueueReadiness(outputMode));
     }
+    [Theory]
+    [InlineData("USB001")]
+    [InlineData("IP_192.168.1.20")]
+    [InlineData("WSD-12345678")]
+    [InlineData(@"\\PRINT-SERVER\Office")]
+    [InlineData("LPT1:")]
+    public void PhysicalAndSharedQueuePortsRemainConnectedTargets(string port)
+    {
+        Assert.True(PrinterTypePolicy.IsConnectedPrinterPort(port));
+    }
+
+    [Theory]
+    [InlineData("Ready", true)]
+    [InlineData("Busy", true)]
+    [InlineData("Offline", false)]
+    [InlineData("Paused", false)]
+    [InlineData("Unknown", false)]
+    [InlineData(null, false)]
+    public void OnlyReadyOrBusyWindowsQueuesAreWorking(string? status, bool expected)
+    {
+        Assert.Equal(expected, PrinterTypePolicy.IsWorkingWindowsQueue(status));
+    }
+
 }

@@ -19,7 +19,7 @@ import CustomerUpiQr from "./CustomerUpiQr";
 import ShopDocumentPreviewSurface from "./ShopDocumentPreviewSurface";
 import ShopSubscriptionCheckout from "./ShopSubscriptionCheckout";
 import { buildCustomerUpiIntent } from "./upi-payment-intent";
-import { getPrinterReadinessReason, isPrinterAvailableForShop } from "./printer-availability";
+import { getPrinterQueueStatusKind, getPrinterReadinessReason, isPrinterAvailableForShop } from "./printer-availability";
 import { shouldBlockBatchCheckoutForExpiredQuote, shouldBlockQuoteRefreshForStatus } from "./batch-checkout-state";
 import { isCustomerBatchFinished } from "./customer-session-state";
 import { canFallbackToCloudFromLocalFailure, resolveCustomerUploadMode } from "./local-upload-routing";
@@ -2533,9 +2533,11 @@ function PrintersPage({
                     ? t("PDF export destination ready on this computer")
                     : !queueFresh
                       ? t("Waiting for a fresh Windows printer scan")
-                      : printer.status === "Ready" || printer.status === "Busy"
-                        ? t("Windows queue reported ready")
-                        : `Windows queue reports ${printer.status.toLowerCase()}`;
+                      : getPrinterQueueStatusKind(printer.status) === "ready"
+                        ? t("Windows queue is ready")
+                        : getPrinterQueueStatusKind(printer.status) === "busy"
+                          ? t("Windows queue is busy processing jobs")
+                          : `Windows queue reports ${printer.status.toLowerCase()}`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">

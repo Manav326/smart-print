@@ -306,4 +306,210 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(primary.DriverName, secondary.DriverName);
         Assert.Equal(primary.PortName, secondary.PortName);
     }
+    [Theory]
+    [InlineData("Office USB", "Office Laser Driver", "USB001", "PHYSICAL")]
+    [InlineData("Office LAN", "Office Laser Driver", "IP_192.168.1.20", "PHYSICAL")]
+    [InlineData("Office WSD", "Microsoft IPP Class Driver", "WSD-12345678", "PHYSICAL")]
+    [InlineData("Office Shared", "Office Laser Driver", @"\\PRINT-SERVER\Office", "PHYSICAL")]
+    [InlineData("Office IPP", "Microsoft IPP Class Driver", "ipp://printer.local/ipp/print", "PHYSICAL")]
+    [InlineData("Office IPPS", "Microsoft IPP Class Driver", "ipps://printer.local/ipp/print", "PHYSICAL")]
+    [InlineData("SmartPrint Android Virtual IPP CI", "Microsoft IPP Class Driver", "ipps://printer.local/ipp/print", "UNSUPPORTED_VIRTUAL")]
+    public void PhysicalOfficeQueueClassificationIsIndependentOfConnectionFamily(
+        string queueName, string driverName, string portName, string expectedOutputMode)
+    {
+        Assert.Equal(
+            expectedOutputMode,
+            WindowsPrinterDiscovery.ResolveDetectedOutputMode(queueName, driverName, portName));
+    }
+
+    [Fact]
+    public async Task InProcessWindowsDiscoveryAndCapabilityEnrichmentHandleInstalledQueue()
+    {
+        if (!string.Equals(
+                Environment.GetEnvironmentVariable("SMARTPRINT_RUN_WINDOWS_SPOOLER_INTEGRATION"),
+                "1",
+                StringComparison.Ordinal))
+            return;
+
+        Assert.True(OperatingSystem.IsWindows(), "The production discovery-worker acceptance requires Windows.");
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            executeInCurrentProcess: true);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
+        var result = await discovery.TryDiscoverAsync(CancellationToken.None);
+
+        Assert.True(result.Success, "The isolated WMI/WinSpool discovery and capability-enrichment pipeline failed.");
+        var queue = Assert.Single(result.Printers, item =>
+            string.Equals(item.QueueName, "Microsoft Print to PDF", StringComparison.OrdinalIgnoreCase));
+        Assert.Equal(PrinterOutputModeRules.PdfExport, queue.OutputMode);
+        using var capabilities = JsonDocument.Parse(queue.CapabilitiesJson);
+        Assert.Equal(JsonValueKind.Object, capabilities.RootElement.ValueKind);
+        Assert.Equal(2, capabilities.RootElement.GetProperty("schemaVersion").GetInt32());
+    }
+
+    [Fact]
+    public async Task WinspoolFallbackKeepsAWindowsQueueVisibleWhenWmiEnumerationFails()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var queueJson = """[{"queueName":"Office LAN","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(1, string.Empty, "simulated WMI failure", false),
+            new AgentChildProcessResult(0, queueJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        var queue = Assert.Single(result.Printers);
+        Assert.Equal("Office LAN", queue.QueueName);
+        Assert.Equal("IP_192.168.1.20", queue.PortName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task CapabilityProbeTimeoutDoesNotHideDiscoveredQueue()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var queue = new DiscoveredPrinter(
+            "Office USB", "Slow vendor driver", "USB001", "Ready", false,
+            OutputMode: PrinterOutputModeRules.Physical);
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(-1, string.Empty, "simulated timeout", true));
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            childProcessRunner: runner);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
+
+        var result = await discovery.EnrichCapabilitiesAsync([queue], CancellationToken.None);
+
+        Assert.True(result.Success);
+        var retained = Assert.Single(result.Printers);
+        Assert.Equal(queue.QueueName, retained.QueueName);
+        Assert.Equal(queue.Status, retained.Status);
+        Assert.Equal("{}", retained.CapabilitiesJson);
+        Assert.Equal(1, runner.CallCount);
+    }
+
+    [Fact]
+    public async Task MalformedWmiPayloadFallsBackToWinspoolInventory()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string fallbackJson = """[{"queueName":"Shared Office","driverName":"Office Driver","portName":"\\\\PRINT-SERVER\\Office","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, "{malformed", string.Empty, false),
+            new AgentChildProcessResult(0, fallbackJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        var queue = Assert.Single(result.Printers);
+        Assert.Equal("Shared Office", queue.QueueName);
+        Assert.Equal(@"\\PRINT-SERVER\Office", queue.PortName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task TimedOutWmiEnumerationFallsBackToWinspoolInventory()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string fallbackJson = """[{"queueName":"Office LAN","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(-1, string.Empty, "simulated timeout", true),
+            new AgentChildProcessResult(0, fallbackJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("Office LAN", Assert.Single(result.Printers).QueueName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task UnknownWmiStatusTriggersOneTargetedWinspoolRefreshWithoutOverwritingKnownStatus()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string wmiJson = """[{"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Unknown","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},{"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        const string winspoolJson = """[{"queueName":"Unknown Office","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Busy","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"},{"queueName":"Known Office","driverName":"Office Driver","portName":"IP_192.168.1.21","status":"Offline","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, wmiJson, string.Empty, false),
+            new AgentChildProcessResult(0, winspoolJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal(2, result.Printers.Count);
+        Assert.Equal("Busy", result.Printers.Single(item => item.QueueName == "Unknown Office").Status);
+        Assert.Equal("Ready", result.Printers.Single(item => item.QueueName == "Known Office").Status);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task DiscoveryDoesNotRunExtraWinspoolPassWhenAllWmiStatusesAreKnown()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string wmiJson = """[{"queueName":"Office USB","driverName":"Office Driver","portName":"USB001","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(0, wmiJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Single(result.Printers);
+        Assert.Equal(new[] { "--discover-printers" }, runner.Commands);
+    }
+
+    private sealed class SequenceChildProcessRunner(params AgentChildProcessResult[] results)
+        : IAgentChildProcessRunner
+    {
+        private readonly Queue<AgentChildProcessResult> responses = new(results);
+        public List<string> Commands { get; } = [];
+        public int CallCount => Commands.Count;
+
+        public Task<AgentChildProcessResult> ExecuteAsync(
+            string command,
+            string standardInput,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Commands.Add(command);
+            if (!responses.TryDequeue(out var response))
+                throw new InvalidOperationException("No fake child-process response was configured.");
+            return Task.FromResult(response);
+        }
+    }
+
 }

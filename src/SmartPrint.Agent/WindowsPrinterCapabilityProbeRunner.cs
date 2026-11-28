@@ -79,10 +79,10 @@ public sealed class WindowsPrinterCapabilityProbeRunner
                 if (document.RootElement.ValueKind != JsonValueKind.Object)
                     throw new JsonException("The capability worker did not return a JSON object.");
 
-                if (document.RootElement.TryGetProperty("queueName", out var returnedQueue) &&
-                    returnedQueue.ValueKind == JsonValueKind.String &&
+                if (!document.RootElement.TryGetProperty("queueName", out var returnedQueue) ||
+                    returnedQueue.ValueKind != JsonValueKind.String ||
                     !string.Equals(returnedQueue.GetString(), queueName, StringComparison.OrdinalIgnoreCase))
-                    throw new JsonException("The capability worker returned a different queue identity.");
+                    throw new JsonException("The capability worker did not return the requested queue identity.");
 
                 var hasDetails = document.RootElement.EnumerateObject().Any();
                 CacheValue(key, json, hasDetails ? SuccessCacheLifetime : UnknownCacheLifetime);

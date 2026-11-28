@@ -72,3 +72,12 @@ test("PDF Export is ready independently of physical Windows queue status when th
   assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT", status: "Offline" }), [agent()], now), null);
   assert.equal(getPrinterAvailabilityReason(printer({ outputMode: "PDF_EXPORT" }), [agent({ lastSeenUtc: stale })], now), "Shop computer offline");
 });
+
+test("Busy is presented as activity, not mislabeled as Ready", async () => {
+  const { getPrinterQueueStatusKind } = await import("../src/printer-availability.ts");
+  assert.equal(getPrinterQueueStatusKind("Ready"), "ready");
+  assert.equal(getPrinterQueueStatusKind("Busy"), "busy");
+  assert.equal(getPrinterQueueStatusKind(" busy "), "busy");
+  assert.equal(getPrinterQueueStatusKind("Offline"), "attention");
+  assert.equal(getPrinterQueueStatusKind(null), "attention");
+});

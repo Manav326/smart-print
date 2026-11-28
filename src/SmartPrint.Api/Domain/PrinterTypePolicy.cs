@@ -32,9 +32,17 @@ public static class PrinterTypePolicy
     public static string ResolveConnectionType(string? portName)
     {
         var value = portName?.Trim() ?? string.Empty;
-        if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint) &&
-            endpoint.Scheme is "ipp" or "ipps" or "http" or "https")
-            return "IPP";
+        if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint))
+        {
+            // Only the IPP URI schemes establish the IPP protocol from the port
+            // metadata itself. HTTP(S) is merely a network transport and may be
+            // an unrelated web endpoint; do not overstate it as an IPP printer.
+            if (endpoint.Scheme is "ipp" or "ipps")
+                return "IPP";
+
+            if (endpoint.Scheme is "http" or "https")
+                return "LAN";
+        }
 
         if (value.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
             return "USB";

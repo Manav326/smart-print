@@ -179,6 +179,7 @@ Inspect the deployment with docker compose --env-file .env -f compose.yml ps and
 - [Role-based Web, Android and Windows acceptance matrix](docs/ROLE_BASED_CROSS_PLATFORM_QA.md)
 - [Production QA master test plan](docs/PRODUCTION_QA_TEST_PLAN.md)
 - [Final pre-production release gate and blocker register](docs/FINAL_PRE_PRODUCTION_RELEASE_GATE.md)
+- [Printer compatibility and qualification](docs/PRINTER_COMPATIBILITY_QUALIFICATION.md)
 
 ## Delivery principles
 
