@@ -297,8 +297,8 @@ try {
         $candidatePort = Get-PrinterPort -Name $candidatePrinter.PortName -ErrorAction SilentlyContinue
         if (-not $candidatePort) { return $false }
         $portText = @(
-            $candidatePort.Name, $candidatePort.PrinterHostAddress,
-            $candidatePort.Description, $candidatePort.PortMonitor
+            $candidatePort.Name, $candidatePort.PrinterHostAddress, $candidatePort.PortNumber,
+            $candidatePort.Protocol, $candidatePort.Description, $candidatePort.PortMonitor
         ) -join " "
         # A local IPP port may retain the endpoint as a port name or host field.
         return ($portText -match [regex]::Escape("127.0.0.1") -and
@@ -333,14 +333,16 @@ try {
             $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
             try {
                 Add-Printer -Name $queueName -IppURL $candidateUrl -KeepPrintedJobs -ErrorAction Stop
+                # From this point the newly-created queue is ours, even if a later
+                # verification step fails; cleanup may remove only this queue.
+                $queueCreated = $true
+                $queueOwned = $true
                 $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
                 if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver") {
                     throw "Windows selected unexpected driver '$($candidatePrinter.DriverName)'."
                 }
                 $printer = $candidatePrinter
                 $ippResource = $candidateResource
-                $queueCreated = $true
-                $queueOwned = $true
                 break
             } catch {
                 $errorRecord = $_
