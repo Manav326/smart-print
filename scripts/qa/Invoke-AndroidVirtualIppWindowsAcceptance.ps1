@@ -499,7 +499,6 @@ try {
                     $hiddenRegistrationEvidence = Get-HiddenIppRegistrationEvidence
                 } catch {
                     $diagnosticCaptureError = $_.Exception.Message
-                    Write-Warning "IPP registration evidence collection failed without replacing the Add-Printer error: $diagnosticCaptureError"
                 }
 
                 $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | '); diagnosticCaptureError=$diagnosticCaptureError"
@@ -518,10 +517,10 @@ try {
                     $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8 -ErrorAction Stop
                 } catch {
                     $diagnosticWriteError = $_.Exception.Message
-                    Write-Warning "Could not save IPP registration diagnostics; preserving the original Add-Printer error: $diagnosticWriteError"
                     $candidateFailures[-1] = "$($candidateFailures[-1]); diagnosticWriteError=$diagnosticWriteError"
                 }
             }
+            if ($printer) { break }
         }
     }
 
@@ -541,7 +540,6 @@ try {
             $printEvents | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8 -ErrorAction Stop
         } catch {
             $eventEvidenceError = $_.Exception.Message
-            Write-Warning "Could not write PrintService evidence; preserving the original printer registration failure: $eventEvidenceError"
         }
 
         throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService evidence: $eventEvidencePath; evidenceError=$eventEvidenceError"
