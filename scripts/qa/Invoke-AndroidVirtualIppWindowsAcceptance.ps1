@@ -66,6 +66,7 @@ $report = [ordered]@{
         version = "1.1.3"
         apkSha256 = $apkSha256
         signerCertificateSha1 = $signerSha1
+        printerUuid = "abcdef78-1234-1234-1234-123456789012"
         emulator = $avdName
         sdkRoot = $sdkRoot
         sdkManager = $null
@@ -335,6 +336,48 @@ try {
         return $property.Value
     }
 
+    function Get-HiddenIppRegistrationEvidence {
+        $pnpDevices = @()
+        try {
+            $pnpDevices = @(Get-PnpDevice -ErrorAction Stop | Where-Object {
+                $_.Class -match "(?i)printer" -or
+                $_.FriendlyName -match "(?i)IppVirtual|virtual" -or
+                $_.InstanceId -match [regex]::Escape($report.android.printerUuid)
+            } | Select-Object Status, Class, FriendlyName, InstanceId, Problem)
+        } catch {
+            $pnpDevices = @([ordered]@{ queryError = $_.Exception.Message })
+        }
+
+        $registryInventory = @()
+        $registryRoots = @(
+            "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Printers",
+            "HKLM:\SYSTEM\CurrentControlSet\Control\Print\Monitors",
+            "HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Print\Connections"
+        )
+        foreach ($registryRoot in $registryRoots) {
+            try {
+                if (Test-Path -LiteralPath $registryRoot) {
+                    $children = @(Get-ChildItem -LiteralPath $registryRoot -ErrorAction Stop |
+                        Select-Object -ExpandProperty PSChildName)
+                    $registryInventory += [ordered]@{
+                        path = $registryRoot
+                        childKeys = $children
+                    }
+                }
+            } catch {
+                $registryInventory += [ordered]@{
+                    path = $registryRoot
+                    queryError = $_.Exception.Message
+                }
+            }
+        }
+
+        return [ordered]@{
+            pnpDevices = $pnpDevices
+            registryKeys = $registryInventory
+        }
+    }
+
     function Test-QueueTargetsLiveReceiver($candidatePrinter, [string]$candidateUrl) {
         if (-not $candidatePrinter) { return $false }
         $driverName = [string](Get-OptionalPropertyValue $candidatePrinter "DriverName")
@@ -439,6 +482,7 @@ try {
                     "$name [$description] host=$hostAddress monitor=$monitor port=$portNumber"
                 })
                 $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+                $hiddenRegistrationEvidence = Get-HiddenIppRegistrationEvidence
                 $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; native=$nativeCode; category $($errorRecord.CategoryInfo.Category); id=$($errorRecord.FullyQualifiedErrorId)); verifiedReuse=$([bool]$printer); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
                 $diagnostic = [ordered]@{
                     resource = $candidateResource; url = $candidateUrl
@@ -448,6 +492,7 @@ try {
                     category = "$($errorRecord.CategoryInfo)"; targetObject = "$($errorRecord.TargetObject)"
                     verifiedReuse = [bool]$printer
                     printers = $visiblePrinters; ports = $visiblePorts
+                    hiddenRegistration = $hiddenRegistrationEvidence
                 }
                 $diagnostic | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $evidenceDirectory "windows-ipp-registration-failure.json") -Encoding UTF8
                 if ($printer) { break }
@@ -486,6 +531,7 @@ try {
     }
     $queueEvidence | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $queueEvidencePath -Encoding UTF8
     $report.android.acceleration = $acceleration
+    $report.android.ippResource = $ippResource
     $report.windowsQueue = $queueEvidence
     $report.queueReused = $queueReused
 
