@@ -40,19 +40,18 @@ public sealed class PrivatePrintingRelayStagingRulesTests
     }
 
     [Theory]
-    [InlineData(true, true, PrivatePrintingOutputPolicy.Physical, false, true)]
-    [InlineData(true, false, PrivatePrintingOutputPolicy.PdfExport, false, false)]
-    [InlineData(false, true, PrivatePrintingOutputPolicy.PdfExport, false, true)]
-    [InlineData(false, true, PrinterTypePolicy.UnsupportedVirtual, false, false)]
-    [InlineData(false, false, PrinterTypePolicy.UnsupportedVirtual, true, true)]
+    [InlineData(true, true, PrivatePrintingOutputPolicy.Physical, true)]
+    [InlineData(true, false, PrivatePrintingOutputPolicy.PdfExport, false)]
+    [InlineData(false, true, PrivatePrintingOutputPolicy.PdfExport, true)]
+    [InlineData(false, true, PrinterTypePolicy.UnsupportedVirtual, true)]
+    [InlineData(false, false, PrinterTypePolicy.UnsupportedVirtual, false)]
     public void PhysicalAndVirtualOutputRestrictionsStillApply(
         bool isProduction,
         bool allowVirtualOutput,
         string outputMode,
-        bool virtualTestGrantActive,
         bool expected)
     {
         Assert.Equal(expected, PrivatePrintingOutputPolicy.IsEligible(
-            allowVirtualOutput, isProduction, outputMode, virtualTestGrantActive));
+            allowVirtualOutput, isProduction, outputMode));
     }
 }
