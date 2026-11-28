@@ -104,7 +104,7 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
                 if (current is not null)
                 {
                     if (current.Status is "ERROR" or "OFFLINE" or "PAPEROUT" or "USERINTERVENTION")
-                        Assert.Fail($"Windows spooler reported {current.Status} for Android IPP job {receipt.JobId}.");
+                        Assert.True(false, $"Windows spooler reported {current.Status} for Android IPP job {receipt.JobId}.");
 
                     if ((current.Status is "PRINTED" or "RETAINED") && current.PagesPrinted >= 1)
                     {
