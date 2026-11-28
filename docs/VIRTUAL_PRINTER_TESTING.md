@@ -58,3 +58,20 @@ Hosted CI can validate the policy, API, Agent protocol and Windows spooler integ
 10. Verify Microsoft Print to PDF still uses the separate `PDF_EXPORT` path and is not treated as this virtual IPP test.
 
 Record the Windows queue/port/driver, Agent version, grant ID and expiry, job ID, spooler job ID, Windows/Android receiver evidence, output state and whether any physical fulfilment state changed. Keep customer documents and personal content out of evidence artifacts.
+
+## Executable shop-PC Android Virtual Printer acceptance
+
+Use the checked-in operator-assisted harness after the virtual queue grant is active:
+
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -File .\scripts\qa\Invoke-SmartPrintVirtualPrinterAcceptance.ps1 `
+  -QueueName "Android Virtual IPP Test" `
+  -GrantId "<approved-grant-id>" `
+  -AgentVersion "<installed-agent-version>"
+```
+
+Run this on the Windows shop PC that has the paired SmartPrint Agent and Android IPP virtual queue installed. The script does **not** create a synthetic Windows print job. It snapshots existing queue job IDs, waits for the operator to start exactly one diagnostic from the SmartPrint owner UI, and requires a newly observed spooler job on the selected queue. It then requires an explicit operator confirmation that the complete diagnostic arrived and can be opened/rendered in the Android receiver. A JSON evidence report is written under `artifacts/virtual-printer-acceptance`.
+
+The harness reports PASS only when both the new Windows spooler job and the Android receiver confirmation are present. A missing spooler job, timeout, or absent receiver confirmation fails. A spooler job disappearing from Windows is recorded as an observation only; it is not interpreted as proof of delivery. The report records queue/driver/port identity, Windows and Agent versions, grant ID, spooler job metadata, timestamps and receiver confirmation. It deliberately excludes document contents and customer data.
+
+This is an operator-assisted **real-device acceptance test**, not a hosted-CI test: hosted runners cannot see the shop PC's installed queue or the Android device on the shop LAN. Keep the Android receiver visible during the test and retain the generated JSON with the matching SmartPrint diagnostic attempt/job ID. After a successful virtual test, revoke the grant and run the negative-path checks above. Do not mark the overall hardware qualification complete until the real shop-PC run and its evidence have been reviewed.
