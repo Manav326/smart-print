@@ -168,8 +168,8 @@ public sealed class WindowsPrinterCapabilityProbeRunnerTests
             CancellationToken cancellationToken,
             Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
         {
-            var queueName = System.Text.Json.JsonDocument.Parse(standardInput)
-                .RootElement.GetProperty("queueName").GetString();
+            using var request = System.Text.Json.JsonDocument.Parse(standardInput);
+            var queueName = request.RootElement.GetProperty("queueName").GetString();
             var current = Interlocked.Increment(ref active);
             UpdateMaximum(current);
             try
