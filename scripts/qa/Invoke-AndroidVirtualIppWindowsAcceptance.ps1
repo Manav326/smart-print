@@ -201,6 +201,16 @@ try {
     Invoke-Checked $adb @("-s", "emulator-5554", "install", "-r", $apkPath) "Installing the pinned IppVirtual receiver failed"
     Invoke-Checked $adb @("-s", "emulator-5554", "shell", "monkey", "-p", $packageName, "1") "Launching IppVirtual failed"
 
+    # The receiver opens in Preview mode. Its Run action must be pressed to
+    # start the IPP service; launching the activity alone leaves port 10631 closed.
+    Start-Sleep -Seconds 3
+    Invoke-Checked $adb @("-s", "emulator-5554", "shell", "input", "tap", "911", "136") "Starting the IppVirtual receiver failed"
+    Start-Sleep -Seconds 5
+    & $adb -s emulator-5554 shell uiautomator dump /sdcard/smartprint-ippvirtual-ui.xml 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+        & $adb -s emulator-5554 pull /sdcard/smartprint-ippvirtual-ui.xml $uiHierarchyPath 2>$null | Out-Null
+    }
+
     # Forward only the receiver's known IPP listener to this same Windows host.
     Invoke-Checked $adb @("-s", "emulator-5554", "forward", "tcp:$ippPort", "tcp:$ippPort") "ADB port forwarding failed"
     $forwardCreated = $true
@@ -222,7 +232,7 @@ try {
     # spelling used by most IPP clients. Only a successful Windows IPP
     # directed-discovery result is accepted.
     Start-Service -Name Spooler
-    $ippResources = @("/p/vir" + [char]0x0435 + "ual", "/p/virtual")
+    $ippResources = @("/p/virtual")
     $candidateFailures = @()
     $printer = $null
     foreach ($candidateResource in $ippResources) {
