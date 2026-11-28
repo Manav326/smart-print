@@ -12,6 +12,7 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.LayerDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
@@ -190,7 +191,15 @@ class QrScannerActivity : AppCompatActivity() {
     private fun buildScannerUi() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            background = ColorDrawable(getColor(R.color.qp_surface))
+            // Keep an explicit opaque surface drawable on the full edge-to-edge root.
+            // Insets are applied as padding below, so this same surface remains visible
+            // behind the status and navigation bars without any translucent overlay.
+            background = LayerDrawable(arrayOf(
+                GradientDrawable(
+                    GradientDrawable.Orientation.TOP_BOTTOM,
+                    intArrayOf(getColor(R.color.qp_surface), getColor(R.color.qp_surface))
+                )
+            ))
             setPadding(dp(18), 0, dp(18), 0)
         }
 
