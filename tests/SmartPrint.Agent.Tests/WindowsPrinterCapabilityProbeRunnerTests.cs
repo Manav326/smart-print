@@ -38,6 +38,8 @@ public sealed class WindowsPrinterCapabilityProbeRunnerTests
     [InlineData("not-json")]
     [InlineData("[]")]
     [InlineData("""{"queueName":"Different Queue","duplex":true}""")]
+    [InlineData("""{"duplex":true}""")]
+    [InlineData("""{"queueName":42,"duplex":true}""")]
     public async Task InvalidOrMismatchedCapabilityReportFailsClosedAndIsBackedOff(string response)
     {
         if (!OperatingSystem.IsWindows()) return;
