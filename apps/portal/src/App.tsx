@@ -2533,9 +2533,11 @@ function PrintersPage({
                     ? t("PDF export destination ready on this computer")
                     : !queueFresh
                       ? t("Waiting for a fresh Windows printer scan")
-                      : printer.status === "Ready" || printer.status === "Busy"
-                        ? t("Windows queue reported ready")
-                        : `Windows queue reports ${printer.status.toLowerCase()}`;
+                      : printer.status === "Ready"
+                        ? t("Windows queue is ready")
+                        : printer.status === "Busy"
+                          ? t("Windows queue is busy processing jobs")
+                          : \`Windows queue reports \${printer.status.toLowerCase()}\`;
               return (
                 <article className="printer-card" key={printer.id}>
                   <div className="printer-card-top">
