@@ -249,13 +249,12 @@ try {
     }
 
     # Directed discovery avoids mDNS multicast assumptions in a virtualized CI network.
-    # The developer's published service record uses rp=p/virеual (the e in
-    # that path is Cyrillic); try that exact resource first, then the ASCII
-    # spelling used by most IPP clients. Only a successful Windows IPP
-    # directed-discovery result is accepted.
+    # 402D's published DNS-SD record uses rp=p/virеual, where the fifth
+    # character is CYRILLIC SMALL LETTER IE (U+0435), not ASCII "e".
+    # Try the exact advertised resource first; retain ASCII as a fallback probe.
     Start-Service -Name Spooler
-    # Use a run-scoped local queue name so a stale queue left by a previous
-    # acceptance attempt cannot collide with this runner's new receiver.
+    # The queue name is unique to this workflow attempt. Never remove queues
+    # discovered by endpoint/port alone: multiple valid queues may share ports.
     $existingQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
     if ($existingQueue) {
         Remove-Printer -Name $queueName -ErrorAction Stop
@@ -266,7 +265,8 @@ try {
         } while ($existingQueue -and [DateTimeOffset]::UtcNow -lt $removeDeadline)
         if ($existingQueue) { throw "Windows did not remove stale IPP queue '$queueName' before discovery." }
     }
-    $ippResources = @("/p/virtual")
+    $advertisedResource = [string]::Concat("/p/vir", [char]0x0435, "ual")
+    $ippResources = @($advertisedResource, "/p/virtual")
     $candidateFailures = @()
     $printer = $null
     foreach ($candidateResource in $ippResources) {
@@ -282,13 +282,25 @@ try {
             $queueCreated = $true
             break
         } catch {
+            $exception = $_.Exception
+            $hresult = $exception.HResult.ToString("X8")
             $visiblePrinters = @(Get-Printer -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.DriverName)] port=$($_.PortName)" })
-            $candidateFailures += "$candidateResource => $($_.Exception.Message); visible printers: $($visiblePrinters -join ' | ')"
+            $visiblePorts = @(Get-PrinterPort -ErrorAction SilentlyContinue | ForEach-Object { "$($_.Name) [$($_.Description)] monitor=$($_.PortMonitor)" })
+            $candidateFailures += "$candidateResource => $($exception.Message) (HRESULT $hresult; category $($_.CategoryInfo.Category)); printers: $($visiblePrinters -join ' | '); ports: $($visiblePorts -join ' | ')"
+            # Only the run-scoped queue is eligible for cleanup. Do not touch
+            # a pre-existing queue or shared port, even if its endpoint matches.
             Remove-Printer -Name $queueName -ErrorAction SilentlyContinue
         }
     }
     if (-not $queueCreated -or $null -eq $printer) {
-        throw "Windows could not discover IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; ')"
+        $printEvents = @()
+        try {
+            $printEvents = @(Get-WinEvent -FilterHashtable @{ LogName = "Microsoft-Windows-PrintService/Operational"; StartTime = [DateTime]::Now.AddMinutes(-15) } -MaxEvents 30 -ErrorAction Stop |
+                Select-Object TimeCreated, Id, LevelDisplayName, Message)
+        } catch { $printEvents = @("PrintService Operational log unavailable: $($_.Exception.Message)") }
+        $eventEvidencePath = Join-Path $evidenceDirectory "windows-printservice-events.json"
+        $printEvents | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $eventEvidencePath -Encoding UTF8
+        throw "Windows could not register IppVirtual at resource path(s) $($ippResources -join ', '): $($candidateFailures -join '; '). PrintService events saved to $eventEvidencePath"
     }
     $driver = Get-PrinterDriver -Name $printer.DriverName -ErrorAction Stop
     $port = Get-PrinterPort -Name $printer.PortName -ErrorAction Stop
