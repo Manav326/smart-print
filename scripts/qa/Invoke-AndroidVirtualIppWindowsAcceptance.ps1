@@ -17,7 +17,7 @@ test against that receiver. It writes logs, screenshot, queue metadata and a
 JSON result under artifacts/android-ipp-windows/.
 
 Required: Java 17, Android command-line tools, emulator, platform-tools,
-Android API 35 x86_64 Google APIs image, .NET test build, Windows Print Spooler.
+Android API 35 x86_64 default system image, .NET test build, Windows Print Spooler.
 "@ | Write-Output
     exit 0
 }
@@ -524,9 +524,9 @@ try {
     $queueEvidence = [ordered]@{
         name = $printer.Name
         driver = $printer.DriverName
-        driverVersion = Get-OptionalPropertyValue $driver "DriverVersion"
+        driverVersion = (Get-OptionalPropertyValue $driver "DriverVersion")
         port = $printer.PortName
-        portMonitor = Get-OptionalPropertyValue $port "PortMonitor"
+        portMonitor = (Get-OptionalPropertyValue $port "PortMonitor")
         ippUrl = "http://127.0.0.1:$ippPort$ippResource"
         keepPrintedJobs = $true
     }
