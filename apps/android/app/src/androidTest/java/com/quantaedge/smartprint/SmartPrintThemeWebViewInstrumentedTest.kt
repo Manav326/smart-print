@@ -3,6 +3,8 @@ package com.quantaedge.smartprint
 import android.content.Context
 import android.os.SystemClock
 import android.webkit.WebView
+import androidx.webkit.WebSettingsCompat
+import androidx.webkit.WebViewFeature
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -29,6 +31,12 @@ class SmartPrintThemeWebViewInstrumentedTest {
             val webView = MainActivity::class.java.getDeclaredMethod("ensureWebView")
                 .apply { isAccessible = true }
                 .invoke(activity) as WebView
+            if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+                assertFalse(
+                    "The embedded portal must use its explicit CSS theme, not WebView auto-darkening.",
+                    WebSettingsCompat.getAlgorithmicDarkeningAllowed(webView.settings)
+                )
+            }
             // loadDataWithBaseURL gives this fixture the same trusted origin as the
             // configured portal, so localStorage survives a fresh document load.
             // WebView.reload() would navigate to the real network URL instead of

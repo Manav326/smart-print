@@ -1,5 +1,7 @@
 <resources>
     <style name="Theme.SmartPrint" parent="Theme.Material3.DayNight.NoActionBar">
+        <!-- SmartPrint supplies complete DayNight palettes; platform Force Dark would partially invert native screens. -->
+        <item name="android:forceDarkAllowed">false</item>
         <item name="colorPrimary">@color/qp_primary</item>
         <item name="colorSecondary">@color/qp_primary</item>
         <item name="colorOnPrimary">@color/qp_primary_content</item>

@@ -4389,6 +4389,11 @@ class MainActivity : AppCompatActivity() {
             isHorizontalScrollBarEnabled = false
             overScrollMode = View.OVER_SCROLL_NEVER
         }
+        // The portal owns an explicit Light/Dark palette. Do not let WebView's
+        // algorithmic darkening independently recolour controls or surfaces.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.ALGORITHMIC_DARKENING)) {
+            androidx.webkit.WebSettingsCompat.setAlgorithmicDarkeningAllowed(view.settings, false)
+        }
         view.settings.userAgentString = "${view.settings.userAgentString} SmartPrintAndroid/1"
         // Never trust the QR-selected route as a credential-sharing origin.
         // The bridge is pinned to the configured service origin for this build.
