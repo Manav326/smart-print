@@ -1986,12 +1986,30 @@ shop.MapPatch("/printers/{printerId:guid}/active", async (
                 return Results.BadRequest(new { code = "invalid_printer_replacement", message = "Choose a different selected queue to replace." });
             }
 
-            replacedPrinter = await db.PrinterDevices.SingleOrDefaultAsync(
-                item => item.Id == previousId && item.TenantId == tenantId && item.IsActive, ct);
+            var lockedReplacement = await db.PrinterDevices.FromSqlInterpolated(
+                $"""
+                SELECT * FROM "PrinterDevices"
+                WHERE "Id" = {previousId}
+                  AND "TenantId" = {tenantId}
+                  AND "IsActive" = TRUE
+                FOR UPDATE
+                """)
+                .ToListAsync(ct);
+            replacedPrinter = lockedReplacement.SingleOrDefault();
             if (replacedPrinter is null)
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new { code = "printer_replacement_source_unavailable", message = "The selected queue to replace is no longer selected. Refresh the printer list and try again." });
+            }
+
+            if (replacedPrinter.IsPlatformHeld)
+            {
+                await transaction.RollbackAsync(ct);
+                return Results.Conflict(new
+                {
+                    code = "printer_replacement_source_on_platform_hold",
+                    message = "A printer on platform hold cannot be deselected through replacement. Its shop selection remains unchanged until the platform hold is released."
+                });
             }
 
             var queueJobsUnderLock = await db.PrintJobs.FromSqlInterpolated(

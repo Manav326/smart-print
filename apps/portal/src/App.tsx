@@ -2434,6 +2434,7 @@ function PrintersPage({
   const selectedPrinters = printers.filter(printer =>
     printer.isActive && ["PHYSICAL", "PDF_EXPORT", "UNSUPPORTED_VIRTUAL"].includes(printer.outputMode)
   );
+  const replaceableSelectedPrinters = selectedPrinters.filter(printer => !printer.isPlatformHeld);
   const selectablePrinters = printers.filter(printer =>
     !printer.isActive && isPrinterReadyForSelection(printer, agents)
   );
@@ -2442,7 +2443,7 @@ function PrintersPage({
   ).length;
   const quotaFull = maxPrinters != null && selectedPrinters.length >= maxPrinters;
   const canUseSelection = subscriptionActive === true;
-  const canReplaceSelection = selectedPrinters.length > 0 && selectablePrinters.length > 0;
+  const canReplaceSelection = replaceableSelectedPrinters.length > 0 && selectablePrinters.length > 0;
 
   async function confirmReplacement() {
     if (!pendingReplacement || !replacePrinterId) return;
@@ -2661,7 +2662,7 @@ function PrintersPage({
               {t("Queue to replace")}
               <select value={replacePrinterId} onChange={event => setReplacePrinterId(event.target.value)}>
                 <option value="">{t("Choose a selected queue")}</option>
-                {selectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
+                {replaceableSelectedPrinters.map(printer => <option key={printer.id} value={printer.id}>{printer.displayName}</option>)}
               </select>
             </label>
             <div className="modal-note">
