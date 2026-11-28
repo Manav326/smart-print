@@ -83,6 +83,35 @@ public sealed class AddPlatformPrinterAccessHolds : Migration
 
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        // This migration is newer than the virtual-printer output-mode migration.
+        // EF executes Down methods in reverse order, so refuse the downgrade here
+        // before removing any columns if the next older migration cannot safely
+        // roll back the visible virtual-queue inventory.
+        migrationBuilder.Sql(
+            """
+            DO $block_platform_printer_access_downgrade$
+            BEGIN
+                IF EXISTS (
+                    SELECT 1 FROM "PrinterDevices"
+                    WHERE "OutputMode" = 'UNSUPPORTED_VIRTUAL'
+                ) THEN
+                    RAISE EXCEPTION 'Cannot downgrade printer test-mode migration while unsupported virtual-printer inventory exists.';
+                END IF;
+
+                IF EXISTS (SELECT 1 FROM "PrinterPlatformAccessAudits") THEN
+                    RAISE EXCEPTION 'Cannot downgrade printer platform access while hold audit records exist.';
+                END IF;
+
+                IF EXISTS (
+                    SELECT 1 FROM "PrinterDevices"
+                    WHERE "IsPlatformHeld" = TRUE
+                ) THEN
+                    RAISE EXCEPTION 'Cannot downgrade printer platform access while active platform holds exist.';
+                END IF;
+            END
+            $block_platform_printer_access_downgrade$;
+            """);
+
         migrationBuilder.DropTable(name: "PrinterPlatformAccessAudits");
         migrationBuilder.DropCheckConstraint(
             name: "CK_PrinterDevices_PlatformHold", table: "PrinterDevices");

@@ -396,6 +396,10 @@ public sealed class PostgresMigrationUpgradeTests
             Assert.Equal("UNSUPPORTED_VIRTUAL", savedUnsupportedQueue.OutputMode);
             Assert.Equal("IPP", savedUnsupportedQueue.ConnectionType);
             Assert.False(savedUnsupportedQueue.IsActive);
+            Assert.False(savedUnsupportedQueue.IsPlatformHeld);
+            Assert.Null(savedUnsupportedQueue.PlatformHoldReason);
+            Assert.Null(savedUnsupportedQueue.PlatformHeldByUserId);
+            Assert.Null(savedUnsupportedQueue.PlatformHeldUtc);
             Assert.Null(savedUnsupportedQueue.IdentityFingerprint);
         }
 
@@ -407,12 +411,17 @@ public sealed class PostgresMigrationUpgradeTests
         Assert.NotNull(downgradePostgresException);
         Assert.Equal("P0001", downgradePostgresException.SqlState);
         Assert.Contains("Cannot downgrade printer test-mode migration", downgradePostgresException.Message, StringComparison.Ordinal);
+        Assert.Contains(
+            "202611280001_AddPlatformPrinterAccessHolds",
+            await db.Database.GetAppliedMigrationsAsync());
         await using (var afterBlockedDowngrade = new SmartPrintDbContext(options))
         {
             var preservedQueue = await afterBlockedDowngrade.PrinterDevices.AsNoTracking()
                 .SingleAsync(item => item.Id == unsupportedVirtualPrinter.Id);
             Assert.Equal("UNSUPPORTED_VIRTUAL", preservedQueue.OutputMode);
             Assert.Equal("http://192.168.31.171:10631/p/virtual", preservedQueue.ConnectionAddress);
+            Assert.False(preservedQueue.IsPlatformHeld);
+            Assert.Null(preservedQueue.PlatformHoldReason);
         }
     }
 
