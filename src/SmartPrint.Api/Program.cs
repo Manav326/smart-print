@@ -10804,6 +10804,7 @@ publicApi.MapPost("/sessions/current/jobs", async (
     try
     {
         await using var transaction = await db.Database.BeginTransactionAsync(ct);
+        await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         if (stationDefaultPrinterId is Guid lockedDefaultPrinterId)
         {
             var lockedDefaultRows = await db.PrinterDevices.FromSqlInterpolated(
@@ -10825,7 +10826,6 @@ publicApi.MapPost("/sessions/current/jobs", async (
                 });
             }
         }
-        await entitlements.AcquireQuotaLockAsync(session.TenantId, TenantQuotaResource.MonthlyPrintJob, ct);
         var racedJob = await db.PrintJobs.AsNoTracking()
             .Where(item => item.TenantId == session.TenantId && item.IdempotencyKey == idempotencyKey)
             .Select(item => new
