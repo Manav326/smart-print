@@ -20,6 +20,20 @@ public sealed class PrinterTypePolicyTests
         Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
     }
 
+    [Theory]
+    [InlineData("IPP://PRINTER.LOCAL/IPP/PRINT", "IPP")]
+    [InlineData("IPPS://PRINTER.LOCAL/IPP/PRINT", "IPP")]
+    [InlineData("HTTP://PRINTER.LOCAL/IPP/PRINT", "LAN")]
+    [InlineData("HTTPS://PRINTER.LOCAL/IPP/PRINT", "LAN")]
+    [InlineData("LPT1:", "WindowsQueue")]
+    [InlineData("", "WindowsQueue")]
+    [InlineData(null, "WindowsQueue")]
+    public void ConnectionClassificationIsCaseInsensitiveAndFailsClosedForUnknownPorts(
+        string? port, string expected)
+    {
+        Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
+    }
+
     [Fact]
     public void VirtualQueueIdentityIsNeverPromoted()
     {
