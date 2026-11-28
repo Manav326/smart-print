@@ -69,10 +69,11 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
             false,
             "INR",
             100,
-            documentName,
+            "ci-android-ipp-diagnostic.png",
             "ACKNOWLEDGED",
             now,
-            now.AddMinutes(5))
+            now.AddMinutes(5),
+            SpoolerJobName: documentName)
         {
             OutputMode = PrinterOutputModeRules.UnsupportedVirtual
         };
