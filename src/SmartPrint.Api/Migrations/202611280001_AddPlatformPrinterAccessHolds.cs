@@ -108,7 +108,7 @@ public sealed class AddPlatformPrinterAccessHolds : Migration
                 ) THEN
                     RAISE EXCEPTION 'Cannot downgrade printer platform access while active platform holds exist.';
                 END IF;
-            END
+            END;
             $block_platform_printer_access_downgrade$;
             """);
 
