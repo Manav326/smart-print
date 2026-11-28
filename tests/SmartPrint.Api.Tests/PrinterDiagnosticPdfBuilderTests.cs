@@ -64,6 +64,24 @@ public sealed class PrinterDiagnosticPdfBuilderTests
     }
 
     [Fact]
+    public void VirtualDiagnosticArtworkIdentifiesADigitalTestFileNotPhysicalPaper()
+    {
+        var metadata = Metadata with { OutputType = PrivatePrintingOutputPolicy.TestVirtual };
+        var settings = new PrinterDiagnosticSettings(
+            "A4", "Mono", false, 1, "VIRTUAL_FILE_OUTPUT;DUPLEX_NOT_APPLICABLE");
+        var pdf = PrinterDiagnosticPdfBuilder.CreatePdf(
+            settings, metadata, DateTimeOffset.Parse("2026-11-27T12:00:00Z"));
+
+        using var document = UglyToad.PdfPig.PdfDocument.Open(new MemoryStream(pdf));
+        var text = ExtractText(document);
+        Assert.Contains("VIRTUAL OUTPUT TEST", text, StringComparison.Ordinal);
+        Assert.Contains("One generated test file", text, StringComparison.Ordinal);
+        Assert.Contains("ONE TEST FILE", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("ONE COPY", text, StringComparison.Ordinal);
+        Assert.Single(document.GetPages());
+    }
+
+    [Fact]
     public void SanitizesPrinterMetadataAndDoesNotInterpretItAsPdfOperators()
     {
         var metadata = Metadata with
