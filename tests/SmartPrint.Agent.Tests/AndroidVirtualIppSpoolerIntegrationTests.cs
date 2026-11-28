@@ -42,19 +42,29 @@ public sealed class AndroidVirtualIppSpoolerIntegrationTests
         using var bitmap = new SKBitmap(640, 840);
         bitmap.Erase(SKColors.White);
         using (var canvas = new SKCanvas(bitmap))
-        using (var heading = new SKPaint { Color = SKColors.Black, TextSize = 34, IsAntialias = true, Typeface = SKTypeface.Default })
-        using (var body = new SKPaint { Color = SKColors.DarkSlateGray, TextSize = 22, IsAntialias = true, Typeface = SKTypeface.Default })
         using (var accent = new SKPaint { Color = new SKColor(25, 105, 180), IsAntialias = true })
         using (var pale = new SKPaint { Color = SKColors.LightGray, IsAntialias = true })
+        using (var dark = new SKPaint { Color = SKColors.DarkSlateGray, IsAntialias = true })
         {
-            canvas.DrawText("SMARTPRINT IPP RECEIVER TEST", 32, 70, heading);
-            canvas.DrawText("Windows Agent -> Windows spooler -> IPP -> Android", 32, 120, body);
-            canvas.DrawText("This is a controlled CI diagnostic page.", 32, 165, body);
-            canvas.DrawRect(new SKRect(32, 210, 608, 250), accent);
-            canvas.DrawRect(new SKRect(32, 280, 220, 430), accent);
-            canvas.DrawRect(new SKRect(250, 280, 608, 430), pale);
-            canvas.DrawText("END-TO-END RECEIPT", 32, 510, heading);
-            canvas.DrawText("Unique document: " + Guid.NewGuid().ToString("N"), 32, 555, body);
+            // Deliberately use vector shapes only: this is a transport/driver
+            // test, not a font-rendering test, and remains stable across SDKs.
+            canvas.DrawRect(new SKRect(24, 24, 616, 64), dark);
+            canvas.DrawRect(new SKRect(24, 88, 220, 300), accent);
+            canvas.DrawRect(new SKRect(244, 88, 616, 300), pale);
+            canvas.DrawRect(new SKRect(24, 324, 616, 364), accent);
+            for (var index = 0; index < 8; index++)
+            {
+                var left = 24 + (index * 74);
+                var shade = new SKPaint
+                {
+                    Color = new SKColor((byte)(index * 30), (byte)(255 - index * 28), (byte)(index * 18)),
+                    IsAntialias = true
+                };
+                using (shade)
+                    canvas.DrawRect(new SKRect(left, 400, left + 62, 500), shade);
+            }
+            canvas.DrawRect(new SKRect(24, 540, 616, 580), dark);
+            canvas.DrawRect(new SKRect(24, 604, 616, 804), pale);
             canvas.Flush();
         }
 
