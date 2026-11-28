@@ -350,4 +350,78 @@ public sealed class WindowsPrinterDiscoveryTests
         Assert.Equal(2, capabilities.RootElement.GetProperty("schemaVersion").GetInt32());
     }
 
+    [Fact]
+    public async Task WinspoolFallbackKeepsAWindowsQueueVisibleWhenWmiEnumerationFails()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var queueJson = """[{"queueName":"Office LAN","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(1, string.Empty, "simulated WMI failure", false),
+            new AgentChildProcessResult(0, queueJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        var queue = Assert.Single(result.Printers);
+        Assert.Equal("Office LAN", queue.QueueName);
+        Assert.Equal("IP_192.168.1.20", queue.PortName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
+    public async Task CapabilityProbeTimeoutDoesNotHideDiscoveredQueue()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var queue = new DiscoveredPrinter(
+            "Office USB", "Slow vendor driver", "USB001", "Ready", false,
+            OutputMode: PrinterOutputModeRules.Physical);
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(-1, string.Empty, "simulated timeout", true));
+        var probe = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            childProcessRunner: runner);
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            probe,
+            executeInCurrentProcess: true);
+
+        var result = await discovery.EnrichCapabilitiesAsync([queue], CancellationToken.None);
+
+        Assert.True(result.Success);
+        var retained = Assert.Single(result.Printers);
+        Assert.Equal(queue.QueueName, retained.QueueName);
+        Assert.Equal(queue.Status, retained.Status);
+        Assert.Equal("{}", retained.CapabilitiesJson);
+        Assert.Equal(1, runner.CallCount);
+    }
+
+    private sealed class SequenceChildProcessRunner(params AgentChildProcessResult[] results)
+        : IAgentChildProcessRunner
+    {
+        private readonly Queue<AgentChildProcessResult> responses = new(results);
+        public List<string> Commands { get; } = [];
+        public int CallCount => Commands.Count;
+
+        public Task<AgentChildProcessResult> ExecuteAsync(
+            string command,
+            string standardInput,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            Func<CancellationToken, Task<bool>>? beforeSpoolerSubmission = null)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Commands.Add(command);
+            if (!responses.TryDequeue(out var response))
+                throw new InvalidOperationException("No fake child-process response was configured.");
+            return Task.FromResult(response);
+        }
+    }
+
 }
