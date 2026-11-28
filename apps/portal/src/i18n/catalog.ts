@@ -4663,7 +4663,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "The Agent has received the test. Waiting for the current spooler attempt to finish before asking for your result.": "Agent ko test mil gaya hai. Aapse result poochhne se pehle current spooler attempt complete hone ka wait ho raha hai.",
     "The diagnostic is queued. Keep the paired Windows computer and Print Agent online; this panel checks the result automatically.": "Diagnostic queue mein hai. Paired Windows computer aur Print Agent online rakhein; yeh panel result automatically check karta hai.",
     "diagnostic records retained for this printer": "Is printer ke diagnostic records saved hain",
-  },    "Printer test": "Printer test karein",
+    "Printer test": "Printer test karein",
     "Create a test file through this virtual printer.": "Is virtual printer se test file banayein.",
     "Send one test copy using the installed Windows printer settings.": "Installed Windows printer settings se ek test copy bhejein.",
     "Test printer": "Printer test karein",
@@ -4709,7 +4709,7 @@ const screenTextCatalogs: Record<UiLocale, Record<string, string>> = {
     "Refresh test status": "Test status refresh karein",
     "Open Print Agent": "Print Agent kholein",
     "File received with an issue": "File issue ke saath mili",
-
+  },
 };
 
 export function translateUiText(localeValue: unknown, sourceText: string, values: MessageValues = {}): string {
