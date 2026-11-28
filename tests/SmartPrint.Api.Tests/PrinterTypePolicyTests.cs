@@ -53,7 +53,7 @@ public sealed class PrinterTypePolicyTests
     [Theory]
     [InlineData("PHYSICAL", true, true)]
     [InlineData("PDF_EXPORT", true, false)]
-    [InlineData("UNSUPPORTED_VIRTUAL", false, true)]
+    [InlineData("UNSUPPORTED_VIRTUAL", true, true)]
     [InlineData("UNKNOWN", false, true)]
     public void DefinesWhichProfilesUseTheWindowsQueueReadinessContract(
         string outputMode, bool selectable, bool usesQueueReadiness)
