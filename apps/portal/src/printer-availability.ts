@@ -62,3 +62,14 @@ export function isPrinterAvailableForShop(
 ): boolean {
   return getPrinterAvailabilityReason(printer, agents, now) === null;
 }
+
+/**
+ * Queue activity is not the same as queue health: Busy remains eligible for
+ * selection, but the owner UI must not describe it as Ready.
+ */
+export function getPrinterQueueStatusKind(status?: string | null): "ready" | "busy" | "attention" {
+  const normalized = (status ?? "").trim().toLowerCase();
+  if (normalized === "ready") return "ready";
+  if (normalized === "busy") return "busy";
+  return "attention";
+}
