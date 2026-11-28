@@ -33,7 +33,10 @@ public static class PrinterDiagnosticEndpoints
 
             var printer = readiness.Printer!;
             if (!PrinterDiagnosticRules.TryResolveSettings(
-                    printer.CapabilitiesJson, out var settings, out var failureReason))
+                    printer.CapabilitiesJson,
+                    string.Equals(printer.OutputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase),
+                    out var settings,
+                    out var failureReason))
                 return Results.Conflict(new { code = "diagnostic_capabilities_unsupported", message = failureReason });
 
             return Results.Ok(new
@@ -253,7 +256,10 @@ public static class PrinterDiagnosticEndpoints
             }
 
             if (!PrinterDiagnosticRules.TryResolveSettings(
-                    printer.CapabilitiesJson, out var settings, out var failureReason))
+                    printer.CapabilitiesJson,
+                    string.Equals(printer.OutputMode, PrinterTypePolicy.UnsupportedVirtual, StringComparison.OrdinalIgnoreCase),
+                    out var settings,
+                    out var failureReason))
             {
                 await transaction.RollbackAsync(ct);
                 return Results.Conflict(new { code = "diagnostic_capabilities_unsupported", message = failureReason });
