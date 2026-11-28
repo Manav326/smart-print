@@ -29,19 +29,38 @@ public static class PrinterTypePolicy
                !port.Equals("NUL:", StringComparison.OrdinalIgnoreCase);
     }
 
-    public static string ResolveConnectionType(string? portName)
+    public static string ResolveConnectionType(string? portName, string? driverName = null)
     {
         var value = portName?.Trim() ?? string.Empty;
-        if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint) &&
-            endpoint.Scheme is "ipp" or "ipps" or "http" or "https")
-            return "IPP";
+        var usesIppDriver = driverName?.Contains("IPP", StringComparison.OrdinalIgnoreCase) == true;
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var endpoint))
+        {
+            if (endpoint.Scheme is "ipp" or "ipps")
+                return "IPP";
+
+            // HTTP(S) alone is not proof of IPP. Require the installed IPP driver.
+            if (endpoint.Scheme is "http" or "https")
+                return usesIppDriver ? "IPP" : "LAN";
+        }
 
         if (value.StartsWith("USB", StringComparison.OrdinalIgnoreCase))
             return "USB";
 
+        // UNC printer connections are print-server shares, not direct LAN ports.
+        if (value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase))
+            return "Shared";
+
+        // Windows may hide the IPP URI behind a generated WSD port.
+        if (usesIppDriver && value.StartsWith("WSD-", StringComparison.OrdinalIgnoreCase))
+            return "IPP";
+
         if (value.StartsWith("IP_", StringComparison.OrdinalIgnoreCase) ||
-            value.StartsWith(@"\\", StringComparison.OrdinalIgnoreCase) ||
-            value.Contains("WSD", StringComparison.OrdinalIgnoreCase))
+            value.StartsWith("TCP_", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("LPR_", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("WSD-", StringComparison.OrdinalIgnoreCase) ||
+            value.Contains("WSD", StringComparison.OrdinalIgnoreCase) ||
+            value.StartsWith("LPR", StringComparison.OrdinalIgnoreCase))
             return "LAN";
 
         return "WindowsQueue";

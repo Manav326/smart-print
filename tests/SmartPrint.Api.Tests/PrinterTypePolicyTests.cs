@@ -5,18 +5,23 @@ namespace SmartPrint.Api.Tests;
 public sealed class PrinterTypePolicyTests
 {
     [Theory]
-    [InlineData("USB001", "USB")]
-    [InlineData("IP_192.168.31.171", "LAN")]
-    [InlineData(@"\\PRINT-SERVER\Queue", "LAN")]
-    [InlineData("WSD-abc123", "LAN")]
-    [InlineData("http://192.168.31.171:10631/p/virtual", "IPP")]
-    [InlineData("ipp://printer.local/ipp/print", "IPP")]
-    [InlineData("ipps://printer.local/ipp/print", "IPP")]
-    [InlineData("PORTPROMPT:", "WindowsQueue")]
-    [InlineData("FILE:", "WindowsQueue")]
-    public void DetectsConnectionTransportWithoutChangingOutputKind(string port, string expected)
+    [InlineData("USB001", null, "USB")]
+    [InlineData("IP_192.168.31.171", null, "LAN")]
+    [InlineData("TCP_192.168.31.171", null, "LAN")]
+    [InlineData("LPR_192.168.31.171", null, "LAN")]
+    [InlineData(@"\\PRINT-SERVER\Queue", null, "Shared")]
+    [InlineData("WSD-abc123", null, "LAN")]
+    [InlineData("WSD-abc123", "Microsoft IPP Class Driver", "IPP")]
+    [InlineData("http://192.168.31.171:10631/p/virtual", "Microsoft IPP Class Driver", "IPP")]
+    [InlineData("http://192.168.31.171:10631/p/virtual", "Generic Network Driver", "LAN")]
+    [InlineData("https://printer.local/ipp/print", "Microsoft IPP Class Driver", "IPP")]
+    [InlineData("ipp://printer.local/ipp/print", null, "IPP")]
+    [InlineData("ipps://printer.local/ipp/print", null, "IPP")]
+    [InlineData("PORTPROMPT:", null, "WindowsQueue")]
+    [InlineData("FILE:", null, "WindowsQueue")]
+    public void DetectsConnectionTransportWithoutChangingOutputKind(string port, string? driver, string expected)
     {
-        Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port));
+        Assert.Equal(expected, PrinterTypePolicy.ResolveConnectionType(port, driver));
     }
 
     [Fact]

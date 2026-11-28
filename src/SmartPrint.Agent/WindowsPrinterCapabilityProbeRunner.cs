@@ -36,9 +36,16 @@ public sealed class WindowsPrinterCapabilityProbeRunner
             configuration?.GetValue<int?>("Agent:PrinterCapabilityProbeTimeoutSeconds") ?? 8, 2, 30));
     }
 
+    public Task<string> ProbeAsync(
+        string queueName,
+        string? driverName,
+        CancellationToken cancellationToken) =>
+        ProbeAsync(queueName, driverName, null, cancellationToken);
+
     public async Task<string> ProbeAsync(
         string queueName,
         string? driverName,
+        string? portName,
         CancellationToken cancellationToken)
     {
         if (!OperatingSystem.IsWindows() || string.IsNullOrWhiteSpace(queueName))
@@ -47,7 +54,7 @@ public sealed class WindowsPrinterCapabilityProbeRunner
         if (executeInCurrentProcess)
             return WindowsPrinterCapabilityDiscovery.DiscoverJson(queueName, driverName);
 
-        var key = BuildCacheKey(queueName, driverName);
+        var key = BuildCacheKey(queueName, driverName, portName);
         if (TryGetCached(key, out var cached))
             return cached;
 
@@ -133,8 +140,10 @@ public sealed class WindowsPrinterCapabilityProbeRunner
             cache[key] = new CacheEntry(DateTimeOffset.UtcNow.Add(lifetime), json);
     }
 
-    private static string BuildCacheKey(string queueName, string? driverName) =>
-        queueName.Trim() + "\u001f" + (driverName ?? string.Empty).Trim();
+    private static string BuildCacheKey(string queueName, string? driverName, string? portName) =>
+        queueName.Trim() + "\u001f" +
+        (driverName ?? string.Empty).Trim() + "\u001f" +
+        (portName ?? string.Empty).Trim();
 
     private sealed record CacheEntry(DateTimeOffset ExpiresUtc, string Json);
 }

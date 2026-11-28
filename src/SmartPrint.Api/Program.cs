@@ -9574,29 +9574,53 @@ agentApi.MapPost("/printers/sync", async (
         .ToListAsync(ct);
     var seenQueues = normalized.Select(printer => printer.QueueName)
         .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // This endpoint runs on every Agent inventory refresh. Index current queues
+    // once instead of issuing an existence SELECT for every discovered queue.
+    var existingByQueue = existing
+        .Where(printer => !string.IsNullOrWhiteSpace(printer.QueueName))
+        .GroupBy(printer => printer.QueueName!, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+    // Manual placeholders and queues owned by revoked Agents can be adopted.
+    // Fetch the matching records once and resolve by normalized queue name.
+    var adoptable = await db.PrinterDevices
+        .Where(printer => printer.TenantId == device.TenantId &&
+            printer.QueueName != null && seenQueues.Contains(printer.QueueName) &&
+            (printer.AgentDeviceId == null ||
+             db.AgentDevices.Any(previousAgent =>
+                 previousAgent.Id == printer.AgentDeviceId &&
+                 previousAgent.TenantId == device.TenantId &&
+                 previousAgent.RevokedUtc != null)))
+        .OrderBy(printer => printer.CreatedUtc)
+        .ToListAsync(ct);
+    var adoptableByQueue = adoptable
+        .Where(printer => !string.IsNullOrWhiteSpace(printer.QueueName))
+        .GroupBy(printer => printer.QueueName!, StringComparer.OrdinalIgnoreCase)
+        .ToDictionary(group => group.Key, group => group.First(), StringComparer.OrdinalIgnoreCase);
+
+    // Batch active grants for the tenant, replacing per-queue grant lookups.
+    var activeGrantRows = await db.VirtualPrinterTestGrants.AsNoTracking()
+        .Where(grant => grant.TenantId == device.TenantId &&
+            grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now)
+        .Select(grant => new { grant.PrinterDeviceId, grant.AgentDeviceId, grant.IdentityFingerprint })
+        .ToListAsync(ct);
+    var activeGrantKeys = activeGrantRows
+        .Select(grant => (grant.PrinterDeviceId, grant.AgentDeviceId, grant.IdentityFingerprint))
+        .ToHashSet();
+
     var created = 0;
     var updated = 0;
     var autoSelected = 0;
 
     foreach (var discovered in normalized)
     {
-        var printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
-            item.TenantId == device.TenantId &&
-            item.AgentDeviceId == device.Id &&
-            item.QueueName == discovered.QueueName, ct);
-
+        existingByQueue.TryGetValue(discovered.QueueName, out var printer);
         var adoptedUnlinkedQueue = false;
-        if (printer is null)
+        if (printer is null && adoptableByQueue.TryGetValue(discovered.QueueName, out var adoptablePrinter))
         {
-            printer = await db.PrinterDevices.FirstOrDefaultAsync(item =>
-                item.TenantId == device.TenantId &&
-                item.QueueName == discovered.QueueName &&
-                (item.AgentDeviceId == null ||
-                 db.AgentDevices.Any(previousAgent =>
-                     previousAgent.Id == item.AgentDeviceId &&
-                     previousAgent.TenantId == device.TenantId &&
-                     previousAgent.RevokedUtc != null)), ct);
-            adoptedUnlinkedQueue = printer is not null && printer.AgentDeviceId is null;
+            printer = adoptablePrinter;
+            adoptedUnlinkedQueue = printer.AgentDeviceId is null;
         }
 
         if (printer is null)
@@ -9614,7 +9638,7 @@ agentApi.MapPost("/printers/sync", async (
                 DisplayName = discovered.QueueName,
                 Manufacturer = "Windows",
                 Model = discovered.DriverName,
-                ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName),
+                ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName),
                 OutputMode = discovered.OutputMode,
                 IdentityFingerprint = VirtualPrinterTestGrantPolicy.ComputeIdentityFingerprint(
                     device.Id, discovered.QueueName, discovered.DriverName, discovered.PortName),
@@ -9626,6 +9650,7 @@ agentApi.MapPost("/printers/sync", async (
                 CreatedUtc = now
             };
             db.PrinterDevices.Add(printer);
+            existingByQueue[discovered.QueueName] = printer;
             if (selectQueue)
             {
                 selectedPrinterCount++;
@@ -9645,10 +9670,7 @@ agentApi.MapPost("/printers/sync", async (
                 (printer.OutputMode == "PHYSICAL" || printer.OutputMode == "PDF_EXPORT" ||
                  (printer.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
                   !string.IsNullOrWhiteSpace(previousFingerprint) &&
-                  await db.VirtualPrinterTestGrants.AnyAsync(grant =>
-                      grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
-                      grant.AgentDeviceId == device.Id && grant.IdentityFingerprint == previousFingerprint &&
-                      grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct)));
+                  activeGrantKeys.Contains((printer.Id, device.Id, previousFingerprint))));
 
             if (!string.Equals(previousFingerprint, discoveredFingerprint, StringComparison.Ordinal))
             {
@@ -9664,17 +9686,14 @@ agentApi.MapPost("/printers/sync", async (
 
             var hasActiveVirtualGrant = !environment.IsProduction() &&
                 discovered.OutputMode == PrinterTypePolicy.UnsupportedVirtual &&
-                await db.VirtualPrinterTestGrants.AnyAsync(grant =>
-                    grant.TenantId == device.TenantId && grant.PrinterDeviceId == printer.Id &&
-                    grant.AgentDeviceId == device.Id && grant.IdentityFingerprint == discoveredFingerprint &&
-                    grant.RevokedUtc == null && grant.CreatedUtc <= now && grant.ExpiresUtc > now, ct);
+                activeGrantKeys.Contains((printer.Id, device.Id, discoveredFingerprint));
             var driverChanged = !string.Equals(
                 printer.Model, discovered.DriverName, StringComparison.OrdinalIgnoreCase);
             printer.AgentDeviceId = device.Id;
             printer.DisplayName = discovered.QueueName;
             printer.Manufacturer = "Windows";
             printer.Model = discovered.DriverName;
-            printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName);
+            printer.ConnectionType = PrinterTypePolicy.ResolveConnectionType(discovered.PortName, discovered.DriverName);
             printer.OutputMode = discovered.OutputMode;
             printer.IdentityFingerprint = discoveredFingerprint;
             printer.ConnectionAddress = string.IsNullOrWhiteSpace(discovered.PortName) ? null : discovered.PortName;

@@ -154,7 +154,7 @@ public sealed class WindowsPrinterDiscovery
             printer with
             {
                 CapabilitiesJson = await capabilityProbe.ProbeAsync(
-                    printer.QueueName, printer.DriverName, cancellationToken)
+                    printer.QueueName, printer.DriverName, printer.PortName, cancellationToken)
             }));
         return (true, NormalizeDiscoveredQueues(enriched));
     }

@@ -23,6 +23,29 @@ public sealed class IsolatedPrinterWorkerTests
     }
 
     [Fact]
+    public async Task CapabilityProbeCacheIsScopedToTheDiscoveredPort()
+    {
+        var runner = new FakeChildProcessRunner(
+            new AgentChildProcessResult(
+                0,
+                """{"schemaVersion":2,"color":true}""",
+                string.Empty,
+                false));
+        var probes = new WindowsPrinterCapabilityProbeRunner(
+            NullLogger<WindowsPrinterCapabilityProbeRunner>.Instance,
+            childProcessRunner: runner);
+
+        var first = await probes.ProbeAsync("Office queue", "Office driver", "USB001", CancellationToken.None);
+        var unchanged = await probes.ProbeAsync("Office queue", "Office driver", "USB001", CancellationToken.None);
+        var reconnected = await probes.ProbeAsync("Office queue", "Office driver", "USB002", CancellationToken.None);
+
+        Assert.Contains("schemaVersion", first);
+        Assert.Equal(first, unchanged);
+        Assert.Equal(first, reconnected);
+        Assert.Equal(2, runner.CallCount);
+    }
+
+    [Fact]
     public async Task CapabilityProbeTimeoutDoesNotBlockOtherQueues()
     {
         var runner = new FakeChildProcessRunner(
