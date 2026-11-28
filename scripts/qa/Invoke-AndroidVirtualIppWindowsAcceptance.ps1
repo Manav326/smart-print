@@ -201,15 +201,36 @@ try {
     Invoke-Checked $adb @("-s", "emulator-5554", "install", "-r", $apkPath) "Installing the pinned IppVirtual receiver failed"
     Invoke-Checked $adb @("-s", "emulator-5554", "shell", "monkey", "-p", $packageName, "1") "Launching IppVirtual failed"
 
-    # The receiver opens in Preview mode. Its Run action must be pressed to
-    # start the IPP service; launching the activity alone leaves port 10631 closed.
+    # Discover the live Run control from Android accessibility; do not assume
+    # fixed coordinates because hosted emulator resolution/density can vary.
     Start-Sleep -Seconds 3
-    Invoke-Checked $adb @("-s", "emulator-5554", "shell", "input", "tap", "911", "136") "Starting the IppVirtual receiver failed"
+    $runTapped = $false
+    for ($attempt = 1; $attempt -le 3 -and -not $runTapped; $attempt++) {
+        & $adb -s emulator-5554 shell uiautomator dump /sdcard/smartprint-ippvirtual-ui.xml 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0) { Start-Sleep -Seconds 2; continue }
+        & $adb -s emulator-5554 pull /sdcard/smartprint-ippvirtual-ui.xml $uiHierarchyPath 2>&1 | Out-Null
+        if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $uiHierarchyPath)) { Start-Sleep -Seconds 2; continue }
+        try {
+            [xml]$ui = Get-Content -LiteralPath $uiHierarchyPath -Raw
+            $runNode = @($ui.SelectNodes("//node")) | Where-Object {
+                $_.GetAttribute("resource-id") -eq ($packageName + ":id/action_start") -or
+                $_.GetAttribute("content-desc") -match "^(Run|Start)$" -or
+                ($_.GetAttribute("text") -match "^(Run|Start)$" -and $_.GetAttribute("clickable") -eq "true")
+            } | Select-Object -First 1
+            if ($null -eq $runNode) { throw "IppVirtual accessibility tree does not expose its Run/Start control." }
+            if ($runNode.GetAttribute("enabled") -eq "false" -or $runNode.GetAttribute("clickable") -eq "false") { throw "IppVirtual Run/Start control is disabled or not clickable." }
+            $bounds = [regex]::Match($runNode.GetAttribute("bounds"), "^\[(\d+),(\d+)\]\[(\d+),(\d+)\]$")
+            if (-not $bounds.Success) { throw "IppVirtual Run/Start control has invalid accessibility bounds." }
+            $tapX = [int]([int]$bounds.Groups[1].Value + ([int]$bounds.Groups[3].Value - [int]$bounds.Groups[1].Value) / 2)
+            $tapY = [int]([int]$bounds.Groups[2].Value + ([int]$bounds.Groups[4].Value - [int]$bounds.Groups[2].Value) / 2)
+            Invoke-Checked $adb @("-s", "emulator-5554", "shell", "input", "tap", "$tapX", "$tapY") "Tapping the discovered IppVirtual Run/Start control failed"
+            $runTapped = $true
+        } catch { if ($attempt -eq 3) { throw }; Start-Sleep -Seconds 2 }
+    }
+    if (-not $runTapped) { throw "Could not discover and activate IppVirtual Run/Start control." }
     Start-Sleep -Seconds 5
     & $adb -s emulator-5554 shell uiautomator dump /sdcard/smartprint-ippvirtual-ui.xml 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
-        & $adb -s emulator-5554 pull /sdcard/smartprint-ippvirtual-ui.xml $uiHierarchyPath 2>$null | Out-Null
-    }
+    if ($LASTEXITCODE -eq 0) { & $adb -s emulator-5554 pull /sdcard/smartprint-ippvirtual-ui.xml $uiHierarchyPath 2>$null | Out-Null }
 
     # Forward only the receiver's known IPP listener to this same Windows host.
     Invoke-Checked $adb @("-s", "emulator-5554", "forward", "tcp:$ippPort", "tcp:$ippPort") "ADB port forwarding failed"
