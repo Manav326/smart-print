@@ -426,6 +426,27 @@ public sealed class WindowsPrinterDiscoveryTests
     }
 
     [Fact]
+    public async Task TimedOutWmiEnumerationFallsBackToWinspoolInventory()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        const string fallbackJson = """[{"queueName":"Office LAN","driverName":"Office Driver","portName":"IP_192.168.1.20","status":"Ready","isDefault":false,"outputMode":"PHYSICAL","capabilitiesJson":"{}"}]""";
+        var runner = new SequenceChildProcessRunner(
+            new AgentChildProcessResult(-1, string.Empty, "simulated timeout", true),
+            new AgentChildProcessResult(0, fallbackJson, string.Empty, false));
+        var discovery = new WindowsPrinterDiscovery(
+            NullLogger<WindowsPrinterDiscovery>.Instance,
+            childProcessRunner: runner);
+
+        var result = await discovery.TryDiscoverMetadataAsync(CancellationToken.None);
+
+        Assert.True(result.Success);
+        Assert.Equal("Office LAN", Assert.Single(result.Printers).QueueName);
+        Assert.Equal(new[] { "--discover-printers", "--discover-printers-winspool" }, runner.Commands);
+    }
+
+    [Fact]
     public async Task UnknownWmiStatusTriggersOneTargetedWinspoolRefreshWithoutOverwritingKnownStatus()
     {
         if (!OperatingSystem.IsWindows())
