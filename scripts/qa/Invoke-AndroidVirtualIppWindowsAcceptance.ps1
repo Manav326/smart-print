@@ -72,6 +72,11 @@ $report = [ordered]@{
         ippPort = $ippPort
         ippResource = $ippResource
     }
+    discovery = [ordered]@{
+        result = "NOT_TESTED"
+        method = "Direct IPP endpoint registration; mDNS multicast discovery is a separate acceptance stage."
+        expectedResource = "/p/virtual"
+    }
     windowsQueue = $null
     agentTestExitCode = $null
     failure = $null
@@ -248,10 +253,9 @@ try {
         throw "IppVirtual did not expose its documented IPP listener on TCP $ippPort after launch."
     }
 
-    # Directed discovery avoids mDNS multicast assumptions in a virtualized CI network.
-    # 402D's published DNS-SD record uses rp=p/virеual, where the fifth
-    # character is CYRILLIC SMALL LETTER IE (U+0435), not ASCII "e".
-    # Try the exact advertised resource first; retain ASCII as a fallback probe.
+    # Register the documented receiver resource path directly. This stage
+    # validates IPP transport and the real Windows spooler/Agent path only;
+    # it does NOT claim to validate mDNS/DNS-SD automatic discovery.
     Start-Service -Name Spooler
     # The queue name is unique to this workflow attempt. A collision is an
     # invariant violation: preserve the existing queue and fail with evidence.
@@ -260,8 +264,7 @@ try {
     if ($existingQueue) {
         throw "Refusing to overwrite pre-existing queue '$queueName' (driver '$($existingQueue.DriverName)', port '$($existingQueue.PortName)')."
     }
-    $advertisedResource = [string]::Concat("/p/vir", [char]0x0435, "ual")
-    $ippResources = @($advertisedResource, "/p/virtual")
+    $ippResources = @("/p/virtual")
     $candidateFailures = @()
     $printer = $null
     foreach ($candidateResource in $ippResources) {
