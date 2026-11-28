@@ -121,7 +121,7 @@ try {
     if (-not (Test-Path -LiteralPath $sdkManager)) { throw "Android SDK Manager is missing at $sdkManager." }
 
     # Install only the one API image and tools needed for the receiver smoke test.
-    @("y", "y", "y", "y", "y") | & $sdkManager --licenses | Out-Null
+    # The setup-android action has already accepted the Android SDK licenses.
     Invoke-Checked $sdkManager @("--install", "platform-tools", "emulator", "platforms;android-35", "build-tools;36.0.0", "system-images;android-35;google_apis;x86_64") "Android SDK package installation failed"
     if (-not (Test-Path -LiteralPath $adb) -or -not (Test-Path -LiteralPath $emulator) -or -not (Test-Path -LiteralPath $avdManager)) {
         throw "Android SDK installation did not provide adb, emulator and avdmanager."
