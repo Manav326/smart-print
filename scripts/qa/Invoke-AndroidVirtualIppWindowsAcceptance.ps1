@@ -511,6 +511,42 @@ try {
         if ($printer) { break }
     }
 
+    # Windows may have already auto-discovered this IPP printer via DNS-SD.
+    # When its live PnP UUID and WSD port registry UUID match this receiver,
+    # attach the queue to that existing port rather than registering the same
+    # IPP device a second time.
+    if (-not $printer -and $discoveredIppPorts.Count -gt 0) {
+        foreach ($discoveredPort in $discoveredIppPorts) {
+            try {
+                $candidatePortName = $discoveredPort.PortName
+                Write-Host "Using already-discovered IPP port '$candidatePortName' for printer UUID $($discoveredPort.PrinterUuid)."
+                Add-Printer -Name $queueName -DriverName "Microsoft IPP Class Driver" -PortName $candidatePortName -KeepPrintedJobs -ErrorAction Stop
+                $queueCreated = $true
+                $queueOwned = $true
+                $candidatePrinter = Get-Printer -Name $queueName -ErrorAction Stop
+                if ($candidatePrinter.DriverName -notmatch "Microsoft IPP Class Driver" -or
+                    $candidatePrinter.PortName -ne $candidatePortName) {
+                    throw "Windows did not bind the queue to the UUID-verified IPP port and Microsoft IPP Class Driver."
+                }
+                $printer = $candidatePrinter
+                $ippResource = $ippResources[0]
+                $ippPortReused = $true
+                $registrationMethod = "EXISTING_WSD_IPP_PORT"
+                Write-Host "Created Windows queue '$queueName' on existing IPP port '$candidatePortName'."
+                break
+            } catch {
+                # If the cmdlet created the uniquely named queue before an
+                # after-create verification failure, take ownership for cleanup.
+                $partialQueue = Get-Printer -Name $queueName -ErrorAction SilentlyContinue
+                if ($partialQueue) {
+                    $queueCreated = $true
+                    $queueOwned = $true
+                }
+                $candidateFailures += "pre-existing IPP port $($discoveredPort.PortName) (UUID $($discoveredPort.PrinterUuid)) => $($_.Exception.Message)"
+            }
+        }
+    }
+
     if (-not $printer) {
         foreach ($candidateResource in $ippResources) {
             $candidateUrl = "http://127.0.0.1:$ippPort$candidateResource"
