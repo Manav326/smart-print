@@ -171,7 +171,7 @@ function OrderCard({journey,printers,agents,locale,onReviewBatch,onVerifyPayment
     const originalQueueReady=!!originalPrinter&&
       originalPrinter.agentDeviceId===job.claimedByAgentDeviceId&&
       ((originalPrinter.outputMode==="PHYSICAL"&&job.outputType==="PHYSICAL")||
-       (originalPrinter.outputMode==="UNSUPPORTED_VIRTUAL"&&job.outputType==="TEST_VIRTUAL"&&originalPrinter.virtualTestGrantActive===true))&&
+       (originalPrinter.outputMode==="UNSUPPORTED_VIRTUAL"&&job.outputType==="TEST_VIRTUAL"))&&
       isPrinterAvailableForShop(originalPrinter,agents);
     const verifiedPayment=job.payment?.status==="VERIFIED"||job.payment?.status==="PARTIALLY_REFUNDED";
     return verifiedPayment&&canResumeUnprintedPhysicalJob(
