@@ -1,7 +1,7 @@
 # Printer onboarding and diagnostics — implementation audit
 
 **Audit baseline:** `main` / `feature/unified-printer-onboarding` at `69d34714c75502666fa5c69c1f2aacb9e61c4a37`  
-**Scope:** Wi-Fi/network, IPP/IPPS, USB and virtual printers. Bluetooth, BLE, thermal/label/portable and ESC/POS/ZPL/TSPL/CPCL are excluded.
+**Scope:** USB, Wi-Fi, Ethernet/LAN, WSD, IPP/IPPS, shared Windows queues and the existing restricted virtual-printer test path. Bluetooth/BLE and thermal/label devices and command languages (ESC/POS, ZPL, TSPL, CPCL) are explicitly outside the product scope.
 
 ## Executive finding
 
@@ -72,11 +72,14 @@ The safest next step is to extend the existing Windows queue pathway and its own
 
 | Area | Current implementation | Gap / truthful boundary |
 |---|---|---|
-| USB physical | Windows-installed queue, driver capability probe, Windows spooler execution | No direct USB stack; model/driver/hardware combinations still need qualification |
-| Wi-Fi / LAN physical | Works when Windows has installed a usable queue; port may be classified LAN | Wi-Fi radio/SSID does not define a print protocol; no in-app printer service browse or queue installation |
-| IPP / IPPS | IPP-like Windows queue ports are classified as IPP; print uses the Windows spooler/installed queue | No direct IPP attribute query, format negotiation, TLS policy or driverless adapter contract |
-| Virtual output | Windows queues retain `UNSUPPORTED_VIRTUAL`; non-production shop-scoped grant can exercise the shared spooler path; PDF export is separate | No general production virtual-printer support; no OS inbound print-capture workflow |
-| Diagnostic test | Dedicated one-copy diagnostic job purpose, branded template, attempt history, Agent/spooler reconciliation and owner verification are implemented on installed Windows queues | Real physical paper-output qualification remains device/driver-specific; Bluetooth/BLE and native protocol discovery are out of scope |
+| USB physical | Windows-installed USB queue, isolated driver capability probe and Windows spooler execution | Exact device/driver/firmware combinations still require physical qualification |
+| Wi-Fi / Ethernet / LAN | Windows-installed TCP/IP or network queue, same Agent and spooler execution | Wi-Fi is a medium, not a protocol; verify the actual Windows port/driver and recovery after IP/network changes |
+| WSD | Windows-installed WSD queue, same Agent and spooler execution | Distinguish ordinary WSD network queues from WSD ports backed by Microsoft's IPP Class Driver |
+| IPP / IPPS | Windows-installed IPP queue, Windows IPP Class Driver or vendor driver, same spooler execution | URI/driver evidence must identify IPP; HTTP(S) alone is not IPP. Direct native IPP/IPPS negotiation is not implemented by this Windows-queue path |
+| Shared Windows queue | Windows-connected UNC share, same Agent and spooler execution | Verify share permissions, print-server reachability and reconnection; preserve the share as a distinct connection type |
+| Other Windows queues | Installed Windows queue and spooler | Expose the actual queue type as a fallback; do not infer a physical protocol from an opaque port name |
+| Virtual output | Existing `UNSUPPORTED_VIRTUAL` identity and non-production shop-scoped grant; PDF export remains separate | No general production virtual-printer support or OS inbound print-capture workflow |
+| Diagnostic test | One-copy owner-initiated diagnostic, Agent/spooler reconciliation and owner verification | A successful spooler state is not physical proof; hardware qualification remains specific to printer, driver, media and Windows build |
 
 ## 4. Architecture decisions
 
@@ -143,6 +146,19 @@ Focused policy, PDF-renderer and endpoint integration tests cover conservative c
 Bluetooth/BLE, thermal/label/portable printers and ESC/POS/ZPL/TSPL/CPCL; broad subnet scans; vendor-driver downloads or installation; replacing a shop's existing Windows driver/default printer; universal compatibility claims; a second rendering/dispatch/queue service; or changes to the MSIX release pipeline unrelated to the printer product.
 
 ## 8. Diagnostic page selection and owner experience
+
+## 9. Physical Windows queue acceptance (USB, LAN/WSD, IPP/IPPS and shared queues)
+
+The operator-assisted acceptance harness exercises the production SmartPrint diagnostic path for an already installed physical Windows queue. It works across the included connection families and never creates a synthetic Windows job, changes a port, downloads a driver or changes the default printer.
+
+Run `scripts/qa/Invoke-SmartPrintPhysicalPrinterAcceptance.ps1` on the paired shop PC, supplying the exact queue name and installed Agent version. Set `ExpectedConnectionType` to `USB`, `LAN`, `IPP`, `SHARED`, `WINDOWS_QUEUE` or `AUTO`.
+
+Use one acceptance run per physical queue and per materially different driver/port/media combination. The harness snapshots existing queue job IDs, asks the operator to start exactly one SmartPrint owner diagnostic, requires a newly observed spooler job, and then asks the operator to inspect the real paper output. It writes a JSON evidence report with Windows build, Agent version, queue, driver/version, port/monitor, detected connection type, spooler observation and explicit physical-output confirmation. A spooler job disappearing is never interpreted as proof of physical output.
+
+For shared queues, connect the intended Windows print-server share on the paired shop PC before running acceptance. For IPP/IPPS, install/configure the Windows queue with the intended IPP Class Driver or vendor driver first; Windows owns the queue's TLS and certificate policy. SmartPrint uses that installed queue and does not silently downgrade IPPS or claim native direct-IPPS support. For Wi-Fi/Ethernet, record the actual TCP/IP or WSD port and repeat after a controlled disconnect/reconnect or address change.
+
+Hosted CI can validate the Agent, API, driver probing, Windows spooler fixtures and Android IPP receiver. It cannot claim physical USB/network/shared-queue output without the corresponding hardware and real operator inspection. A combination is marked qualified only after its own evidence is recorded.
+
 
 The diagnostic is selected by **output profile**, not by transport label alone. USB, LAN, shared and Windows-installed IPP queues that expose a supported physical Windows queue use the same protected spooler path; the installed driver's positive capability evidence determines the artwork and job settings.
 

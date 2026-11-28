@@ -2545,7 +2545,7 @@ function PrintersPage({
                       tone={isUnsupportedVirtual && !isAuthorisedVirtual ? "red" : isSelected ? (canSelect ? "green" : "amber") : canSelect ? "slate" : "amber"}
                     />
                   </div>
-                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? t("Virtual test · ") : t("Unsupported virtual · ")) : printer.outputMode === "PDF_EXPORT" ? t("PDF export · ") : printer.connectionType === "IPP" ? t("IPP printer · ") : ""}{printer.displayName}</h3>
+                  <h3>{isUnsupportedVirtual ? (isAuthorisedVirtual ? t("Virtual test · ") : t("Unsupported virtual · ")) : printer.outputMode === "PDF_EXPORT" ? t("PDF export · ") : printer.connectionType === "IPP" ? t("IPP/IPPS printer · ") : printer.connectionType === "USB" ? t("USB printer · ") : printer.connectionType === "LAN" ? t("Network printer · ") : printer.connectionType === "Shared" ? t("Shared Windows queue · ") : ""}{printer.displayName}</h3>
                   <p>{isUnsupportedVirtual
                     ? isAuthorisedVirtual
                       ? t("Approved for this shop's non-production test use. Jobs use the existing Windows spooler pipeline and are recorded as test output, not physical fulfilment.")
@@ -2553,10 +2553,16 @@ function PrintersPage({
                     : printer.outputMode === "PDF_EXPORT"
                       ? t("Supported Microsoft Print to PDF destination. SmartPrint creates the PDF directly on this connected computer; physical printer status is not used.")
                       : printer.connectionType === "IPP"
-                        ? t("IPP-connected Windows queue · installed driver {model}").replace("{model}", printer.model)
-                        : printer.manufacturer === "Windows"
-                          ? t("Installed Windows driver · {model}").replace("{model}", printer.model)
-                          : t("{manufacturer} · {model}").replace("{manufacturer}", printer.manufacturer).replace("{model}", printer.model)}</p>
+                        ? t("IPP/IPPS Windows queue · installed driver {model}").replace("{model}", printer.model)
+                        : printer.connectionType === "USB"
+                          ? t("USB-connected Windows queue · installed driver {model}").replace("{model}", printer.model)
+                          : printer.connectionType === "LAN"
+                            ? t("Network-connected Windows queue · installed driver {model}").replace("{model}", printer.model)
+                            : printer.connectionType === "Shared"
+                              ? t("Windows print-server share · installed driver {model}").replace("{model}", printer.model)
+                              : printer.manufacturer === "Windows"
+                                ? t("Installed Windows driver · {model}").replace("{model}", printer.model)
+                                : t("{manufacturer} · {model}").replace("{manufacturer}", printer.manufacturer).replace("{model}", printer.model)}</p>
                   <div className="printer-meta">
                     <span>{ownerStatus}{printer.isDefault ? " · " + t("Default Windows queue") : ""}</span>
                     <span>{printer.queueName || printer.connectionAddress || t("Connection details not reported")}</span>
