@@ -66,7 +66,7 @@ public sealed class PrinterTypePolicyTests
     [InlineData("USB001")]
     [InlineData("IP_192.168.1.20")]
     [InlineData("WSD-12345678")]
-    [InlineData(@"\\\\PRINT-SERVER\\Office")]
+    [InlineData(@"\\PRINT-SERVER\Office")]
     [InlineData("LPT1:")]
     public void PhysicalAndSharedQueuePortsRemainConnectedTargets(string port)
     {
